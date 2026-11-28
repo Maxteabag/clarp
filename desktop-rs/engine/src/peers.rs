@@ -39,9 +39,10 @@ pub(crate) struct Peer {
     pub(crate) engine: Box<Engine>,
     /// The primary's open panes and selection on this Host were handed to it.
     handed_over: bool,
+    repair: Option<Box<Engine>>,
     /// Its first connect ended (live, or failed): until then the
     /// "<Host> unreachable" note stays quiet for it.
-    settled: bool,
+    pub(crate) settled: bool,
 }
 
 #[derive(Default)]
@@ -405,6 +406,20 @@ impl Engine {
         if !saved.server_id.is_empty() && (saved.server_id == self.server_id || self.peers.list.iter().any(|p| p.server_id == saved.server_id)) {
             return;
         }
+        let mut engine = self.peer_engine(&base, token, &saved.server_id);
+        engine.start();
+        eprintln!("Engine: reading {} as a peer Host ({})", saved.label(), base);
+        self.peers.list.push(Peer { url: base, label: saved.label(), server_id: saved.server_id.clone(), engine: Box::new(engine), handed_over: false, repair: None, settled: false });
+        let index = self.peers.list.len() - 1;
+        if !saved.server_id.is_empty() {
+            self.hand_over(index);
+        }
+        self.schedule_peer_retry();
+        self.rebuild_merged();
+        self.changes.extend([Change::Roster, Change::RosterFreshness]);
+    }
+
+    fn peer_engine(&self, base: &str, token: &str, server_id: &str) -> Engine {
         // The peer's preferences are the primary's (activity, narration,
         // themes), held in memory: it never writes the settings file.
         let mut settings = Settings::in_memory();
@@ -414,7 +429,7 @@ impl Engine {
             }
         }
         let config = Config {
-            base_url: base.clone(),
+            base_url: base.to_owned(),
             token: token.to_owned(),
             settings,
             workspace_store: None,
@@ -424,19 +439,99 @@ impl Engine {
         };
         let mut engine = Engine::build(config, self.runtime.clone(), self.wake.clone());
         engine.peer = true;
-        if !saved.server_id.is_empty() {
-            engine.cache_key = format!("clarp-server:{}", saved.server_id);
+        if !server_id.is_empty() {
+            engine.cache_key = format!("clarp-server:{server_id}");
         }
-        engine.start();
-        eprintln!("Engine: reading {} as a peer Host ({})", saved.label(), base);
-        self.peers.list.push(Peer { url: base, label: saved.label(), server_id: saved.server_id.clone(), engine: Box::new(engine), handed_over: false, settled: false });
-        let index = self.peers.list.len() - 1;
-        if !saved.server_id.is_empty() {
-            self.hand_over(index);
+        engine
+    }
+
+    /// Validate a replacement connection separately so a failed edit leaves the
+    /// paired Host, its cached chats and the current primary stream intact.
+    pub fn repair_peer(&mut self, original: &str, url: &str, secret: &str, pair: bool) {
+        let Some(index) = self.peers.list.iter().position(|p| p.url == original) else { return };
+        let url = normalized_base_url(url);
+        let mut candidate = self.peer_engine(&url, "", "");
+        candidate.repair_identity = Some(self.peers.list[index].server_id.clone());
+        if url == self.base_url || self.peers.list.iter().any(|p| p.url == url && p.url != original) {
+            // i18n: connection dialog, validation error when a replacement address belongs to another saved Host
+            candidate.set_error(&clarp_core::tr!("Another Host already uses this address."));
+        } else if pair {
+            candidate.pair_device(&url, secret);
+        } else {
+            let token = if secret.is_empty() && url == original { &self.peers.list[index].engine.token } else { secret };
+            candidate.token = token.to_owned();
+            candidate.reconnect();
         }
-        self.schedule_peer_retry();
-        self.rebuild_merged();
-        self.changes.extend([Change::Roster, Change::RosterFreshness]);
+        self.peers.list[index].repair = Some(Box::new(candidate));
+        self.changes.push(Change::Connection);
+    }
+
+    pub fn repair_state(&self, target: &str) -> Option<(&str, &str)> {
+        let peer = self.peers.list.iter().find(|p| p.url == target)?;
+        let engine = peer.repair.as_deref().unwrap_or(&peer.engine);
+        Some((engine.connection_state(), engine.error()))
+    }
+
+    pub fn cancel_peer_repair(&mut self, original: &str) {
+        if let Some(peer) = self.peers.list.iter_mut().find(|p| p.url == original) {
+            peer.repair = None;
+        }
+    }
+
+    fn pump_peer_repairs(&mut self) {
+        let mut renamed = Vec::new();
+        for peer in &mut self.peers.list {
+            let Some(candidate) = &mut peer.repair else { continue };
+            if candidate.pump().is_empty() { continue; }
+            self.changes.push(Change::Connection);
+            if candidate.connection_state() != "live" { continue; }
+            let mut accepted = peer.repair.take().expect("live repair candidate");
+            accepted.repair_identity = None;
+            self.changes.push(Change::PeerRepaired(peer.url.clone()));
+            if !peer.server_id.is_empty() && peer.server_id != accepted.server_id {
+                renamed.push((peer.server_id.clone(), accepted.server_id.clone()));
+            }
+            let new_url = accepted.base_url.clone();
+            if peer.url != new_url {
+                clarp_core::hosts::forget(&mut self.settings, &peer.url);
+                clarp_core::hosts::remember(&mut self.settings, &new_url, &peer.label);
+                clarp_core::hosts::set_identity(&mut self.settings, &new_url, &peer.label, &accepted.server_id);
+                self.peers.tokens.remove(&peer.url);
+                self.peers.looked_up.remove(&peer.url);
+                self.peers.looked_up.insert(new_url.clone());
+            }
+            self.peers.tokens.insert(new_url.clone(), accepted.token.clone());
+            // Persist the credential only after the replacement identified itself.
+            accepted.keyring = self.keyring;
+            accepted.keep_working_token();
+            peer.url = new_url;
+            peer.server_id = accepted.server_id.clone();
+            peer.handed_over = false;
+            accepted.changes.push(Change::ServerInfo);
+            peer.engine = accepted;
+            self.changes.extend([Change::Roster, Change::Hosts]);
+        }
+        for (old, new) in renamed {
+            self.with_panes(|tree| tree.remap_peer_sessions(&old, &new));
+        }
+    }
+
+    pub fn switch_to_host_content(&mut self, url: &str) {
+        let session = if url == self.base_url {
+            self.roster.first_session().map(str::to_owned)
+        } else {
+            self.peers.list.iter().find(|p| p.url == url).and_then(|p|
+                p.engine.roster.first_session().map(|s| all_hosts::qualify(&p.server_id, s)))
+        };
+        if let Some(session) = session {
+            self.select(&session);
+        } else if url != self.base_url {
+            self.connect_to_server(url, "");
+        } else {
+            self.selected.clear();
+            self.with_panes(|panes| panes.set_active_session(""));
+            self.changes.push(Change::Selection);
+        }
     }
 
     /// The primary's selection and open panes on this peer's Host are its.
@@ -512,6 +607,7 @@ impl Engine {
 
     /// Applies what the peers received, as changes of the merged view.
     pub(crate) fn pump_peers(&mut self) {
+        self.pump_peer_repairs();
         let roster_change = |c: &Change| matches!(c, Change::Roster | Change::Archive | Change::RosterFreshness | Change::Connection | Change::ServerInfo);
         let mut roster_changed = self.changes.iter().any(roster_change);
         let mut updates_changed = self.changes.contains(&Change::Updates);

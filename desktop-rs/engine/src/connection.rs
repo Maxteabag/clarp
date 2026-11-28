@@ -44,6 +44,7 @@ impl Engine {
         self.cache_key = normalized.clone();
         self.server_name.clear();
         self.server_version.clear();
+        self.server_contract = None;
         let empty = serde_json::Map::from_iter([("agents".to_owned(), Value::Array(Vec::new()))]);
         self.mutate_roster(|r| r.apply_snapshot(&empty));
         self.archived.apply_snapshot(&empty);

@@ -291,7 +291,7 @@
   "start.favorite_title": {
     "other": "{path}（启动过 {count} 次）"
   },
-  "start.harness": "运行框架",
+  "start.harness": "后端",
   "start.locked": "{name} 只能使用 {backend}",
   "start.required": "必需",
   "start.model_provider": "模型提供商",

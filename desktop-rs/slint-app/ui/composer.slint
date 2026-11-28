@@ -224,6 +224,8 @@ export component Composer inherits FocusScope {
     // count line then stays away.
     in property <bool> strip-shown;
     in property <string> quota-notice;
+    // The chat's Host does not answer: saved messages only, sending waits.
+    in property <string> read-only-note;
     in property <string> stop-notice;
     in property <string> starting;
     in property <int> transcribing;
@@ -378,6 +380,15 @@ export component Composer inherits FocusScope {
             font-size: 12 * Look.unit;
             overflow: elide;
             accessible-label: root.quota-notice;
+        }
+        if root.read-only-note != "": Text {
+            text: root.read-only-note;
+            color: Palette.muted;
+            font-size: 12 * Look.unit;
+            overflow: elide;
+            accessible-role: text;
+            accessible-id: "composer-read-only";
+            accessible-label: root.read-only-note;
         }
         // What Stop did: never what happens next (Stop does not resume).
         if root.stop-notice != "": Text {

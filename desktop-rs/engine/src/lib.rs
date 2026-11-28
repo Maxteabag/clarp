@@ -34,6 +34,7 @@ mod voice;
 mod narrator;
 mod outage;
 mod host_status;
+pub mod host_down;
 pub mod lifecycle;
 mod live;
 mod queue;
@@ -86,6 +87,11 @@ pub const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_millis(700);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Connection,
+    /// A Host stopped or started answering, or its panel's line changed
+    /// (`host_down`).
+    HostDown,
+    /// Original peer URL whose submitted repair has committed.
+    PeerRepaired(String),
     ServerInfo,
     /// The saved Hosts changed (`clarp_core::hosts`).
     Hosts,
@@ -207,6 +213,11 @@ enum Message {
     LogRetryDue { session: String, token: u64 },
     /// A catch-up round's `/live` is read again (the round's generation).
     LiveRetryDue { session: String, generation: u64 },
+    /// A Host out of reach is probed again (`host_down`).
+    HostProbeDue { url: String, generation: u64 },
+    HostProbed { url: String, generation: u64, probe: clarp_net::probe::Probe },
+    /// `Back online` has shown long enough.
+    HostBackOnlineDue { url: String, generation: u64 },
 }
 
 pub struct Config {
@@ -266,12 +277,16 @@ pub struct Engine {
     connected: bool,
     connecting: bool,
     connection_state: String,
+    /// Bumped each time this Host's connection turns live: media that failed
+    /// while it was out of reach is asked for again after it.
+    live_epoch: u64,
     error: String,
     error_is_transport: bool,
     /// The Host out of reach for a moment (`outage.rs`).
     outage: outage::OutageState,
     server_name: String,
     server_version: String,
+    server_contract: Option<u32>,
 
     roster: Roster,
     archived: Roster,
@@ -363,6 +378,8 @@ pub struct Engine {
     profile: profile::Profile,
     publications: publications::Publications,
     avatars: avatars::Avatars,
+    /// Hosts that do not answer, per Host (`host_down`).
+    host_down: host_down::HostDown,
     live: live::Live,
     form_events: FormEventStore,
     form_events_supported: bool,
@@ -376,6 +393,7 @@ pub struct Engine {
     /// This engine reads a peer Host for the primary one: it never picks a
     /// chat by itself and keeps no settings of its own.
     peer: bool,
+    repair_identity: Option<String>,
     /// What the transcript cache files this Host's chats under: its URL,
     /// or for a peer whose server id is known, that id.
     cache_key: String,
@@ -431,6 +449,7 @@ impl Engine {
             cache_key: normalized_base_url(&config.base_url),
             peers: Default::default(),
             peer: false,
+            repair_identity: None,
             base_url: normalized_base_url(&config.base_url),
             token: config.token,
             settings: config.settings,
@@ -444,11 +463,13 @@ impl Engine {
             connected: false,
             connecting: false,
             connection_state: "offline".into(),
+            live_epoch: 0,
             error: String::new(),
             error_is_transport: false,
             outage: Default::default(),
             server_name: String::new(),
             server_version: String::new(),
+            server_contract: None,
             roster: Roster::default(),
             archived: Roster::archived(),
             rooms: Vec::new(),
@@ -516,6 +537,7 @@ impl Engine {
             profile: Default::default(),
             publications: Default::default(),
             avatars: Default::default(),
+            host_down: Default::default(),
             live: Default::default(),
             form_events: form_events::store(config.form_events.clone()),
             form_events_supported: false,
@@ -571,6 +593,9 @@ impl Engine {
                 Message::ServerInfoRetryDue(attempt) => self.server_info_retry_due(attempt),
                 Message::LogRetryDue { session, token } => self.log_retry_due(&session, token),
                 Message::LiveRetryDue { session, generation } => self.live_retry_due(&session, generation),
+                Message::HostProbeDue { url, generation } => self.host_probe_due(&url, generation),
+                Message::HostProbed { url, generation, probe } => self.host_probed(&url, generation, probe),
+                Message::HostBackOnlineDue { url, generation } => self.host_back_online_due(&url, generation),
             }
         }
         // What the Host said of a chat's view (#702): the primary keeps it.
@@ -581,6 +606,7 @@ impl Engine {
         // What the panes show, told to the Host once per pump (#905).
         self.sync_viewport();
         self.pump_peers();
+        self.watch_hosts();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();
         changes.retain(|change| matches!(change, Change::Notification(_)) || seen.insert(format!("{change:?}")));
@@ -956,6 +982,7 @@ impl Engine {
     }
 
     pub fn reconnect(&mut self) {
+        self.host_down.started = true;
         self.rooms_unsupported = false;
         let endpoint = match Url::parse(&self.base_url) {
             Ok(url) if url.host_str().is_some_and(|h| !h.is_empty()) => url,
@@ -1037,7 +1064,21 @@ impl Engine {
         if self.connection_state != value {
             self.connection_state = value.into();
             self.changes.push(Change::Connection);
+            if value == "live" {
+                self.live_epoch += 1;
+                self.media_back_online();
+            }
         }
+    }
+
+    /// How many times the connection to `host` (this engine's or a peer's
+    /// base URL) has turned live; None for a Host this engine does not
+    /// read. A picture that failed under an older epoch is fetched again.
+    pub fn live_epoch(&self, host: &str) -> Option<u64> {
+        if self.base_url == host {
+            return Some(self.live_epoch);
+        }
+        self.peers.list.iter().find(|peer| peer.url == host).map(|peer| peer.engine.live_epoch)
     }
     fn set_error(&mut self, message: &str) {
         self.error_source.clear();
@@ -1730,10 +1771,18 @@ impl Engine {
             return;
         }
         if tag == "server-info" {
+            if self.repair_identity.as_deref().is_some_and(|expected| !clarp_net::probe::same_host(object, expected)) {
+                self.set_connecting(false);
+                self.set_connection_state("offline");
+                // i18n: connection dialog, error when an edited address answers as a different paired Host
+                self.set_error(&clarp_core::tr!("This address belongs to a different Host."));
+                return;
+            }
             self.outage.server_info_attempt = 0;
             self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();
             self.server_version = json::string(object, "clarp_version");
+            self.server_contract = object.get("contract").and_then(|c| c.get("host").unwrap_or(c).as_u64()).and_then(|n| u32::try_from(n).ok());
             self.changes.push(Change::ServerInfo);
             // A Host that answered is kept for switching back to it.
             let before = clarp_core::hosts::list(&self.settings);

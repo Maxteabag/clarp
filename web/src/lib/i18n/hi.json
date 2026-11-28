@@ -208,7 +208,7 @@
   "overview.agent": "एजेंट",
   "overview.no_workspace": "कोई वर्कस्पेस नहीं",
   "overview.refreshed": "एजेंट रीफ़्रेश हो गए",
-  "overview.action_failed": "{action} नहीं हो सका",
+  "overview.action_failed": "कार्रवाई विफल: {action}",
   "overview.schedule_toggle_failed": "शेड्यूल चालू या बंद नहीं किया जा सका",
   "overview.schedule_enabled": "शेड्यूल चालू किया गया",
   "overview.schedule_disabled": "शेड्यूल बंद किया गया",
@@ -305,7 +305,7 @@
     "one": "{path} ({count} बार शुरू किया गया)",
     "other": "{path} ({count} बार शुरू किया गया)"
   },
-  "start.harness": "हार्नेस",
+  "start.harness": "बैकएंड",
   "start.locked": "{name} सिर्फ़ {backend} पर चल सकता है",
   "start.required": "ज़रूरी",
   "start.model_provider": "मॉडल प्रोवाइडर",

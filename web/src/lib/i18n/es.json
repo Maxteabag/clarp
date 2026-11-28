@@ -201,7 +201,7 @@
   "overview.state.working": "trabajando",
   "overview.state.thinking": "pensando",
   "overview.state.responding": "respondiendo",
-  "overview.state.tool": "herramienta",
+  "overview.state.tool": "ejecutando herramienta",
   "overview.state.new_reply": "respuesta nueva",
   "overview.state.idle": "inactivo",
   "overview.refresh_failed": "No se pudieron actualizar los agentes de este ordenador.",
@@ -305,7 +305,7 @@
     "one": "{path} ({count} inicio)",
     "other": "{path} ({count} inicios)"
   },
-  "start.harness": "Entorno",
+  "start.harness": "Backend",
   "start.locked": "{name} solo puede usar {backend}",
   "start.required": "Obligatorio",
   "start.model_provider": "Proveedor del modelo",

@@ -36,6 +36,8 @@ import { FontPicker, FontBridge, FontItem, FontKey } from "fonts.slint";
 export { FontBridge, FontItem, FontKey }
 import { AvatarArt } from "avatar.slint";
 export { AvatarArt }
+import { HostDownBridge, HostDownPanel, HostDownRow, HostDownPage, DeviceOfflineBanner, HostDownToast } from "host_down.slint";
+export { HostDownBridge, HostDownPanel, HostDownRow }
 import { DisplayCell, CellLine } from "cells.slint";
 import { ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormConfirmDialog, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow } from "artifacts.slint";
 import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
@@ -435,11 +437,18 @@ export component AppWindow inherits Window {
     in property <bool> stored-credential;
     in property <bool> has-agents;
     in property <[SavedHostRow]> saved-hosts;
+    callback repair-peer(string, string, string, bool);
+    callback switch-content(string);
+    out property <string> repair-target: connection-page.repair-target;
+    out property <bool> choosing-host: connection-page.choosing-host;
+    in property <string> dialog-error;
+    in property <string> dialog-state;
     callback connect-host(string, string);
     callback pair-host(string, string);
     callback forget-host();
     callback remove-saved-host(string);
-    public function open-connection-page() { connection-page.open(); }
+    public function open-connection-page() { connection-page.open-for(root.base-url, ""); }
+    public function open-host-action(url: string, action: string) { connection-page.open-for(url, action); }
     public function open-font-picker() { font-picker.open(); }
     // ---- preview versions
     in property <bool> preview-enabled;
@@ -548,6 +557,8 @@ export component AppWindow inherits Window {
                 row-index(session, kind) => { return root.sidebar-row-index(session, kind); }
             }
             VerticalLayout {
+                // No network on this device at all: said once, here.
+                if HostDownBridge.device-offline: DeviceOfflineBanner { }
                 if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {
                     update-label: root.preview-update-label;
                     pinned: root.preview-pinned;
@@ -628,6 +639,13 @@ export component AppWindow inherits Window {
                     job-output(id) => { root.job-output(id); }
                     open-report(id) => { root.open-report(id); }
                     open-chat(session) => { root.open-chat(session); }
+                }
+                // The only Host does not answer and nothing is cached: its
+                // page takes the chat area.
+                if HostDownBridge.full-page && !HostDownBridge.device-offline && root.surface != "settings" && root.surface != "updates" && root.surface != "teams": HostDownPage {
+                    width: parent.width;
+                    height: parent.height;
+                    panel: HostDownBridge.page;
                 }
                 teams := Teams {
                     visible: root.surface == "teams";
@@ -756,17 +774,30 @@ export component AppWindow inherits Window {
             copy-all => { root.select-copy-all(); }
             close => { root.overlay-closed(); }
         }
+        if root.overlay == "host-down": HostDownPage {
+            width: parent.width;
+            height: parent.height;
+            panel: HostDownBridge.page;
+            closable: true;
+        }
+        HostDownToast {
+            x: (parent.width - self.width) / 2;
+            y: parent.height - (root.shortcuts-visible ? footer.height : 0px) - self.height - 24px;
+            shown: HostDownBridge.copied;
+        }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";
             width: parent.width;
             height: parent.height;
             base-url: root.base-url;
-            state: root.connection;
-            error: root.error;
-            connecting: root.connecting;
+            state: root.dialog-state;
+            error: root.dialog-error;
+            connecting: root.dialog-state == "connecting" || root.dialog-state == "pairing";
             can-cancel: root.has-agents;
             stored: root.stored-credential;
             hosts: root.saved-hosts;
+            repair(original, url, secret, pairing) => { root.repair-peer(original, url, secret, pairing); }
+            switch-content(url) => { root.switch-content(url); }
             connect(url, token) => { root.connect-host(url, token); }
             remove(url) => { root.remove-saved-host(url); }
             pair(url, code) => { root.pair-host(url, code); }

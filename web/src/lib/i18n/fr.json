@@ -201,7 +201,7 @@
   "overview.state.working": "en cours",
   "overview.state.thinking": "réflexion",
   "overview.state.responding": "rédaction",
-  "overview.state.tool": "outil",
+  "overview.state.tool": "outil en cours",
   "overview.state.new_reply": "nouvelle réponse",
   "overview.state.idle": "inactif",
   "overview.refresh_failed": "Impossible d’actualiser cet ordinateur.",
@@ -305,7 +305,7 @@
     "one": "{path} ({count} lancement)",
     "other": "{path} ({count} lancements)"
   },
-  "start.harness": "Environnement",
+  "start.harness": "Backend",
   "start.locked": "{name} doit utiliser {backend}",
   "start.required": "Requis",
   "start.model_provider": "Fournisseur du modèle",

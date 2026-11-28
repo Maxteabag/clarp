@@ -13,6 +13,8 @@ use crate::headless;
 // ---- launch dialogs
 #[path = "launch_checks.rs"]
 mod launch_checks;
+#[path = "host_down_checks.rs"]
+mod host_down_checks;
 // ---- profile and overview
 #[path = "profile_checks.rs"]
 mod profile_checks;
@@ -95,7 +97,7 @@ mod stop_checks;
 // ---- a stalled turn: the working indicator says so and offers Stop (#249)
 #[path = "stall_checks.rs"]
 mod stall_checks;
-// ---- a failed turn explained: one card, repeats as one (contract 217)
+// ---- a failed turn explained: one card, repeats as one (contract 220)
 #[path = "turn_error_checks.rs"]
 mod turn_error_checks;
 // ---- why an agent cannot answer now: one line in the row and the header (#918)
@@ -631,6 +633,7 @@ pub fn start_check(name: &str, out: String) {
         "narrow" => narrow_checks::narrow_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
+        "host-down" => host_down_checks::host_down_check(out),
         "playback" => playback_checks::playback_check(out, false),
         "playback-audio" => playback_checks::playback_check(out, true),
         "link-hints" => link_hint_checks::link_hints_check(out),

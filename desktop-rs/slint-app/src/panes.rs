@@ -1514,6 +1514,7 @@ impl App {
                 view.portrait = self.header_portrait(&session);
                 pane.view = view;
             }
+            if composer || everything || changes.contains(&Change::HostDown) { crate::host_down_view::pane(&self.engine.borrow(), &mut pane.view, &session); }
             pane.view = self.pane_view(pane);
         }
         let running = panes.iter().any(|p| crate::live_view::ticking(&self.engine.borrow(), &p.session));

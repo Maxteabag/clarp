@@ -155,6 +155,18 @@ impl Engine {
         }
     }
 
+    /// The Host is live again: portraits and chat images that failed
+    /// meanwhile (it was out of reach) are asked for again the next time a
+    /// row draws them (the chats redraw on `Updates`).
+    pub(crate) fn media_back_online(&mut self) {
+        self.changes.push(Change::Updates);
+        if !self.avatars.failures.is_empty() {
+            self.avatars.failures.clear();
+            self.avatars.revision += 1;
+            self.changes.push(Change::Avatars);
+        }
+    }
+
     pub(crate) fn avatar_failure(&mut self, tag: &str, detail: &str) -> bool {
         if !tag.starts_with("avatar:") {
             return false;
