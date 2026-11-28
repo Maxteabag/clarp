@@ -21,6 +21,7 @@ import { normalizeMoved } from '@core/agent-moved.js';
 import { originOf, readIds, resolveAllHosts, PREFERENCE_KEY } from '@core/all-hosts.js';
 import { visibleSessions } from '@core/session-select.js';
 import { clog } from '../lib/net.js';
+import { t } from './i18n.svelte.js';
 import { fetchFailure, peerAttempt } from '@core/host-reach.js';
 import { noteFail, noteOk, reachOf, trackHost, untrackHost, untrackOthers } from './reach.svelte.js';
 
@@ -291,20 +292,19 @@ export function startHosts() {
 export async function addHost(url, token, primaryServerId = '') {
   const origin = originOf(url);
   const secret = String(token || '').trim();
-  if (!origin) return 'Give the Host\'s address, like https://studio.example.ts.net.';
-  if (origin === location.origin) return 'That is the Host this app is served by.';
-  if (!secret) return 'Give a token paired with that Host.';
-  if (hostsState.saved.some(h => h.url === origin)) return 'That Host is already added.';
+  if (!origin) return t('hosts.need_address');
+  if (origin === location.origin) return t('hosts.is_this_host');
+  if (!secret) return t('hosts.need_token');
+  if (hostsState.saved.some(h => h.url === origin)) return t('hosts.already_added');
   const info = await getJson(origin, '/server-info', secret);
-  if (info.refused) return 'That Host refused the token.';
+  if (info.refused) return t('hosts.refused');
   if (!info.body) {
-    return `Cannot read ${origin} from here. On that Host, add ${location.origin} to `
-      + '[server] web_read_origins, and check the address.';
+    return t('hosts.cannot_read', { host: origin, origin: location.origin });
   }
   const serverId = String(info.body.server_id || '');
   if (serverId && (serverId === primaryServerId || knownHosts().some(h => h.serverId === serverId)
       || hostsState.saved.some(h => h.serverId === serverId))) {
-    return 'That Host is already in the list.';
+    return t('hosts.already_listed');
   }
   const id = 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   hostsState.saved = [...hostsState.saved, { id, url: origin, token: secret, name: String(info.body.name || origin), serverId }];
@@ -333,17 +333,17 @@ function readSaved(id) {
  */
 export async function updateHost(id, { url, token } = {}) {
   const at = hostsState.saved.findIndex(h => h.id === id);
-  if (at < 0) return 'That Host is not saved on this device.';
+  if (at < 0) return t('hosts.not_saved');
   const next = { ...hostsState.saved[at] };
   if (url !== undefined) {
     const origin = originOf(url);
-    if (!origin) return 'Give the Host\'s address, like https://studio.example.ts.net.';
-    if (origin === location.origin) return 'That is the Host this app is served by.';
+    if (!origin) return t('hosts.need_address');
+    if (origin === location.origin) return t('hosts.is_this_host');
     next.url = origin;
   }
   if (token !== undefined) {
     const secret = String(token || '').trim();
-    if (!secret) return 'Give a token paired with that Host.';
+    if (!secret) return t('hosts.need_token');
     next.token = secret;
   }
   hostsState.saved[at] = next;

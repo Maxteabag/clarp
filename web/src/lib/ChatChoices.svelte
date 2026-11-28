@@ -1,7 +1,8 @@
 <script>
   // A chat's own choices in its profile (#653), the same two its '…' menu holds.
-  import { CHAT_TOOL_ACTIVITY, CHAT_TOOL_ACTIVITY_LABELS } from '@core/history-fold.js';
-  import { OVERRIDE_LABELS, OVERRIDES } from '@core/coordination.js';
+  import { CHAT_TOOL_ACTIVITY, toolActivityKey } from '@core/history-fold.js';
+  import { OVERRIDE_KEYS, OVERRIDES } from '@core/coordination.js';
+  import { t } from '../stores/i18n.svelte.js';
   import {
     chatChoicesReady, chatCoordinationChoice, chatToolActivity, setChatCoordinationChoice,
     setChatToolActivity,
@@ -24,20 +25,20 @@
   }
 </script>
 
-<div class="chat-choices" aria-label="This chat's settings">
+<div class="chat-choices" aria-label={t('chat_choices.label')}>
   {#if live.hiddenCoordination}
     <label>
-      <span>Messages between agents</span>
+      <span>{t('chat_choices.coordination')}</span>
       <select value={coordination} disabled={busy} onchange={e => pickCoordination(e.currentTarget)}>
-        {#each OVERRIDES as value (value)}<option {value}>{OVERRIDE_LABELS[value]}</option>{/each}
+        {#each OVERRIDES as value (value)}<option {value}>{t(OVERRIDE_KEYS[value])}</option>{/each}
       </select>
     </label>
   {/if}
   <label>
-    <span>Tool activity</span>
+    <span>{t('chat_choices.tool_activity')}</span>
     <select value={tools} disabled={!chatChoicesReady(session)}
             onchange={e => setChatToolActivity(session, e.currentTarget.value)}>
-      {#each CHAT_TOOL_ACTIVITY as value (value)}<option {value}>{CHAT_TOOL_ACTIVITY_LABELS[value]}</option>{/each}
+      {#each CHAT_TOOL_ACTIVITY as value (value)}<option {value}>{t(toolActivityKey(value))}</option>{/each}
     </select>
   </label>
 </div>

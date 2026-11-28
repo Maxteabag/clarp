@@ -121,3 +121,8 @@ export function formatDuration(ms, style = 'narrow', locale = i18n.locale) {
     .map(([u, n]) => new Intl.NumberFormat(locale, { style: 'unit', unit: unit[u], unitDisplay: style }).format(n))
     .join(' ');
 }
+
+/** "Mike, Rachel and Ida" / "Mike, Rachel og Ida": names joined as the language joins a list. */
+export function formatList(items, type = 'conjunction', locale = i18n.locale) {
+  return new Intl.ListFormat(locale, { type }).format(items);
+}

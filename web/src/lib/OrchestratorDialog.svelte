@@ -2,6 +2,7 @@
   // Orchestrator settings: whether an AI resolves delegations that name
   // matching could not, and which model does it.
   import { flash } from '../stores/app.svelte.js';
+  import { t } from '../stores/i18n.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -9,11 +10,11 @@
   // `providers` on /orchestrator/settings replaces this wholesale.
   const FALLBACK_OPTIONS = [
     { id: 'claude', label: 'Claude', kind: 'backend', catalog_backend: 'claude',
-      detail: 'Runs an isolated Claude Code request on this Computer.' },
+      detailKey: 'orchestrator.detail.claude' },
     { id: 'codex', label: 'Codex', kind: 'backend', catalog_backend: 'codex',
-      detail: 'Runs an isolated Codex CLI request on this Computer.' },
+      detailKey: 'orchestrator.detail.codex' },
     { id: 'openai', label: 'OpenAI API', kind: 'api', catalog_backend: 'codex',
-      detail: 'Uses the configured OpenAI API key directly.',
+      detailKey: 'orchestrator.detail.openai',
       effort_options: ['minimal', 'low', 'medium', 'high'] },
   ];
 
@@ -24,7 +25,8 @@
   let model = $state('');
   let effort = $state('');
   let timeoutMs = $state(30000);
-  let last = $state('Loading...');
+  // What the last routing decision was, or a status: { key, params } for t().
+  let last = $state({ key: 'orchestrator.loading' });
   let ignored = $state([]);
   let providers = $state({});
   let options = $state(FALLBACK_OPTIONS);
@@ -43,9 +45,14 @@
     return Array.isArray(capability.supported_efforts) ? capability.supported_efforts : [];
   });
   let providerHelp = $derived(
-    (option.detail || '') + (option.kind === 'api'
-      ? ' GPT choices reuse the discovered Codex catalogue; API access is checked when routing runs.'
-      : ' Models and effort levels come from this Computer’s live capability catalogue.'));
+    (option.detailKey ? t(option.detailKey) : option.detail || '') + ' '
+      + t(option.kind === 'api' ? 'orchestrator.help_api' : 'orchestrator.help_backend'));
+
+  // Effort levels the catalog names; another level shows as the Host sends it.
+  const EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+  function effortLabel(e) {
+    return EFFORTS.has(e) ? t(`orchestrator.effort.${e}`) : e.charAt(0).toUpperCase() + e.slice(1);
+  }
 
   $effect(() => {
     if (!open) return;
@@ -53,7 +60,7 @@
   });
 
   async function load() {
-    last = 'Loading...';
+    last = { key: 'orchestrator.loading' };
     ignored = [];
     try {
       const [r, catalogue] = await Promise.all([
@@ -80,17 +87,18 @@
       timeoutMs = s.timeout_ms || 30000;
       const recent = (d.recent_decisions || [])[0];
       last = recent
-        ? `${recent.final_action || recent.decision_kind}: ${recent.target_session || 'none'} (${recent.confidence || 0})`
-        : 'No decisions logged yet.';
+        ? { key: 'orchestrator.last_decision', params: { action: String(recent.final_action || recent.decision_kind || ''),
+            target: recent.target_session || t('orchestrator.no_target'), confidence: String(recent.confidence || 0) } }
+        : { key: 'orchestrator.no_decisions' };
       ignored = (Array.isArray(d.ignored_decisions) ? d.ignored_decisions : [])
         .slice(0, 10)
         .map(row => ({
           text: row.utterance || '',
-          reason: row.reason || 'Ignored by orchestrator',
+          reason: row.reason || '',
           conf: Number(row.confidence || 0).toFixed(2),
         }));
     } catch (_) {
-      last = 'Failed to load orchestrator settings.';
+      last = { key: 'orchestrator.load_failed' };
       ignored = [];
     }
   }
@@ -110,11 +118,11 @@
           timeout_ms: Number(timeoutMs || 30000),
         }),
       });
-      if (!r.ok) { flash('orchestrator save failed: ' + r.status, 2500); return; }
-      flash(enabled ? 'Orchestrator on' : 'Orchestrator off', 1500);
+      if (!r.ok) { flash(t('orchestrator.save_failed', { error: String(r.status) }), 2500); return; }
+      flash(t(enabled ? 'orchestrator.on' : 'orchestrator.off'), 1500);
       open = false;
     } catch (e) {
-      flash('orchestrator save failed: ' + e.message, 2500);
+      flash(t('orchestrator.save_failed', { error: e.message }), 2500);
     }
   }
 </script>
@@ -122,67 +130,67 @@
 {#if open}
   <div class="start-dialog">
     <div class="start-card">
-      <h3>Orchestrator</h3>
+      <h3>{t('orchestrator.title')}</h3>
 
       <label class="start-field inline-toggle">
-        <span>AI routing</span>
+        <span>{t('orchestrator.ai_routing')}</span>
         <input type="checkbox" bind:checked={enabled} />
       </label>
       <label class="start-field inline-toggle">
-        <span>Fallback only</span>
+        <span>{t('orchestrator.fallback_only')}</span>
         <input type="checkbox" bind:checked={fallbackOnly} />
       </label>
       <label class="start-field">
-        <span>Confidence</span>
+        <span>{t('orchestrator.confidence')}</span>
         <input type="number" min="0.50" max="0.99" step="0.05" bind:value={confidence} />
       </label>
       <label class="start-field">
-        <span>Provider</span>
+        <span>{t('orchestrator.provider')}</span>
         <select bind:value={provider} onchange={() => { model = ''; effort = ''; }}>
           {#each options as o (o.id)}
-            <option value={o.id}>{o.label}{o.installed === false ? ' (not installed)' : ''}</option>
+            <option value={o.id}>{o.installed === false ? t('orchestrator.not_installed', { name: o.label }) : o.label}</option>
           {/each}
         </select>
       </label>
       <label class="start-field">
-        <span>Model</span>
+        <span>{t('orchestrator.model')}</span>
         <select bind:value={model} onchange={() => effort = ''}>
-          <option value="">Default</option>
+          <option value="">{t('orchestrator.default')}</option>
           {#each models as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
         </select>
       </label>
       <label class="start-field">
-        <span>Effort</span>
+        <span>{t('orchestrator.effort')}</span>
         <select bind:value={effort}>
-          <option value="">Default</option>
+          <option value="">{t('orchestrator.default')}</option>
           {#each efforts as e (e)}
-            <option value={e}>{e.charAt(0).toUpperCase() + e.slice(1)}</option>
+            <option value={e}>{effortLabel(e)}</option>
           {/each}
         </select>
       </label>
       <div class="orchestrator-last">{providerHelp}</div>
       <label class="start-field">
-        <span>Timeout (ms)</span>
+        <span>{t('orchestrator.timeout')}</span>
         <input type="number" min="250" max="60000" step="250" bind:value={timeoutMs} />
       </label>
-      <div class="orchestrator-last">{last}</div>
+      <div class="orchestrator-last">{t(last.key, last.params)}</div>
       <div class="orchestrator-ignored">
         {#if ignored.length}
-          <div class="orchestrator-ignored-title">Ignored dictation</div>
+          <div class="orchestrator-ignored-title">{t('orchestrator.ignored')}</div>
           {#each ignored as row, i (i)}
             <div class="orchestrator-ignored-row">
               <div class="orchestrator-ignored-text">{row.text}</div>
-              <div class="orchestrator-ignored-meta">{row.reason} · {row.conf}</div>
+              <div class="orchestrator-ignored-meta">{row.reason || t('orchestrator.ignored_reason')} · {row.conf}</div>
             </div>
           {/each}
         {:else}
-          <div class="orchestrator-ignored-empty">None</div>
+          <div class="orchestrator-ignored-empty">{t('orchestrator.none')}</div>
         {/if}
       </div>
 
       <div class="start-actions">
-        <button class="start-btn ghost" onclick={() => open = false}>Cancel</button>
-        <button class="start-btn primary" onclick={save}>Save</button>
+        <button class="start-btn ghost" onclick={() => open = false}>{t('orchestrator.cancel')}</button>
+        <button class="start-btn primary" onclick={save}>{t('orchestrator.save')}</button>
       </div>
     </div>
   </div>
