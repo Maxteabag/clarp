@@ -14,6 +14,8 @@
 
 use std::rc::Rc;
 
+use clarp_core::tr;
+
 use crate::{App, AppWindow};
 
 pub mod lanes;
@@ -32,6 +34,52 @@ pub struct Entry {
     pub group: &'static str,
     /// The actions whose keys reach it (shown beside a setting).
     pub actions: &'static [&'static str],
+}
+
+/// English kept in a `const` or a static table and marked for the catalog:
+/// `en::tr!("Text")` is the text itself, and `tools/i18n-export` reads it as
+/// it reads `tr!` (with its `// i18n:` note). It stays English where it is
+/// kept, so it identifies and finds things in English, and is translated
+/// where it is drawn, with `local`.
+pub mod en {
+    macro_rules! marked {
+        ($text:literal $(,)?) => {
+            $text
+        };
+    }
+    pub(crate) use marked as tr;
+}
+
+/// Text marked with `en::tr!` (or any English the catalog holds) in the
+/// app's language now; English when it has no translation.
+pub fn local(english: &str) -> String {
+    if english.is_empty() {
+        return String::new();
+    }
+    clarp_core::i18n::translate("", english, "", None, &[])
+}
+
+impl Entry {
+    /// The label in the app's language.
+    pub fn label_text(&self) -> String {
+        local(self.label)
+    }
+
+    /// The description in the app's language.
+    pub fn description_text(&self) -> String {
+        local(self.description)
+    }
+}
+
+/// How well `query` matches an entry in the app's language or in English:
+/// the better of the two, so a setting is found by its English words too.
+pub fn entry_score(query: &str, entry: &Entry) -> Option<u32> {
+    let english = score(query, entry.label, entry.aliases, entry.description);
+    if clarp_core::i18n::current() == "en" {
+        return english;
+    }
+    let shown = score(query, &entry.label_text(), entry.aliases, &entry.description_text());
+    shown.max(english)
 }
 
 pub const fn e(id: &'static str, label: &'static str, group: &'static str, description: &'static str, aliases: &'static [&'static str]) -> Entry {
@@ -318,11 +366,11 @@ impl Setting {
     }
 
     pub fn label(&self, app: &App) -> String {
-        self.label.as_ref().map_or_else(|| self.entry.label.to_owned(), |label| label(app))
+        self.label.as_ref().map_or_else(|| self.entry.label_text(), |label| label(app))
     }
 
     pub fn description(&self, app: &App) -> String {
-        self.about.as_ref().map_or_else(|| self.entry.description.to_owned(), |about| about(app))
+        self.about.as_ref().map_or_else(|| self.entry.description_text(), |about| about(app))
     }
 
     /// The stored value: "on"/"off", the chosen option's value or the number.
@@ -345,12 +393,20 @@ impl Setting {
             return detail(app);
         }
         match &self.control {
-            Control::Toggle { get, .. } => if get(app) { "On" } else { "Off" }.to_owned(),
+            Control::Toggle { get, .. } => {
+                if get(app) {
+                    // i18n: Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb)
+                    tr!("switch" => "On")
+                } else {
+                    // i18n: Settings and Ctrl+K, the value of a switch that is off (adjective, not a verb)
+                    tr!("switch" => "Off")
+                }
+            }
             Control::Choice { options, get, .. } => {
                 let now = get(app);
                 options(app).into_iter().find(|o| o.value == now).map_or(now, |o| o.label)
             }
-            Control::Number { get, step, unit, .. } => with_unit(&number_text(get(app), *step), unit),
+            Control::Number { get, step, unit, .. } => shown_number(get(app), *step, unit),
             Control::Action { .. } => String::new(),
         }
     }
@@ -364,11 +420,10 @@ impl Setting {
                 steps(min, max, *step, get(app))
                 .into_iter()
                 .map(|value| {
-                    let text = number_text(value, *step);
-                    let label = with_unit(&text, unit);
-                    let choice = Choice::new(text, label);
+                    let choice = Choice::new(number_text(value, *step), shown_number(value, *step, unit));
                     match &self.default {
-                        Some(default) if *default == choice.value => choice.about("The default"),
+                        // i18n: Settings and Ctrl+K, list of a number setting's values, the line beside the default value
+                        Some(default) if *default == choice.value => choice.about(tr!("The default")),
                         _ => choice,
                     }
                 })
@@ -458,6 +513,73 @@ pub fn with_unit(number: &str, unit: &str) -> String {
     }
 }
 
+/// A number as the settings page shows it, in the app's language: its
+/// decimal separator, and the unit written as the language writes it.
+pub fn shown_number(value: f64, step: f64, unit: &str) -> String {
+    let places = places(value, step);
+    let number = clarp_core::i18n::format::decimal(clarp_core::i18n::current(), tidy(value, places), places as u8);
+    match unit {
+        "" => number,
+        // i18n: Settings, a size or distance value; {} is the number, "px" is pixels
+        "px" => tr!("{} px", number),
+        // i18n: Settings, a percentage value; {} is the number
+        "%" => tr!("{}%", number),
+        // i18n: Settings, a time value; {} is the number, "ms" is milliseconds
+        "ms" => tr!("{} ms", number),
+        // i18n: Settings, a time value; {} is the number, "min" is minutes (abbreviated)
+        "min" => tr!("{} min", number),
+        // i18n: Settings, a memory size; {} is the number, "MB" is megabytes
+        "MB" => tr!("{} MB", number),
+        unit => with_unit(&number, unit),
+    }
+}
+
+/// A section's title as the settings page shows it, in the app's language
+/// (`section` stays the English that identifies it).
+pub fn section_title(section: &str) -> String {
+    match section {
+        // i18n: Settings page, section heading in capitals: chat settings (noun)
+        "CHATS" => tr!("CHATS"),
+        // i18n: Settings page, section heading in capitals: features still being tried (noun)
+        "EXPERIMENTS" => tr!("EXPERIMENTS"),
+        // i18n: Settings page, section heading in capitals: what happens when the app opens (noun)
+        "STARTUP" => tr!("STARTUP"),
+        // i18n: Settings page, section heading in capitals: whether new agents get a contact's name and persona
+        "AGENT IDENTITY" => tr!("AGENT IDENTITY"),
+        // i18n: Settings page, section heading in capitals: how the app looks (noun)
+        "APPEARANCE" => tr!("APPEARANCE"),
+        // i18n: Settings page, section heading in capitals: fonts and text sizes (noun)
+        "TYPOGRAPHY" => tr!("TYPOGRAPHY"),
+        // i18n: Settings page, section heading in capitals: spacing and placement of the window's parts (noun)
+        "LAYOUT" => tr!("LAYOUT"),
+        // i18n: Settings page, section heading in capitals: colour settings (noun)
+        "COLOURS" => tr!("COLOURS"),
+        // i18n: Settings page, section heading in capitals: spoken replies and voice settings
+        "VOICE & AUDIO" => tr!("VOICE & AUDIO"),
+        // i18n: Settings page, section heading in capitals: notification settings (noun)
+        "NOTIFICATIONS" => tr!("NOTIFICATIONS"),
+        // i18n: Settings page, section heading in capitals: how the app behaves (noun)
+        "BEHAVIOUR" => tr!("BEHAVIOUR"),
+        // i18n: Settings page, section heading in capitals: the Clarp Host this window talks to; Host is the product noun
+        "HOST" => tr!("HOST"),
+        // i18n: Settings page, section heading in capitals: the Host's tool processes kept running between messages
+        "KEPT PROCESSES" => tr!("KEPT PROCESSES"),
+        // i18n: Settings page, section heading in capitals: how the Host is doing (its diagnostics); Host is the product noun
+        "HOST STATUS" => tr!("HOST STATUS"),
+        // i18n: Settings page, section heading in capitals: keyboard settings and key bindings (noun)
+        "KEYBOARD" => tr!("KEYBOARD"),
+        // i18n: Settings page, section heading in capitals: the settings file and actions on every setting
+        "ALL SETTINGS" => tr!("ALL SETTINGS"),
+        // i18n: Settings page, section heading in capitals: the app's and the Host's versions
+        "ABOUT" => tr!("ABOUT"),
+        // i18n: Settings page, section heading in capitals: diagnostic recorders for reporting bugs (noun)
+        "DIAGNOSTICS" => tr!("DIAGNOSTICS"),
+        // i18n: Settings page, section heading in capitals: problems found in the settings file and the result of an export or import
+        "SETTINGS FILE" => tr!("SETTINGS FILE"),
+        other => local(other),
+    }
+}
+
 /// Puts every setting in `section` back to its default; how many changed.
 pub fn reset_section(app: &Rc<App>, window: &AppWindow, section: &str) -> usize {
     settings().iter().filter(|s| s.section == section).filter(|s| s.reset(app, window)).count()
@@ -517,73 +639,609 @@ pub fn sections() -> Vec<&'static str> {
 // ---- commands
 
 pub const ENTRIES: &[Entry] = &[
-    e("choose-font", "Choose font…", "appearance", "Picks the chat's typeface and size for this reading theme, previewed in the chat.", &["font", "typeface", "font family", "monospace", "serif", "sans"]),
-    e("edit-keymap", "Customize key bindings", "view", "Opens the editor for every keyboard shortcut.", &["keymap", "shortcuts", "hotkeys", "keyboard", "customise", "rebind", "bindings"]),
-    e("new-workspace", "New tab", "layout", "Opens a new workspace tab with its own pane layout.", &["new workspace", "tabnew", "add tab", "open tab", "workspace"]),
-    e("next-workspace", "Next tab", "layout", "Switches to the next workspace tab.", &["next workspace", "tabnext", "cycle", "switch workspace", "tab"]),
-    e("previous-workspace", "Previous tab", "layout", "Switches to the workspace tab before this one.", &["previous workspace", "tabprevious", "back", "switch workspace", "tab"]),
-    e("close-workspace", "Close tab", "layout", "Closes this workspace tab; its chats stay in the explorer.", &["close workspace", "tabclose", "remove tab", "delete workspace", "tab"]),
-    e("help-keys", "Keys here", "view", "Shows the keys that matter where the keyboard is, your own bindings included.", &["help", "cheat sheet", "shortcuts", "which key", "keyboard help", "?"]),
-    e("quick-new-agent", "New contact & chat", "agent", "Creates a new contact and opens a chat with it.", &["new session", "hub", "create", "add contact", "new persona"]),
-    e("rename-agent", "Rename contact", "agent", "Changes the open contact's name.", &["rename", "name", "title", "relabel", "persona"]),
-    e("new", "New session", "agent", "Opens the hub to start a new agent.", &["new agent", "start", "chat", "provider", "contact", "hub", "create"]),
-    e("preview-versions", "Preview versions · update or roll back", "settings", "Installs another build of this app, newer or older.", &["previous installs", "rollback", "downgrade", "upgrade", "update", "version"]),
-    e("new-contact", "Start an idle contact", "agent", "Starts one of your idle contacts in a new session.", &["new session", "hub", "contact", "wake", "resume"]),
-    e("agent-terminal", "Open agent in terminal", "agent", "Opens the agent's CLI, run by its Host, in a terminal.", &["terminal", "cli", "shell", "console", "native"]),
-    e("split-right", "Split right", "layout", "Opens a second pane to the right.", &["vertical split", "side by side", "pane", "columns", "divide"]),
-    e("split-down", "Split down", "layout", "Opens a second pane below.", &["horizontal split", "stack", "pane", "rows", "divide"]),
-    e("close-pane", "Close pane", "layout", "Closes the active pane.", &["remove pane", "unsplit", "merge", "pane"]),
-    e("zoom", "Zoom pane", "layout", "Fills the window with the active pane, or restores the split.", &["maximise", "maximize", "fullscreen", "focus pane", "pane"]),
-    e("balance", "Balance panes", "layout", "Makes every pane the same size.", &["equalise", "equalize", "even", "resize", "panes"]),
-    e("chat-zoom-in", "Zoom in", "view", "Draws the chats one step (10%) larger: text, code, cards and spacing, apart from the rest of the window.", &["magnify", "bigger", "larger", "enlarge", "text size", "chat zoom", "increase"]),
-    e("chat-zoom-out", "Zoom out", "view", "Draws the chats one step (10%) smaller, apart from the rest of the window.", &["smaller", "shrink", "reduce", "text size", "chat zoom", "decrease"]),
-    e("chat-zoom-reset", "Reset zoom", "view", "Draws the chats at 100% again.", &["actual size", "100%", "normal size", "unzoom", "chat zoom", "default zoom"]),
-    e("ui-larger", "Larger interface", "view", "Draws the whole window one step larger, the chats included.", &["scale up", "bigger window", "increase", "window size", "dpi"]),
-    e("ui-smaller", "Smaller interface", "view", "Draws the whole window one step smaller, the chats included.", &["scale down", "smaller window", "shrink window", "window size", "dpi"]),
-    e("ui-reset", "Reset interface size", "view", "Returns the whole window to its usual scale.", &["default size", "actual size", "scale", "window size"]),
-    e("toggle-queue", "Hide queue", "view", "Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue).", &["queue strip", "waiting messages", "messages waiting", "show queue"]),
-    e("send-queued", "Send waiting message now", "agent", "Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.", &["send now", "steer", "queue", "waiting", "interrupt", "now"]),
-    e("list-all", "Agents: all chats", "view", "Shows every chat in the explorer.", &["sidebar list", "scope", "everything", "back", "all agents"]),
-    e("list-unread", "Agents: unread only", "view", "Shows only chats with unread messages in the explorer.", &["sidebar list", "filter", "new", "unread", "scope"]),
-    e("list-working", "Agents: working", "view", "Shows only the chats whose agent is working now in the explorer.", &["sidebar list", "filter", "busy", "at work", "triage", "scope"]),
-    e("list-needs-you", "Agents: needs you", "view", "Shows only the chats waiting for you: unread, asking a question or holding a decision. Snoozed chats stay out.", &["sidebar list", "filter", "attention", "waiting", "inbox", "triage", "scope"]),
-    e("list-done", "Agents: done", "view", "Shows only the chats that are idle and read in the explorer.", &["sidebar list", "filter", "finished", "settled", "idle", "triage", "scope"]),
-    e("list-snoozed", "Agents: snoozed", "view", "Shows the chats you snoozed, with when each comes back.", &["sidebar list", "filter", "later", "put off", "triage", "scope"]),
-    e("snooze-chat", "Snooze chat until its next message", "agent", "Takes the chat out of Needs you until it gets a new message. Kept on this device.", &["snooze", "later", "remind", "hide", "defer", "triage"]),
-    e("snooze-chat-hour", "Snooze chat for an hour", "agent", "Takes the chat out of Needs you for an hour. Kept on this device.", &["snooze", "later", "1 hour", "remind", "defer", "triage"]),
-    e("snooze-chat-morning", "Snooze chat until tomorrow morning", "agent", "Takes the chat out of Needs you until 08:00 tomorrow. Kept on this device.", &["snooze", "tomorrow", "morning", "later", "defer", "triage"]),
-    e("wake-chat", "Wake snoozed chat", "agent", "Ends the chat's snooze: it is back in Needs you if it waits for you.", &["unsnooze", "wake", "snooze", "back", "triage"]),
-    e("snooze-toggle", "Snooze or wake chat", "agent", "Snoozes the chat until its next message, or wakes it when snoozed.", &["snooze", "wake", "toggle", "later", "triage"]),
-    e("list-rooms", "Agent conversations (agent to agent)", "view", "Shows the rooms where agents talk to each other.", &["pairs", "rooms", "sidebar", "agent to agent", "a2a"]),
-    e("list-archive", "Archived agents", "view", "Shows archived agents so you can restore them.", &["archive", "restore", "old", "sidebar", "history"]),
-    e("link-hints", "Open a link", "view", "Numbers the links on screen; type a number to open one.", &["links", "hints", "url", "urls", "browser", "follow", "vimium", "web"]),
-    e("jump-latest", "Jump to latest", "view", "Scrolls the chat to its newest message.", &["bottom", "newest", "scroll", "follow", "end"]),
-    e("retry-message", "Retry latest failed message", "view", "Sends the last message that failed again.", &["resend", "send", "delivery", "not delivered", "retry"]),
-    e("dismiss-error", "Dismiss conversation error", "view", "Closes the error banner above the chat.", &["clear", "close", "error", "warning", "banner", "voice synthesis failed"]),
-    e("dismiss-layout-warning", "Dismiss layout warning", "view", "Closes the warning that another window saved a newer layout.", &["another window", "newer layout", "conflict", "recovery", "close"]),
-    e("keep-layout", "Keep this window's layout", "view", "Saves this window's layout over the newer one another window saved.", &["another window", "newer layout", "conflict", "recovery", "save instead"]),
-    e("change-directory", "Change directory", "agent", "Starts a new chat in another folder.", &["folder", "workspace", "cwd", "new chat", "path"]),
-    e("recent-agents", "Recent agents", "agent", "Lists the agents you opened last, newest first.", &["last", "previous", "switch back", "mru", "history"]),
-    e("show-work", "Show work", "view", "Opens or folds the work of a finished turn in Conversation view (the message the keyboard is on, else the latest turn), or the running turn's Running box.", &["hide work", "conversation view", "tool activity", "steps", "what ran", "expand turn"]),
-    e("chat-view", "Conversation or Session view", "view", "Shows the open chat the other way: Conversation (your messages, the replies, cards; the work behind Show work) or Session (everything as it ran). On a Host that offers it.", &["conversation view", "session view", "chat view", "clean chat", "only replies"]),
-    e("select-text", "Select text", "view", "Shows the open chat as plain text to select from with the mouse or Shift+arrows and copy with Ctrl+C; a message's own select icon shows just that message.", &["select", "highlight", "copy text", "copy part", "mark text", "visual"]),
-    e("search-messages", "Search messages", "view", "Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.", &["find", "find in chats", "text", "history", "transcript", "grep", "look up"]),
-    e("open-in-browser", "Open report in browser", "view", "Opens an HTML report's whole page, pictures and layout included, in a new browser window; Clarp shows plain ones as a quick preview.", &["browser", "full page", "images", "html", "web page", "external"]),
-    e("refresh", "Refresh conversation", "view", "Loads the open chat again from the Host.", &["reload", "update", "sync", "fetch"]),
-    e("refresh-agents", "Refresh agents", "view", "Fetches the agent list from the Host now, also while it is retrying after a failure.", &["reload", "refresh", "roster", "sync", "agent list", "contacts", "stale"]),
-    e("agent-processes", "Background processes", "agent", "Shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.", &["processes", "jobs", "background jobs", "tasks", "running", "helpers", "kill", "stop job", "output", "logs", "show processes"]),
-    e("overview", "Agent overview", "view", "Shows every agent and what it is doing.", &["dashboard", "summary", "all agents", "status", "fleet"]),
-    e("agent-profile", "Agent profile", "agent", "Opens the open agent's profile: its artifacts and images, files, terminal, voice, plan, prompt history, model and backend.", &["profile", "agent info", "details", "about agent", "artifacts", "media", "images", "agent model", "backend"]),
-    e("chats", "Chats", "destination", "Goes to the chats.", &["conversations", "messages", "home", "main"]),
-    e("updates", "Updates", "destination", "Goes to the updates feed.", &["feed", "activity", "news", "attention", "inbox"]),
-    e("teams", "Teams", "destination", "Goes to the teams.", &["groups", "team", "crews", "squads"]),
-    e("settings", "Settings", "destination", "Opens the settings page.", &["preferences", "options", "configuration", "config", "customise", "customize"]),
-    e("next-attention", "Next agent needing attention", "agent", "Opens the next agent that is waiting for you.", &["attention", "waiting", "blocked", "needs me", "next"]),
-    e("next-agent", "Next agent", "agent", "Opens the next agent in the list.", &["following", "chat", "switch", "forward", "down"]),
-    e("previous-agent", "Previous agent", "agent", "Opens the agent above in the list.", &["back", "chat", "switch", "prior", "up"]),
-    e("release-agent", "Release agent", "agent", "Ends the open agent's session and frees its contact.", &["end", "free", "finish", "close agent", "dismiss"]),
-    e("stop-agent", "Stop agent", "agent", "Interrupts what the open agent is doing.", &["interrupt", "cancel", "halt", "abort", "kill"]),
-    e("talk", "Talk", "audio", "Records your voice and sends it to the open agent.", &["voice", "microphone", "mic", "dictate", "speak", "record", "push to talk"]),
+    e(
+        "choose-font",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Picks the chat's typeface and size for this reading theme, previewed in the chat.
+        en::tr!("Choose font…"),
+        "appearance",
+        // i18n: Ctrl+K command palette, the line under the command “Choose font…” saying what it does
+        en::tr!("Picks the chat's typeface and size for this reading theme, previewed in the chat."),
+        &["font", "typeface", "font family", "monospace", "serif", "sans"],
+    ),
+    e(
+        "edit-keymap",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the editor for every keyboard shortcut.
+        en::tr!("Customize key bindings"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Customize key bindings” saying what it does
+        en::tr!("Opens the editor for every keyboard shortcut."),
+        &["keymap", "shortcuts", "hotkeys", "keyboard", "customise", "rebind", "bindings"],
+    ),
+    e(
+        "new-workspace",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens a new workspace tab with its own pane layout.
+        en::tr!("New tab"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “New tab” saying what it does
+        en::tr!("Opens a new workspace tab with its own pane layout."),
+        &["new workspace", "tabnew", "add tab", "open tab", "workspace"],
+    ),
+    e(
+        "next-workspace",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Switches to the next workspace tab.
+        en::tr!("Next tab"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Next tab” saying what it does
+        en::tr!("Switches to the next workspace tab."),
+        &["next workspace", "tabnext", "cycle", "switch workspace", "tab"],
+    ),
+    e(
+        "previous-workspace",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Switches to the workspace tab before this one.
+        en::tr!("Previous tab"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Previous tab” saying what it does
+        en::tr!("Switches to the workspace tab before this one."),
+        &["previous workspace", "tabprevious", "back", "switch workspace", "tab"],
+    ),
+    e(
+        "close-workspace",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Closes this workspace tab; its chats stay in the explorer.
+        en::tr!("Close tab"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Close tab” saying what it does
+        en::tr!("Closes this workspace tab; its chats stay in the explorer."),
+        &["close workspace", "tabclose", "remove tab", "delete workspace", "tab"],
+    ),
+    e(
+        "help-keys",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the keys that matter where the keyboard is, your own bindings included.
+        en::tr!("Keys here"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Keys here” saying what it does
+        en::tr!("Shows the keys that matter where the keyboard is, your own bindings included."),
+        &["help", "cheat sheet", "shortcuts", "which key", "keyboard help", "?"],
+    ),
+    e(
+        "quick-new-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Creates a new contact and opens a chat with it.
+        en::tr!("New contact & chat"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “New contact & chat” saying what it does
+        en::tr!("Creates a new contact and opens a chat with it."),
+        &["new session", "hub", "create", "add contact", "new persona"],
+    ),
+    e(
+        "rename-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Changes the open contact's name.
+        en::tr!("Rename contact"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Rename contact” saying what it does
+        en::tr!("Changes the open contact's name."),
+        &["rename", "name", "title", "relabel", "persona"],
+    ),
+    e(
+        "new",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the hub to start a new agent.
+        en::tr!("New session"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “New session” saying what it does
+        en::tr!("Opens the hub to start a new agent."),
+        &["new agent", "start", "chat", "provider", "contact", "hub", "create"],
+    ),
+    e(
+        "preview-versions",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Installs another build of this app, newer or older.
+        en::tr!("Preview versions · update or roll back"),
+        "settings",
+        // i18n: Ctrl+K command palette, the line under the command “Preview versions · update or roll back” saying what it does
+        en::tr!("Installs another build of this app, newer or older."),
+        &["previous installs", "rollback", "downgrade", "upgrade", "update", "version"],
+    ),
+    e(
+        "new-contact",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Starts one of your idle contacts in a new session.
+        en::tr!("Start an idle contact"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Start an idle contact” saying what it does
+        en::tr!("Starts one of your idle contacts in a new session."),
+        &["new session", "hub", "contact", "wake", "resume"],
+    ),
+    e(
+        "agent-terminal",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the agent's CLI, run by its Host, in a terminal.
+        en::tr!("Open agent in terminal"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Open agent in terminal” saying what it does
+        en::tr!("Opens the agent's CLI, run by its Host, in a terminal."),
+        &["terminal", "cli", "shell", "console", "native"],
+    ),
+    e(
+        "split-right",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens a second pane to the right.
+        en::tr!("Split right"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Split right” saying what it does
+        en::tr!("Opens a second pane to the right."),
+        &["vertical split", "side by side", "pane", "columns", "divide"],
+    ),
+    e(
+        "split-down",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens a second pane below.
+        en::tr!("Split down"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Split down” saying what it does
+        en::tr!("Opens a second pane below."),
+        &["horizontal split", "stack", "pane", "rows", "divide"],
+    ),
+    e(
+        "close-pane",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Closes the active pane.
+        en::tr!("Close pane"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Close pane” saying what it does
+        en::tr!("Closes the active pane."),
+        &["remove pane", "unsplit", "merge", "pane"],
+    ),
+    e(
+        "zoom",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Fills the window with the active pane, or restores the split.
+        en::tr!("Zoom pane"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Zoom pane” saying what it does
+        en::tr!("Fills the window with the active pane, or restores the split."),
+        &["maximise", "maximize", "fullscreen", "focus pane", "pane"],
+    ),
+    e(
+        "balance",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Makes every pane the same size.
+        en::tr!("Balance panes"),
+        "layout",
+        // i18n: Ctrl+K command palette, the line under the command “Balance panes” saying what it does
+        en::tr!("Makes every pane the same size."),
+        &["equalise", "equalize", "even", "resize", "panes"],
+    ),
+    e(
+        "chat-zoom-in",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats one step (10%) larger: text, code, cards and spacing, apart from the rest of the window.
+        en::tr!("Zoom in"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Zoom in” saying what it does
+        en::tr!("Draws the chats one step (10%) larger: text, code, cards and spacing, apart from the rest of the window."),
+        &["magnify", "bigger", "larger", "enlarge", "text size", "chat zoom", "increase"],
+    ),
+    e(
+        "chat-zoom-out",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats one step (10%) smaller, apart from the rest of the window.
+        en::tr!("Zoom out"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Zoom out” saying what it does
+        en::tr!("Draws the chats one step (10%) smaller, apart from the rest of the window."),
+        &["smaller", "shrink", "reduce", "text size", "chat zoom", "decrease"],
+    ),
+    e(
+        "chat-zoom-reset",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats at 100% again.
+        en::tr!("Reset zoom"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Reset zoom” saying what it does
+        en::tr!("Draws the chats at 100% again."),
+        &["actual size", "100%", "normal size", "unzoom", "chat zoom", "default zoom"],
+    ),
+    e(
+        "ui-larger",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the whole window one step larger, the chats included.
+        en::tr!("Larger interface"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Larger interface” saying what it does
+        en::tr!("Draws the whole window one step larger, the chats included."),
+        &["scale up", "bigger window", "increase", "window size", "dpi"],
+    ),
+    e(
+        "ui-smaller",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the whole window one step smaller, the chats included.
+        en::tr!("Smaller interface"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Smaller interface” saying what it does
+        en::tr!("Draws the whole window one step smaller, the chats included."),
+        &["scale down", "smaller window", "shrink window", "window size", "dpi"],
+    ),
+    e(
+        "ui-reset",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Returns the whole window to its usual scale.
+        en::tr!("Reset interface size"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Reset interface size” saying what it does
+        en::tr!("Returns the whole window to its usual scale."),
+        &["default size", "actual size", "scale", "window size"],
+    ),
+    e(
+        "toggle-queue",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue).
+        en::tr!("Hide queue"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Hide queue” saying what it does
+        en::tr!("Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue)."),
+        &["queue strip", "waiting messages", "messages waiting", "show queue"],
+    ),
+    e(
+        "send-queued",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.
+        en::tr!("Send waiting message now"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Send waiting message now” saying what it does
+        en::tr!("Hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue."),
+        &["send now", "steer", "queue", "waiting", "interrupt", "now"],
+    ),
+    e(
+        "list-all",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows every chat in the explorer.
+        en::tr!("Agents: all chats"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: all chats” saying what it does
+        en::tr!("Shows every chat in the explorer."),
+        &["sidebar list", "scope", "everything", "back", "all agents"],
+    ),
+    e(
+        "list-unread",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows only chats with unread messages in the explorer.
+        en::tr!("Agents: unread only"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: unread only” saying what it does
+        en::tr!("Shows only chats with unread messages in the explorer."),
+        &["sidebar list", "filter", "new", "unread", "scope"],
+    ),
+    e(
+        "list-working",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows only the chats whose agent is working now in the explorer.
+        en::tr!("Agents: working"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: working” saying what it does
+        en::tr!("Shows only the chats whose agent is working now in the explorer."),
+        &["sidebar list", "filter", "busy", "at work", "triage", "scope"],
+    ),
+    e(
+        "list-needs-you",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows only the chats waiting for you: unread, asking a question or holding a decision. Snoozed chats stay out.
+        en::tr!("Agents: needs you"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: needs you” saying what it does
+        en::tr!("Shows only the chats waiting for you: unread, asking a question or holding a decision. Snoozed chats stay out."),
+        &["sidebar list", "filter", "attention", "waiting", "inbox", "triage", "scope"],
+    ),
+    e(
+        "list-done",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows only the chats that are idle and read in the explorer.
+        en::tr!("Agents: done"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: done” saying what it does
+        en::tr!("Shows only the chats that are idle and read in the explorer."),
+        &["sidebar list", "filter", "finished", "settled", "idle", "triage", "scope"],
+    ),
+    e(
+        "list-snoozed",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the chats you snoozed, with when each comes back.
+        en::tr!("Agents: snoozed"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agents: snoozed” saying what it does
+        en::tr!("Shows the chats you snoozed, with when each comes back."),
+        &["sidebar list", "filter", "later", "put off", "triage", "scope"],
+    ),
+    e(
+        "snooze-chat",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Takes the chat out of Needs you until it gets a new message. Kept on this device.
+        en::tr!("Snooze chat until its next message"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Snooze chat until its next message” saying what it does
+        en::tr!("Takes the chat out of Needs you until it gets a new message. Kept on this device."),
+        &["snooze", "later", "remind", "hide", "defer", "triage"],
+    ),
+    e(
+        "snooze-chat-hour",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Takes the chat out of Needs you for an hour. Kept on this device.
+        en::tr!("Snooze chat for an hour"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Snooze chat for an hour” saying what it does
+        en::tr!("Takes the chat out of Needs you for an hour. Kept on this device."),
+        &["snooze", "later", "1 hour", "remind", "defer", "triage"],
+    ),
+    e(
+        "snooze-chat-morning",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Takes the chat out of Needs you until 08:00 tomorrow. Kept on this device.
+        en::tr!("Snooze chat until tomorrow morning"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Snooze chat until tomorrow morning” saying what it does
+        en::tr!("Takes the chat out of Needs you until 08:00 tomorrow. Kept on this device."),
+        &["snooze", "tomorrow", "morning", "later", "defer", "triage"],
+    ),
+    e(
+        "wake-chat",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Ends the chat's snooze: it is back in Needs you if it waits for you.
+        en::tr!("Wake snoozed chat"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Wake snoozed chat” saying what it does
+        en::tr!("Ends the chat's snooze: it is back in Needs you if it waits for you."),
+        &["unsnooze", "wake", "snooze", "back", "triage"],
+    ),
+    e(
+        "snooze-toggle",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Snoozes the chat until its next message, or wakes it when snoozed.
+        en::tr!("Snooze or wake chat"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Snooze or wake chat” saying what it does
+        en::tr!("Snoozes the chat until its next message, or wakes it when snoozed."),
+        &["snooze", "wake", "toggle", "later", "triage"],
+    ),
+    e(
+        "list-rooms",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the rooms where agents talk to each other.
+        en::tr!("Agent conversations (agent to agent)"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agent conversations (agent to agent)” saying what it does
+        en::tr!("Shows the rooms where agents talk to each other."),
+        &["pairs", "rooms", "sidebar", "agent to agent", "a2a"],
+    ),
+    e(
+        "list-archive",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows archived agents so you can restore them.
+        en::tr!("Archived agents"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Archived agents” saying what it does
+        en::tr!("Shows archived agents so you can restore them."),
+        &["archive", "restore", "old", "sidebar", "history"],
+    ),
+    e(
+        "link-hints",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Numbers the links on screen; type a number to open one.
+        en::tr!("Open a link"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Open a link” saying what it does
+        en::tr!("Numbers the links on screen; type a number to open one."),
+        &["links", "hints", "url", "urls", "browser", "follow", "vimium", "web"],
+    ),
+    e(
+        "jump-latest",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Scrolls the chat to its newest message.
+        en::tr!("Jump to latest"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Jump to latest” saying what it does
+        en::tr!("Scrolls the chat to its newest message."),
+        &["bottom", "newest", "scroll", "follow", "end"],
+    ),
+    e(
+        "retry-message",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Sends the last message that failed again.
+        en::tr!("Retry latest failed message"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Retry latest failed message” saying what it does
+        en::tr!("Sends the last message that failed again."),
+        &["resend", "send", "delivery", "not delivered", "retry"],
+    ),
+    e(
+        "dismiss-error",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Closes the error banner above the chat.
+        en::tr!("Dismiss conversation error"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Dismiss conversation error” saying what it does
+        en::tr!("Closes the error banner above the chat."),
+        &["clear", "close", "error", "warning", "banner", "voice synthesis failed"],
+    ),
+    e(
+        "dismiss-layout-warning",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Closes the warning that another window saved a newer layout.
+        en::tr!("Dismiss layout warning"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Dismiss layout warning” saying what it does
+        en::tr!("Closes the warning that another window saved a newer layout."),
+        &["another window", "newer layout", "conflict", "recovery", "close"],
+    ),
+    e(
+        "keep-layout",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Saves this window's layout over the newer one another window saved.
+        en::tr!("Keep this window's layout"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Keep this window's layout” saying what it does
+        en::tr!("Saves this window's layout over the newer one another window saved."),
+        &["another window", "newer layout", "conflict", "recovery", "save instead"],
+    ),
+    e(
+        "change-directory",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Starts a new chat in another folder.
+        en::tr!("Change directory"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Change directory” saying what it does
+        en::tr!("Starts a new chat in another folder."),
+        &["folder", "workspace", "cwd", "new chat", "path"],
+    ),
+    e(
+        "recent-agents",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Lists the agents you opened last, newest first.
+        en::tr!("Recent agents"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Recent agents” saying what it does
+        en::tr!("Lists the agents you opened last, newest first."),
+        &["last", "previous", "switch back", "mru", "history"],
+    ),
+    e(
+        "show-work",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens or folds the work of a finished turn in Conversation view (the message the keyboard is on, else the latest turn), or the running turn's Running box.
+        en::tr!("Show work"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Show work” saying what it does
+        en::tr!("Opens or folds the work of a finished turn in Conversation view (the message the keyboard is on, else the latest turn), or the running turn's Running box."),
+        &["hide work", "conversation view", "tool activity", "steps", "what ran", "expand turn"],
+    ),
+    e(
+        "chat-view",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the open chat the other way: Conversation (your messages, the replies, cards; the work behind Show work) or Session (everything as it ran). On a Host that offers it.
+        en::tr!("Conversation or Session view"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Conversation or Session view” saying what it does
+        en::tr!("Shows the open chat the other way: Conversation (your messages, the replies, cards; the work behind Show work) or Session (everything as it ran). On a Host that offers it."),
+        &["conversation view", "session view", "chat view", "clean chat", "only replies"],
+    ),
+    e(
+        "select-text",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the open chat as plain text to select from with the mouse or Shift+arrows and copy with Ctrl+C; a message's own select icon shows just that message.
+        en::tr!("Select text"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Select text” saying what it does
+        en::tr!("Shows the open chat as plain text to select from with the mouse or Shift+arrows and copy with Ctrl+C; a message's own select icon shows just that message."),
+        &["select", "highlight", "copy text", "copy part", "mark text", "visual"],
+    ),
+    e(
+        "search-messages",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
+        en::tr!("Search messages"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Search messages” saying what it does
+        en::tr!("Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message."),
+        &["find", "find in chats", "text", "history", "transcript", "grep", "look up"],
+    ),
+    e(
+        "open-in-browser",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens an HTML report's whole page, pictures and layout included, in a new browser window; Clarp shows plain ones as a quick preview.
+        en::tr!("Open report in browser"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Open report in browser” saying what it does
+        en::tr!("Opens an HTML report's whole page, pictures and layout included, in a new browser window; Clarp shows plain ones as a quick preview."),
+        &["browser", "full page", "images", "html", "web page", "external"],
+    ),
+    e(
+        "refresh",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Loads the open chat again from the Host.
+        en::tr!("Refresh conversation"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Refresh conversation” saying what it does
+        en::tr!("Loads the open chat again from the Host."),
+        &["reload", "update", "sync", "fetch"],
+    ),
+    e(
+        "refresh-agents",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Fetches the agent list from the Host now, also while it is retrying after a failure.
+        en::tr!("Refresh agents"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Refresh agents” saying what it does
+        en::tr!("Fetches the agent list from the Host now, also while it is retrying after a failure."),
+        &["reload", "refresh", "roster", "sync", "agent list", "contacts", "stale"],
+    ),
+    e(
+        "agent-processes",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.
+        en::tr!("Background processes"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Background processes” saying what it does
+        en::tr!("Shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job."),
+        &["processes", "jobs", "background jobs", "tasks", "running", "helpers", "kill", "stop job", "output", "logs", "show processes"],
+    ),
+    e(
+        "overview",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows every agent and what it is doing.
+        en::tr!("Agent overview"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Agent overview” saying what it does
+        en::tr!("Shows every agent and what it is doing."),
+        &["dashboard", "summary", "all agents", "status", "fleet"],
+    ),
+    e(
+        "agent-profile",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the open agent's profile: its artifacts and images, files, terminal, voice, plan, prompt history, model and backend.
+        en::tr!("Agent profile"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Agent profile” saying what it does
+        en::tr!("Opens the open agent's profile: its artifacts and images, files, terminal, voice, plan, prompt history, model and backend."),
+        &["profile", "agent info", "details", "about agent", "artifacts", "media", "images", "agent model", "backend"],
+    ),
+    e(
+        "chats",
+        // i18n: Ctrl+K command palette, a command's name (a noun: the place in the app it goes to). What it does: Goes to the chats.
+        en::tr!("Chats"),
+        "destination",
+        // i18n: Ctrl+K command palette, the line under the command “Chats” saying what it does
+        en::tr!("Goes to the chats."),
+        &["conversations", "messages", "home", "main"],
+    ),
+    e(
+        "updates",
+        // i18n: Ctrl+K command palette, a command's name (a noun: the place in the app it goes to). What it does: Goes to the updates feed.
+        en::tr!("Updates"),
+        "destination",
+        // i18n: Ctrl+K command palette, the line under the command “Updates” saying what it does
+        en::tr!("Goes to the updates feed."),
+        &["feed", "activity", "news", "attention", "inbox"],
+    ),
+    e(
+        "teams",
+        // i18n: Ctrl+K command palette, a command's name (a noun: the place in the app it goes to). What it does: Goes to the teams.
+        en::tr!("Teams"),
+        "destination",
+        // i18n: Ctrl+K command palette, the line under the command “Teams” saying what it does
+        en::tr!("Goes to the teams."),
+        &["groups", "team", "crews", "squads"],
+    ),
+    e(
+        "settings",
+        // i18n: Ctrl+K command palette, a command's name (a noun: the place in the app it goes to). What it does: Opens the settings page.
+        en::tr!("Settings"),
+        "destination",
+        // i18n: Ctrl+K command palette, the line under the command “Settings” saying what it does
+        en::tr!("Opens the settings page."),
+        &["preferences", "options", "configuration", "config", "customise", "customize"],
+    ),
+    e(
+        "next-attention",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the next agent that is waiting for you.
+        en::tr!("Next agent needing attention"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Next agent needing attention” saying what it does
+        en::tr!("Opens the next agent that is waiting for you."),
+        &["attention", "waiting", "blocked", "needs me", "next"],
+    ),
+    e(
+        "next-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the next agent in the list.
+        en::tr!("Next agent"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Next agent” saying what it does
+        en::tr!("Opens the next agent in the list."),
+        &["following", "chat", "switch", "forward", "down"],
+    ),
+    e(
+        "previous-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the agent above in the list.
+        en::tr!("Previous agent"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Previous agent” saying what it does
+        en::tr!("Opens the agent above in the list."),
+        &["back", "chat", "switch", "prior", "up"],
+    ),
+    e(
+        "release-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Ends the open agent's session and frees its contact.
+        en::tr!("Release agent"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Release agent” saying what it does
+        en::tr!("Ends the open agent's session and frees its contact."),
+        &["end", "free", "finish", "close agent", "dismiss"],
+    ),
+    e(
+        "stop-agent",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Interrupts what the open agent is doing.
+        en::tr!("Stop agent"),
+        "agent",
+        // i18n: Ctrl+K command palette, the line under the command “Stop agent” saying what it does
+        en::tr!("Interrupts what the open agent is doing."),
+        &["interrupt", "cancel", "halt", "abort", "kill"],
+    ),
+    e(
+        "talk",
+        // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Records your voice and sends it to the open agent.
+        en::tr!("Talk"),
+        "audio",
+        // i18n: Ctrl+K command palette, the line under the command “Talk” saying what it does
+        en::tr!("Records your voice and sends it to the open agent."),
+        &["voice", "microphone", "mic", "dictate", "speak", "record", "push to talk"],
+    ),
 ];
 
 /// A setting's or a command's text.
