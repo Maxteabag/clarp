@@ -664,8 +664,7 @@ impl Engine {
                         popup.session = q(popup.session);
                         out.push(Change::Notification(popup))
                     }
-                    Change::NotificationRead(s) => out.push(Change::NotificationRead(q(s))),
-                    Change::QuestionEnded(id) => out.push(Change::QuestionEnded(id)),
+                    Change::NotificationRead(s, host, target) => out.push(Change::NotificationRead(q(s), host, target)),
                     Change::NotificationSettings => out.push(Change::NotificationSettings),
                     Change::Roster | Change::Archive | Change::RosterFreshness | Change::Connection | Change::ServerInfo | Change::Error | Change::Rooms => {
                         roster_changed = true

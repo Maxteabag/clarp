@@ -161,8 +161,17 @@ pub fn notify_daemon_check(_out: String) {
             }
             window.invoke_chat_chosen("mike".into());
             // Two replies of one chat before the daemon has answered the first.
-            send(reply("q-1", "First reply"));
-            send(reply("q-2", "Second reply"));
+            let mut first = reply("q-1", "First reply");
+            first["order_epoch"] = "one".into();
+            first["event_at_ms"] = 1.into();
+            first["event_seq"] = 1.into();
+            let mut second = reply("q-2", "Second reply");
+            second["order_epoch"] = "one".into();
+            second["event_at_ms"] = 1.into();
+            second["event_seq"] = 2.into();
+            send(first);
+            send(second);
+            send(json!({"type":"chat-read","session":"rachel","order_epoch":"one","read_through_ms":1,"read_through_seq":1}));
             true
         })),
         ("chained", Box::new(|_, _window, elapsed| {
@@ -175,8 +184,21 @@ pub fn notify_daemon_check(_out: String) {
                   &format!("the second replaces the first's popup, by the id the daemon gave it: {notified:?}"));
             check(notified[1]["body"] == "Second reply", "and shows the newer reply");
             // A reply, then the chat read on another device before the daemon answers.
-            send(reply("q-3", "Third reply"));
-            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read elsewhere");
+            send(json!({"type":"agent-focus","session":"rachel","order_epoch":"one","read_through_ms":1,"read_through_seq":1}));
+            true
+        })),
+        ("stale focus read", Box::new(|app, _, elapsed| {
+            if !app.engine.borrow().roster().find("rachel").is_some_and(|a| a.focused) || elapsed < DELAY {
+                return false;
+            }
+            check(visible().iter().any(|body| body == "Second reply"), "the later reply stays visible after the stale focus read");
+            check(app.engine.borrow().roster().find("rachel").is_some_and(|a| a.unread), "the later reply stays unread");
+            let mut third = reply("q-3", "Third reply");
+            third["order_epoch"] = "one".into();
+            third["event_at_ms"] = 1.into();
+            third["event_seq"] = 3.into();
+            send(third);
+            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "order_epoch":"one","read_through_ms":1,"read_through_seq":3})).is_ok(), "the chat is read elsewhere");
             true
         })),
         ("read meanwhile", Box::new(|_, _window, elapsed| {

@@ -1914,7 +1914,7 @@ fn desktop_check(out: String) {
                 return false;
             }
             window.invoke_chat_chosen("mike".into());
-            let event = serde_json::json!({"type": "user-notification", "session": "rachel", "persona": "Rachel", "preview": "Echo from Rachel"});
+            let event = serde_json::json!({"type": "user-notification", "session": "rachel", "persona": "Rachel", "preview": "Echo from Rachel", "order_epoch":"one", "event_at_ms":1, "event_seq":1});
             check(control("/__control/event", &event).is_ok(), "the Host says Rachel replied");
             true
         })),
@@ -1935,7 +1935,7 @@ fn desktop_check(out: String) {
             check(active["body"]["instance_id"].as_str().is_some_and(|i| !i.is_empty()), "someone typing at the window is reported present");
             check(!posts("/application-activity").is_empty(), "and the window's activity with it");
             let rachel = |id: &str, event: &str, alert: bool, preview: &str| serde_json::json!({
-                "type": "user-notification", "event": event, "alert": alert, "unread": true, "notification_id": id,
+                "type": "user-notification", "event": event, "alert": alert, "unread": true, "notification_id": id, "order_epoch":"one", "event_at_ms":1, "event_seq":2,
                 "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": preview, "message_id": format!("m-{id}"),
             });
             send(rachel("pn-2", "reply", true, "Second reply"));
@@ -1964,7 +1964,7 @@ fn desktop_check(out: String) {
             check(shown[1]["replaces"] == true && shown[1]["message_id"] == "m-pn-2", &format!("a newer reply replaces the chat's popup and opens at its message: {}", shown[1]));
             check(shown[2]["actions"] == serde_json::json!(["default", "choice:a", "choice:b", "mark-read", "mute", "settings"]), &format!("a question's answers are its first buttons: {}", shown[2]["actions"]));
             check(shown[2]["sound"] == false, "no sound while Sound is off");
-            check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read on another device");
+            check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "order_epoch":"one", "read_through_ms":1, "read_through_seq":2})).is_ok(), "the chat is read on another device");
             true
         })),
         ("closed", Box::new(|_, _window, _| {
@@ -1972,7 +1972,7 @@ fn desktop_check(out: String) {
                 return false;
             }
             check(true, "a chat read elsewhere closes its popup");
-            send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": true, "notification_id": "pn-4",
+            send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": true, "notification_id": "pn-4", "order_epoch":"one", "event_at_ms":1, "event_seq":3,
                                     "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Fourth"}));
             true
         })),
@@ -2070,7 +2070,7 @@ fn desktop_check(out: String) {
             }
             check(read[0]["body"]["session"] == "rachel", &format!("Mark read tells the Host: {}", read[0]["body"]));
             check(set[0]["body"] == serde_json::json!({"agent": "a1", "events": {"reply": false}}), &format!("a contact's choice goes to the Host: {}", set[0]["body"]));
-            check(!app.engine.borrow().roster().find("rachel").is_some_and(|a| a.unread), "and the chat is read here");
+            check(app.engine.borrow().roster().find("rachel").is_some_and(|a| a.unread), "the unordered Host receipt preserves the unread failure");
             if let Some(app) = crate::app()
                 && let Some(window) = crate::window()
             {

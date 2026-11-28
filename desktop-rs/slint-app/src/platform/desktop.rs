@@ -418,6 +418,8 @@ pub struct Note {
     pub session: String,
     /// The message a click opens the chat at.
     pub message_id: String,
+    pub host: String,
+    pub order: Option<clarp_core::notify_events::AlertOrder>,
     /// Ask the desktop for its message sound.
     pub sound: bool,
     /// The agent's cached portrait (`file://`).
@@ -446,6 +448,8 @@ struct Shown {
     action_generation: u64,
     session: String,
     message_id: String,
+    host: String,
+    order: Option<clarp_core::notify_events::AlertOrder>,
     decision_id: String,
     response_type: String,
 }
@@ -502,14 +506,12 @@ pub fn notify(note: Note) {
 }
 
 /// The chat was opened or read on some device: its popup goes.
-pub fn close_chat(session: &str) {
-    close_where(|s| s.session == session, true, serde_json::json!({"closed": session}));
-}
-
-/// A question was answered, dismissed or withdrawn elsewhere: its popup
-/// goes, and only it (a newer popup of the chat stays).
-pub fn close_decision(decision_id: &str) {
-    close_where(|s| s.decision_id == decision_id, false, serde_json::json!({"closed_decision": decision_id}));
+pub fn close_read(session: &str, host: &str, target: &clarp_core::notify_events::ReadTarget) {
+    let logged = match target {
+        clarp_core::notify_events::ReadTarget::Decision(id) => serde_json::json!({"closed_decision": id}),
+        _ => serde_json::json!({"closed": session}),
+    };
+    close_where(|s| s.session == session && s.host == host && target.covers(s.order.as_ref(), &s.decision_id), logged);
 }
 
 /// Closes the popups `which` picks (`logged` is what a check records). A
@@ -517,9 +519,8 @@ pub fn close_decision(decision_id: &str) {
 /// unless another popup's Notify is replacing it, which then owns the id. A
 /// popup still on its way is closed as soon as the desktop names it, unless
 /// a newer popup of the chat waits to replace it; a popup waiting that
-/// `which` picks is not sent. `whole_chat` (the chat read or opened) also
-/// drops whatever else of the chat waits.
-fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_json::Value) {
+/// `which` picks is not sent.
+fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| which(s));
@@ -533,9 +534,6 @@ fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_j
             if which(&flight.popup) {
                 flight.close = true;
                 any = true;
-                if whole_chat {
-                    flight.next = None;
-                }
             }
             if flight.next.as_ref().is_some_and(|next| which(&shown_of(next, 0))) {
                 flight.next = None;
@@ -597,6 +595,8 @@ fn shown_of(note: &Note, id: u32) -> Shown {
         action_generation: 0,
         session: note.session.clone(),
         message_id: note.message_id.clone(),
+        host: note.host.clone(),
+        order: note.order.clone(),
         decision_id: note.decision_id.clone(),
         response_type: note.response_type.clone(),
     }
@@ -661,8 +661,10 @@ pub fn action_invoked(id: u32, key: &str) {
         }
         action
     };
-    close_id(id);
-    act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
+    if key != "mark-read" {
+        close_id(id);
+    }
+    act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key, Some(&popup));
 }
 
 /// What a popup's button does: open the chat at the message, mark it
@@ -670,15 +672,18 @@ pub fn action_invoked(id: u32, key: &str) {
 /// question, or send a failed turn's message again (opening the chat when
 /// the answer or the retry cannot go, and for Switch model and Sign in).
 pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
-    close_chat(session);
-    act(session, message_id, decision_id, response_type, key);
+    let shown = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == session && s.message_id == message_id && s.decision_id == decision_id).cloned());
+    if key != "mark-read" {
+        close_where(|s| s.session == session && s.message_id == message_id && s.decision_id == decision_id, serde_json::json!({"closed": session}));
+    }
+    act(session, message_id, decision_id, response_type, key, shown.as_ref());
 }
 
-fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
+fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str, shown: Option<&Shown>) {
     let Some(app) = crate::app() else { return };
     match key {
         "mark-read" => {
-            app.engine.borrow_mut().mark_chat_read(session);
+            app.engine.borrow_mut().mark_popup_read(session, shown.map_or("", |s| s.host.as_str()), shown.and_then(|s| s.order.as_ref()));
             crate::pump_now(&app);
             return;
         }
@@ -789,7 +794,7 @@ fn send(note: Note, closed: Option<u32>) {
         let mut flights = flights.borrow_mut();
         match flights.iter_mut().find(|f| f.popup.session == note.session) {
             Some(flight) => {
-                (flight.next, flight.close) = (Some(note), false);
+                flight.next = Some(note);
                 None
             }
             None => {

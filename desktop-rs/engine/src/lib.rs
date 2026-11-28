@@ -126,11 +126,8 @@ pub enum Change {
     Composer(String),
     /// Something for the user the desktop may pop up (`notifications.rs`).
     Notification(Popup),
-    /// This chat was opened or read on some device: its popup goes.
-    NotificationRead(String),
-    /// This question (decision id) was answered, dismissed or withdrawn
-    /// elsewhere: its popup goes.
-    QuestionEnded(String),
+    /// A read scoped to the UI chat key, originating Host and matching alerts.
+    NotificationRead(String, String, clarp_core::notify_events::ReadTarget),
     /// The Host's notification settings changed (or whether it has them).
     NotificationSettings,
     /// Launch data changed: the model catalog, idle contacts, launch
@@ -926,7 +923,6 @@ impl Engine {
                 .or_else(|| self.roster.first_session().map(str::to_owned));
             if let Some(first) = first.filter(|_| !self.waiting_for_session_choice && !self.peer) {
                 self.selected = first.clone();
-                self.mutate_roster(|r| r.clear_unread(&first));
                 self.ensure_conversation(&first);
                 self.changes.push(Change::Selection);
                 if self.panes.tree.active_session() != first {
@@ -1367,7 +1363,7 @@ impl Engine {
             // The chat left takes its "not spoken" banner with it.
             self.with_conversation(&left, |c| c.set_voice_error(""));
         }
-        self.mutate_roster(|r| r.clear_unread(session));
+        // /select causes a Host focus event with the authoritative read boundary.
         if changed {
             self.ensure_conversation(session);
             self.changes.push(Change::Selection);
@@ -2079,14 +2075,13 @@ impl Engine {
             }
             "agent-focus" => {
                 self.mutate_roster(|r| r.apply_focus_event(event));
-                self.chat_read_event(&session, false);
+                self.chat_read_event(&session, event);
             }
-            clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, true),
+            clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, event),
             clarp_core::notify_events::SETTINGS_CHANGED => self.notification_settings_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
             "user-notification" => {
                 self.request_snapshot();
-                self.mutate_roster(|r| r.apply_notification_event(event));
                 self.notification_event(event);
             }
             "server-version" => {
