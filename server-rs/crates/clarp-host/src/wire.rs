@@ -2912,6 +2912,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn an_unstructured_notification_preview_keeps_its_text_and_withholds_bound_words() {
+        let mut agent = record();
+        let said = "A private reply";
+        let told = json!({"preview": said});
+        let (key, extras) = crate::pusher::preview_keys(&agent, &told);
+        assert!(key.is_none() && extras.is_empty());
+        assert_eq!(crate::pusher::preview_of(&agent, said), said);
+        agent.codex_provider = "private".into();
+        let (key, extras) = crate::pusher::preview_keys(&agent, &told);
+        assert_eq!(key.unwrap().key, "notify.body.answered");
+        assert!(extras.is_empty());
+        assert_eq!(crate::pusher::preview_of(&agent, said), "Maximus answered");
+    }
+
     fn version(entry: Entry, revision: u64, turn: Option<TurnEnd>) -> Versioned {
         Versioned {
             turn_number: Some(1),
