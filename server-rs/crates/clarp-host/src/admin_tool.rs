@@ -1138,19 +1138,24 @@ async fn agent_helper_state(app: &App, args: &[String]) -> ToolAnswer {
         ToolAnswer::said(
             2,
             format!(
-                "usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] \
+                "usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] [--child-cwd PATH] \
                  session [{{done,failed,running}}]\n\
                  clarp-admin agent helper-state: error: {why}"
             ),
         )
     };
-    let parsed = match parse(args, &["--from"], &[], &["session", "[state]"]) {
+    let parsed = match parse(
+        args,
+        &["--from", "--child-cwd"],
+        &[],
+        &["session", "[state]"],
+    ) {
         Ok(parsed) => parsed,
         Err(why) => return usage(&why),
     };
     let session = parsed.positional.first().cloned().unwrap_or_default();
     let answered = match parsed.positional.get(1).map(String::as_str) {
-        None => roster::lineage(app, &session),
+        None => roster::lineage(app, &session, parsed.option("--child-cwd")),
         Some(state @ ("done" | "failed" | "running")) => {
             let mut asked = roster::Fields::new();
             asked.insert("session".to_string(), json!(session));

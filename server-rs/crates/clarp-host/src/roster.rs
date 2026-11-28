@@ -652,7 +652,7 @@ async fn helper_state_post(
 }
 
 /// Who made an agent and how its work stands, without the whole list.
-pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
+pub(crate) fn lineage(app: &App, session: &str, child_cwd: Option<&str>) -> Result<Value, Refusal> {
     let session = session.trim();
     if session.is_empty() {
         return Err(bad("session required"));
@@ -671,6 +671,7 @@ pub(crate) fn lineage(app: &App, session: &str) -> Result<Value, Refusal> {
         "backend": record.backend,
         "role": record.role(),
         "parent_agent_id": record.parent_agent_id,
+        "helper_defaults": app.config.helper_defaults.as_ref().and_then(|scope| scope.for_parent(&directory, session, child_cwd)),
         "helper_state": crate::fleet::AboveWork::of(&directory).helper_state(member),
         "helper_completed_at": record.helper_completed_at_ms,
         "archived_at": record.archived_at_ms,
@@ -683,7 +684,11 @@ async fn helper_state_get(
     Query(query): Query<HashMap<String, String>>,
 ) -> Answered {
     let session = query.get("session").map_or("", String::as_str);
-    Ok(Json(lineage(&app, session)?))
+    Ok(Json(lineage(
+        &app,
+        session,
+        query.get("child_cwd").map(String::as_str),
+    )?))
 }
 
 pub fn routes() -> Router<App> {
