@@ -26,11 +26,13 @@ import {
 import { noteQueuedSendDeleted } from './delivery.svelte.js';
 import { noteArtifactUpdated, refreshRenderSpecs } from './artifacts.svelte.js';
 import {
-  PRIMARY, noteOk as noteHostOk, onRecover, reachOf, retry as retryHost, setServingIdentity, suspect,
+  PRIMARY, noteHeard, noteOk as noteHostOk, onRecover, reachOf, retry as retryHost, setServingIdentity, suspect,
 } from './reach.svelte.js';
 
 let es = null;
 let lastMsgAt = 0;
+/** When the open stream last delivered something (not a connect attempt). */
+let lastHeardAt = 0;
 /** The newest SSE id seen, so a reconnect resumes instead of replaying a window. */
 let lastEventId = '';
 /** Set while we reopen on purpose (the live subscription changed). */
@@ -62,7 +64,9 @@ export function scheduleReconnect() {
   if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
-  // The stream dropped: ask the Host whether it answers at all (stores/reach.svelte.js).
+  // The stream dropped: it last heard the Host then ("Last answered"), and the Host is asked
+  // whether it answers at all (stores/reach.svelte.js).
+  if (lastHeardAt) noteHeard(PRIMARY, lastHeardAt);
   suspect(PRIMARY);
   // While it does not answer, its own backoff asks it, and an answer reopens the stream.
   if (reachOf(PRIMARY)?.down) return;
@@ -150,6 +154,7 @@ export function connectSSE() {
     reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
     noteHostOk(PRIMARY);
     lastMsgAt = Date.now();
+    lastHeardAt = lastMsgAt;
     setConn('live', Timing.DEAD_OVERLAY_MS);
     const planned = resubscribing;
     resubscribing = false;
@@ -167,6 +172,7 @@ export function connectSSE() {
 
   es.onmessage = e => {
     lastMsgAt = Date.now();
+    lastHeardAt = lastMsgAt;
     if (e.lastEventId) lastEventId = e.lastEventId;
     try {
       const ev = JSON.parse(e.data);

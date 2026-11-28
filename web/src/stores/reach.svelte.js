@@ -31,6 +31,8 @@ export const reach = $state({
   hosts: {},
   /** What the OS says (navigator.onLine): false shows one app-wide banner instead of panels. */
   deviceOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+  /** When this device lost its network (ms), or 0 while it has one. */
+  offlineSince: typeof navigator !== 'undefined' && navigator.onLine === false ? Date.now() : 0,
   /** Ticks once a second while a status line counts down. */
   now: Date.now(),
   /** The Host whose full panel is open over the app (from a list row), or ''. */
@@ -108,6 +110,32 @@ export function onRecover(id, fn) {
 /** The Host's record, or null. */
 export function reachOf(id) {
   return reach.hosts[id] || null;
+}
+
+/**
+ * Nothing is heard from the Host now: it does not answer, or this device has no network. Its
+ * last live state is then not happening now (no working state, no timer). Unlike isDown, this
+ * includes the device being offline, where the banner stands in for the panels.
+ */
+export function unheard(id) {
+  const r = reach.hosts[id];
+  return !reach.deviceOnline || !!(r && r.down);
+}
+
+/**
+ * Since when nothing has been heard: for a Host that is down, its last answer (kept true by its
+ * stream's events), else its first failure; else when the device went offline.
+ */
+export function silentSince(id) {
+  const r = reach.hosts[id];
+  if (r && r.down) return r.lastOk || r.downSince;
+  return reach.offlineSince || (r && r.lastOk) || 0;
+}
+
+/** The Host was heard at `ts` (an event on its stream): "Last answered" counts from there. */
+export function noteHeard(id, ts) {
+  const r = reach.hosts[id];
+  if (r && !r.down && ts > r.lastOk) r.lastOk = ts;
 }
 
 /** Shown as not answering: down, and this device is online (offline is the banner's). */
@@ -346,6 +374,7 @@ export function startReach() {
   started = true;
   window.addEventListener('online', () => {
     reach.deviceOnline = true;
+    reach.offlineSince = 0;
     clog('hostReach', 'device=online');
     // Every Host is asked: the ones that were down, and the serving one in case it went down
     // while there was no network to notice.
@@ -354,6 +383,7 @@ export function startReach() {
   });
   window.addEventListener('offline', () => {
     reach.deviceOnline = false;
+    reach.offlineSince = Date.now();
     clog('hostReach', 'device=offline');
   });
   window.addEventListener('focus', retryAll);

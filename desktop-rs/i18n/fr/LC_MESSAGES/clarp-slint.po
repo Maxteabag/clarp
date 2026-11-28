@@ -1,0 +1,118 @@
+# Clarp desktop: fr. Edit with tools/i18n-import; see docs/i18n.md.
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Language: fr\n"
+"Plural-Forms: nplurals=2; plural=(n > 1);\n"
+
+#. Settings > Language picker, line under the System option: the app follows the computer's language; {} is that language's own name, e.g. "Norsk bokmål"
+msgid "Follows this computer: {}"
+msgstr "Suit cet ordinateur : {}"
+
+#. relative time for something under a minute ago, shown alone as a timestamp
+msgid "Just now"
+msgstr "À l’instant"
+
+#. Settings > Appearance, row label (noun): the setting that picks the app's language
+msgid "Language"
+msgstr "Langue"
+
+#. Settings page, title at the top (noun), written in capitals where the script has them
+msgid "SETTINGS"
+msgstr "RÉGLAGES"
+
+#. Settings > Language picker, first option (noun): use the language the computer is set to
+msgid "System"
+msgstr "Système"
+
+#. Settings > Appearance, the Language row's current value when it follows the computer; {} is that language's own name
+msgid "System ({})"
+msgstr "Système ({})"
+
+#. Settings > Appearance, description line under the Language row; "System" is the picker's first option
+msgid "The language of the app. System follows this computer's languages."
+msgstr "La langue de l’application. Système suit les langues de cet ordinateur."
+
+#. day heading in the transcript and chat-list stamp for a message sent today (adverb, capitalised as a heading)
+msgid "Today"
+msgstr "Aujourd’hui"
+
+#. day heading for something due tomorrow
+msgid "Tomorrow"
+msgstr "Demain"
+
+#. day heading in the transcript and chat-list stamp for a message sent yesterday
+msgid "Yesterday"
+msgstr "Hier"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} day"
+msgid_plural "in {n} days"
+msgstr[0] "dans {n} jour"
+msgstr[1] "dans {n} jours"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} hour"
+msgid_plural "in {n} hours"
+msgstr[0] "dans {n} heure"
+msgstr[1] "dans {n} heures"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} minute"
+msgid_plural "in {n} minutes"
+msgstr[0] "dans {n} minute"
+msgstr[1] "dans {n} minutes"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} month"
+msgid_plural "in {n} months"
+msgstr[0] "dans {n} mois"
+msgstr[1] "dans {n} mois"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} week"
+msgid_plural "in {n} weeks"
+msgstr[0] "dans {n} semaine"
+msgstr[1] "dans {n} semaines"
+
+#. relative timestamp for something due in the future; {n} is the number
+msgid "in {n} year"
+msgid_plural "in {n} years"
+msgstr[0] "dans {n} an"
+msgstr[1] "dans {n} ans"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} day ago"
+msgid_plural "{n} days ago"
+msgstr[0] "il y a {n} jour"
+msgstr[1] "il y a {n} jours"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} hour ago"
+msgid_plural "{n} hours ago"
+msgstr[0] "il y a {n} heure"
+msgstr[1] "il y a {n} heures"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} minute ago"
+msgid_plural "{n} minutes ago"
+msgstr[0] "il y a {n} minute"
+msgstr[1] "il y a {n} minutes"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} month ago"
+msgid_plural "{n} months ago"
+msgstr[0] "il y a {n} mois"
+msgstr[1] "il y a {n} mois"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} week ago"
+msgid_plural "{n} weeks ago"
+msgstr[0] "il y a {n} semaine"
+msgstr[1] "il y a {n} semaines"
+
+#. relative timestamp in lists and tooltips, how long ago something happened; {n} is the number
+msgid "{n} year ago"
+msgid_plural "{n} years ago"
+msgstr[0] "il y a {n} an"
+msgstr[1] "il y a {n} ans"

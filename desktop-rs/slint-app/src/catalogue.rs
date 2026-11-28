@@ -17,6 +17,7 @@ use std::rc::Rc;
 use crate::{App, AppWindow};
 
 pub mod lanes;
+mod language;
 mod prefs;
 mod settings;
 pub use settings::COORDINATION_LINE;
@@ -141,6 +142,8 @@ pub struct Setting {
     pub shown: Option<Getter<bool>>,
     /// A label that changes (the Host's name), instead of the entry's.
     pub label: Option<Getter<String>>,
+    /// A description that changes (in the app's language), instead of the entry's.
+    pub about: Option<Getter<String>>,
     /// The value as shown, instead of the option's label (an action's state).
     pub detail: Option<Getter<String>>,
     /// How `reset` puts it back when its default is not one value (a font
@@ -153,7 +156,7 @@ pub struct Setting {
 
 impl Setting {
     fn with(entry: Entry, section: &'static str, control: Control) -> Self {
-        Setting { entry, section, control, default: None, shown: None, label: None, detail: None, reset_to: None, range: None }
+        Setting { entry, section, control, default: None, shown: None, label: None, about: None, detail: None, reset_to: None, range: None }
     }
 
     pub fn toggle(entry: Entry, section: &'static str, get: impl Fn(&App) -> bool + 'static, set: impl Fn(&Rc<App>, &AppWindow, bool) + 'static) -> Self {
@@ -251,6 +254,10 @@ impl Setting {
         Setting { label: Some(Rc::new(label)), ..self }
     }
 
+    pub fn describe_from(self, about: impl Fn(&App) -> String + 'static) -> Self {
+        Setting { about: Some(Rc::new(about)), ..self }
+    }
+
     pub fn detail(self, detail: impl Fn(&App) -> String + 'static) -> Self {
         Setting { detail: Some(Rc::new(detail)), ..self }
     }
@@ -312,6 +319,10 @@ impl Setting {
 
     pub fn label(&self, app: &App) -> String {
         self.label.as_ref().map_or_else(|| self.entry.label.to_owned(), |label| label(app))
+    }
+
+    pub fn description(&self, app: &App) -> String {
+        self.about.as_ref().map_or_else(|| self.entry.description.to_owned(), |about| about(app))
     }
 
     /// The stored value: "on"/"off", the chosen option's value or the number.

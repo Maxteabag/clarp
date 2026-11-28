@@ -9,13 +9,15 @@
   } from '../stores/app.svelte.js';
   import { activityStatusClass } from './render.js';
   import { movedLine } from '@core/agent-moved.js';
+  import { PRIMARY, unheard } from '../stores/reach.svelte.js';
   import HostBadge from './HostBadge.svelte';
 
   let { session = app.session, onTap, onHold } = $props();
 
   let label = $derived(chipLabel(session));
   let status = $derived(statusFor(session));
-  let activity = $derived(
+  // While the serving Host does not answer nothing is known of what the agent does now: no word.
+  let activity = $derived(unheard(PRIMARY) ? (movedLine(status.moved) || '') :
     movedLine(status.moved) || shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
   let unread = $derived((app.tick, unreadAgentCount()));
   let host = $derived((app.tick, hostBadgeFor(session)));
@@ -66,6 +68,6 @@
     <span
       class="history-agent-status {activityStatusClass(status.activity_status)}"
       title={activity}
-    >{#if host}<HostBadge name={host} /> · {/if}{activity}</span>
+    >{#if host}<HostBadge name={host} />{#if activity} · {/if}{/if}{activity}</span>
   </span>
 </button>

@@ -16,6 +16,7 @@ import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
 import { hostBadgeText } from '@core/host-badge.js';
 import { prefs } from './prefs.svelte.js';
 import { knownHosts, readHosts } from './hosts.svelte.js';
+import { PRIMARY as SERVING, unheard } from './reach.svelte.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -100,8 +101,21 @@ export function avatarUrl(name, sid = '') {
                           { preferModel: app.modelAvatars });
 }
 
+// What a row says only while its Host can be heard: working, the activity line, a turn's start
+// (timers count from it). docs/design/host-not-answering.md.
+const LIVE_ONLY = {
+  busy: false, latest_state: '', activity: null, activity_summary: '', activity_action: '',
+  activity_phase: '', turn_started_at: null, compacting_trigger: '',
+};
+
+/**
+ * An agent's status row. While the serving Host is not heard (down, or no network), what it last said is not
+ * happening now: the row keeps its name, move and last activity, but nothing working, so no
+ * spinner or timer runs on it. The live row comes back with the Host.
+ */
 export function statusFor(sid) {
-  return app.status[sid] || {};
+  const s = app.status[sid] || {};
+  return unheard(SERVING) ? { ...s, ...LIVE_ONLY } : s;
 }
 
 export function shortActivityText(s) {

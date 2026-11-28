@@ -13,9 +13,18 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 pulldown-cmark = { version = "0.13", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
-# Turn errors' {time} and repeat counts in the app's locale (docs/turn-errors.md):
-# the CLDR formatter and plural rules, never hand-built date words.
-icu_datetime = "~2.3"
-icu_locale_core = "~2.3"
-icu_plurals = "~2.3"
+# The app's language (i18n): the device's languages, and dates, times and
+# numbers from ICU4X's compiled CLDR data (Slint already carries ICU 2.3).
+sys-locale = "0.3"
+icu_locale_core = "2.3"
+icu_calendar = "2.3"
+icu_time = "2.3"
+icu_datetime = "2.3"
+icu_decimal = "2.3"
+# Plural rules for counts in the app's locale (turn errors' repeat count).
+icu_plurals = "2.3"
+
+[build-dependencies]
+# The parser Slint's compiler reads the same .po files with.
+rspolib = "0.1"
 

@@ -1,0 +1,44 @@
+#!/usr/bin/env python3
+"""tools/i18n-export PATH: the desktop's English strings as JSONL, one line per key:
+{"key", "en", "comment", "screen", "placeholders", "plural"}. PATH is a file, or a folder
+that gets en.jsonl. Lines are in source order, so the output is stable.
+`plural` is {"one": ..., "other": ...} for a plural and null otherwise;
+`screen` is the screen or group it belongs to. Exits 1 when a tr call cannot
+be read or has no `// i18n:` note (each is listed; the file is still written)."""
+
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import i18n_catalog as cat  # noqa: E402
+
+
+def main() -> int:
+    if len(sys.argv) != 2:
+        print(__doc__, file=sys.stderr)
+        return 2
+    out = Path(sys.argv[1])
+    if out.is_dir() or sys.argv[1].endswith("/"):
+        out = out / "en.jsonl"
+    messages, problems = cat.scan()
+    for p in problems:
+        print(f"i18n-export: {p}", file=sys.stderr)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", encoding="utf-8") as f:
+        for m in messages:
+            comment = "; ".join(m.comments + ([f"context: {m.context}"] if m.context else []))
+            line = {
+                "key": m.key,
+                "en": m.text,
+                "comment": comment,
+                "screen": m.screen,
+                "placeholders": cat.placeholders(m.text + m.plural),
+                "plural": {"one": m.text, "other": m.plural} if m.plural else None,
+            }
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    print(f"i18n-export: {len(messages)} strings to {out}")
+    return 1 if problems else 0
+
+
+sys.exit(main())

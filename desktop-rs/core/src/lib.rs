@@ -30,6 +30,7 @@ pub mod links;
 pub mod list_ops;
 pub mod live;
 pub mod history_fold;
+pub mod i18n;
 pub mod live_present;
 pub mod markdown_style;
 pub mod media;

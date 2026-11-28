@@ -30,6 +30,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.extend(chats());
     all.extend(experiments());
     all.extend(startup());
+    all.extend(super::language::register());
     all.extend(appearance());
     all.extend(voice());
     all.extend(notifications());

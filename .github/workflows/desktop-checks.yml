@@ -35,7 +35,7 @@ env:
   DEFAULT_CHECKS: >-
     scrollbar transcript scroll scroll-paint scroll-flash scroll-shake scroll-jump row-overlap composer live quiet-chat agent-messages conversation-view audience-flip a2a receipts
     artifacts artifact-open artifact-summary form-events render-spec artifact-keys link-hints keymap switcher panes sidebar banner
-    layout-warning updates settings themes fonts startup refocus avatars message-search host-search select-text mention customize chat-zoom
+    layout-warning updates settings language themes fonts startup refocus avatars message-search host-search select-text mention customize chat-zoom
     send desktop vim processes roster-stale roster-rows stop-receipt composer-buttons stalled-turn pair narrow explorer all-hosts backend-row kept-processes
 
 jobs:
@@ -182,7 +182,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libasound2-dev \
             libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libx11-dev libudev-dev \
-            dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-dejavu-core fonts-liberation2
+            dbus gnome-keyring python3 fonts-jetbrains-mono fonts-noto-core fonts-noto-cjk fonts-dejavu-core fonts-liberation2
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
