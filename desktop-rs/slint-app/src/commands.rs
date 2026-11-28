@@ -1386,6 +1386,9 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
 
 pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
     let previous = std::mem::replace(&mut *app.overlay.borrow_mut(), name.to_owned());
+    if previous == "connection" && !window.get_repair_target().is_empty() {
+        app.engine.borrow_mut().cancel_peer_repair(&window.get_repair_target());
+    }
     if previous == "report" && name != "report" {
         app.engine.borrow_mut().set_artifact_in_view(None);
     }
@@ -1398,6 +1401,9 @@ pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
 pub fn close_overlay(app: &App, window: &AppWindow) {
     let closed = std::mem::take(&mut *app.overlay.borrow_mut());
     window.set_overlay("".into());
+    if closed == "connection" && !window.get_repair_target().is_empty() {
+        app.engine.borrow_mut().cancel_peer_repair(&window.get_repair_target());
+    }
     if closed == "report" {
         app.engine.borrow_mut().set_artifact_in_view(None);
     }

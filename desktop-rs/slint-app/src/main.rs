@@ -512,20 +512,23 @@ impl App {
         let repair_target = window.get_repair_target();
         let peer_dialog = !repair_target.is_empty();
         let dialog = if peer_dialog { engine.repair_state(&repair_target) } else { Some((state.as_str(), engine.error())) };
-        window.set_dialog_error(dialog.map_or("", |d| d.1).into());
+        window.set_dialog_error(match dialog {
+            Some((_, detail)) => detail.into(),
+            // i18n: peer repair dialog when the original saved Host disappeared during editing
+            None => clarp_core::tr!("This Host is no longer available.").into(),
+        });
         window.set_dialog_state(dialog.map_or("", |d| d.0).into());
         let empty = engine.roster().agents().is_empty();
         let overlay = self.overlay.borrow().clone();
         // A Host that answered before has its own page (host_down_view)
         // instead: the connection page is for a desktop without one.
         let host_down_page = engine.host_down(engine.base_url()).is_some();
+        let close_connection = overlay == "connection" && !window.get_choosing_host() &&
+            if peer_dialog { changes.iter().any(|c| matches!(c, Change::PeerRepaired(url) if url == repair_target.as_str())) }
+            else { state == "live" && !empty && changes.contains(&Change::Roster) };
         if overlay.is_empty() && empty && !host_down_page && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
             commands::open_overlay(self, &window, "connection");
             window.invoke_open_connection_page();
-        } else if overlay == "connection" && !window.get_choosing_host() && changes.contains(&Change::Roster)
-            && if peer_dialog { window.get_connection_submitted() && dialog.is_none_or(|d| d.0 == "live") }
-               else { state == "live" && !empty } {
-            commands::close_overlay(self, &window);
         }
         window.set_muted(engine.muted());
         let name = engine.server_name();
@@ -541,6 +544,7 @@ impl App {
         let error = if engine.error().is_empty() || primary_down { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
         window.set_error(SharedString::from(error));
         drop(engine);
+        if close_connection { commands::close_overlay(self, &window); }
         // Live items say when the agent works: the bar names Stop.
         if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_)) || matches!(c, Change::Live(s) if *s == selected)) {
             commands::show_hints(self, &window);
@@ -1116,7 +1120,8 @@ fn main() {
         app.engine.borrow_mut().pair_device(&url, &code);
         pump_now(app);
     }));
-    window.on_forget_host(|| with_window(|app, _| {
+    window.on_forget_host(|| with_window(|app, window| {
+        if !window.get_repair_target().is_empty() || window.get_choosing_host() { return; }
         app.engine.borrow_mut().forget_credential();
         pump_now(app);
     }));

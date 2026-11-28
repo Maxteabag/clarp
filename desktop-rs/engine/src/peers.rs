@@ -451,6 +451,7 @@ impl Engine {
         let Some(index) = self.peers.list.iter().position(|p| p.url == original) else { return };
         let url = normalized_base_url(url);
         let mut candidate = self.peer_engine(&url, "", "");
+        candidate.repair_identity = Some(self.peers.list[index].server_id.clone());
         if url == self.base_url || self.peers.list.iter().any(|p| p.url == url && p.url != original) {
             // i18n: connection dialog, validation error when a replacement address belongs to another saved Host
             candidate.set_error(&clarp_core::tr!("Another Host already uses this address."));
@@ -471,21 +472,28 @@ impl Engine {
         Some((engine.connection_state(), engine.error()))
     }
 
+    pub fn cancel_peer_repair(&mut self, original: &str) {
+        if let Some(peer) = self.peers.list.iter_mut().find(|p| p.url == original) {
+            peer.repair = None;
+        }
+    }
+
     fn pump_peer_repairs(&mut self) {
+        let mut remapped_selection = None;
         for peer in &mut self.peers.list {
             let Some(candidate) = &mut peer.repair else { continue };
             if candidate.pump().is_empty() { continue; }
             self.changes.push(Change::Connection);
             if candidate.connection_state() != "live" { continue; }
-            if candidate.server_id.is_empty() || (!peer.server_id.is_empty() && candidate.server_id != peer.server_id) {
-                // i18n: connection dialog, error when an edited address answers as a different paired Host
-                let error = clarp_core::tr!("This address belongs to a different Host.");
-                candidate.shutdown();
-                candidate.set_connection_state("offline");
-                candidate.set_error(&error);
-                continue;
-            }
             let mut accepted = peer.repair.take().expect("live repair candidate");
+            accepted.repair_identity = None;
+            self.changes.push(Change::PeerRepaired(peer.url.clone()));
+            if peer.server_id != accepted.server_id
+                && let Some((id, session)) = all_hosts::split(&self.selected)
+                && id == peer.server_id
+            {
+                remapped_selection = Some(all_hosts::qualify(&accepted.server_id, session));
+            }
             let new_url = accepted.base_url.clone();
             if peer.url != new_url {
                 clarp_core::hosts::forget(&mut self.settings, &peer.url);
@@ -506,6 +514,7 @@ impl Engine {
             peer.engine = accepted;
             self.changes.extend([Change::Roster, Change::Hosts]);
         }
+        if let Some(session) = remapped_selection { self.select(&session); }
     }
 
     pub fn switch_to_host_content(&mut self, url: &str) {

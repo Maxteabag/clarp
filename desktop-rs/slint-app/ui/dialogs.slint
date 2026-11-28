@@ -183,20 +183,17 @@ export component ConnectionPage inherits Modal {
     // Leaves a saved Host out of the list.
     callback remove(string);
     out property <string> repair-target;
-    out property <bool> submitted;
     out property <bool> choosing-host: root.switch-from != "";
     callback repair(string, string, string, bool);
     callback switch-content(string);
     private property <string> switch-from;
     function submit(pairing: bool) {
-        root.submitted = true;
         if (root.repair-target != "") {
             root.repair(root.repair-target, server.text, pairing ? code.text : token.text, pairing);
         } else if (pairing) { root.pair(server.text, code.text); }
         else { root.connect(server.text, token.text); }
     }
     public function open-for(url: string, action: string) {
-        root.submitted = false;
         root.repair-target = (action == "pair" || action == "address") && url != root.base-url ? url : "";
         root.switch-from = action == "switch" ? url : "";
         server.text = url;
@@ -311,7 +308,7 @@ export component ConnectionPage inherits Modal {
             Rectangle { horizontal-stretch: 1; }
             // i18n: Connection page, button (verb): close the page without connecting
             if root.can-cancel: Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
-            if root.stored && server.text == root.base-url: Button {
+            if root.repair-target == "" && root.switch-from == "" && root.stored && server.text == root.base-url: Button {
                 // i18n: Connection page, button (verb phrase): delete the access token this computer has saved
                 text: @tr("Forget device token");
                 enabled: !root.connecting;

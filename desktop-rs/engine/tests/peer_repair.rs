@@ -24,11 +24,19 @@ fn a_peer_repair_is_committed_only_after_the_expected_host_answers() {
     d.engine.repair_peer(&peer.base, &moved.base, "expired", true);
     d.until("rejected pairing code in peer dialog", |e| e.repair_state(&peer.base).is_some_and(|(_, error)| error.contains("expired")));
     assert!(d.engine.saved_hosts().iter().any(|h| h.url == peer.base));
+    assert_eq!(d.engine.selected_session(), selected);
+    d.engine.repair_peer(&peer.base, &moved.base, "probe-token", false);
+    d.engine.cancel_peer_repair(&peer.base);
+    d.settle(std::time::Duration::from_millis(200));
+    assert!(d.engine.saved_hosts().iter().all(|h| h.url != moved.base));
+
+    moved.control("/__control/server-id", serde_json::json!({"server_id":"renamed-peer", "previous_server_ids":["fake-host-2"]}));
+    d.engine.select("@fake-host-2/nova");
     d.engine.repair_peer(&peer.base, &moved.base, "123456", true);
     d.until("saved peer address replaced", |e| e.saved_hosts().iter().any(|h| h.url == moved.base));
     assert!(!d.engine.saved_hosts().iter().any(|h| h.url == peer.base));
     assert_eq!(d.engine.base_url(), primary.base);
-    assert_eq!(d.engine.selected_session(), selected);
+    assert_eq!(d.engine.selected_session(), "@renamed-peer/nova");
     assert_eq!(d.engine.live_epoch(&primary.base), epoch);
     assert!(primary.requests("POST", "/pairing/exchange").is_empty());
     assert_eq!(moved.requests("POST", "/pairing/exchange").len(), 2);

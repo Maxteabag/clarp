@@ -90,6 +90,8 @@ pub enum Change {
     /// A Host stopped or started answering, or its panel's line changed
     /// (`host_down`).
     HostDown,
+    /// Original peer URL whose submitted repair has committed.
+    PeerRepaired(String),
     ServerInfo,
     /// The saved Hosts changed (`clarp_core::hosts`).
     Hosts,
@@ -391,6 +393,7 @@ pub struct Engine {
     /// This engine reads a peer Host for the primary one: it never picks a
     /// chat by itself and keeps no settings of its own.
     peer: bool,
+    repair_identity: Option<String>,
     /// What the transcript cache files this Host's chats under: its URL,
     /// or for a peer whose server id is known, that id.
     cache_key: String,
@@ -446,6 +449,7 @@ impl Engine {
             cache_key: normalized_base_url(&config.base_url),
             peers: Default::default(),
             peer: false,
+            repair_identity: None,
             base_url: normalized_base_url(&config.base_url),
             token: config.token,
             settings: config.settings,
@@ -1767,6 +1771,13 @@ impl Engine {
             return;
         }
         if tag == "server-info" {
+            if self.repair_identity.as_deref().is_some_and(|expected| !clarp_net::probe::same_host(object, expected)) {
+                self.set_connecting(false);
+                self.set_connection_state("offline");
+                // i18n: connection dialog, error when an edited address answers as a different paired Host
+                self.set_error(&clarp_core::tr!("This address belongs to a different Host."));
+                return;
+            }
             self.outage.server_info_attempt = 0;
             self.keep_working_token();
             self.server_name = object.get("name").and_then(Value::as_str).unwrap_or("Clarp").to_owned();

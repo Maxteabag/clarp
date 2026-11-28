@@ -58,15 +58,18 @@ pub fn answered(body: &[u8], expected_server_id: &str) -> Probe {
     let Ok(Value::Object(info)) = serde_json::from_slice::<Value>(body) else { return Probe::Failed(Attempt::NotThisHost) };
     let text = |key: &str| info.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
     let server_id = text("server_id");
-    if server_id.is_empty() {
-        return Probe::Failed(Attempt::NotThisHost);
-    }
-    let previous = info.get("previous_server_ids").and_then(Value::as_array).is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(expected_server_id)));
-    if !expected_server_id.is_empty() && server_id != expected_server_id && !previous {
+    if !same_host(&info, expected_server_id) {
         return Probe::Failed(Attempt::NotThisHost);
     }
     let contract = info.get("contract").and_then(|c| c.get("host").or(Some(c))).and_then(Value::as_u64).and_then(|c| u32::try_from(c).ok());
     Probe::Answered { server_id, version: text("clarp_version"), contract }
+}
+
+/// A moved Host may retain its original pairing under a previous server ID.
+pub fn same_host(info: &clarp_core::json::Object, expected: &str) -> bool {
+    let Some(id) = info.get("server_id").and_then(Value::as_str).filter(|s| !s.is_empty()) else { return false };
+    expected.is_empty() || id == expected || info.get("previous_server_ids").and_then(Value::as_array)
+        .is_some_and(|ids| ids.iter().any(|id| id.as_str() == Some(expected)))
 }
 
 /// How a request failed, from the error and its causes.
