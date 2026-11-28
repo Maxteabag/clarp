@@ -195,7 +195,7 @@ impl Engine {
         use clarp_core::catalog::{ANTIGRAVITY_ACP, LEGACY_ANTIGRAVITY};
 
         if backend == LEGACY_ANTIGRAVITY {
-            self.set_error("Choose a harness in New Session to start a new agent");
+            self.set_error("In New Session, choose which tool the new agent should use");
             return false;
         }
         if backend == ANTIGRAVITY_ACP && !self.backend_options().iter().any(|choice| choice["id"] == backend) {
