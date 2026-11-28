@@ -530,12 +530,17 @@ pub fn restart_check() {
             send(read(4));
             send(json!({"type":"chat-unread","session":"mike","unread":true,"preview":"quiet failure"}));
             send(read(99));
-            send(json!({"type":"agent-focus","session":"rachel"}));
             true
         })));
         stages.push(("unordered evidence survives", Box::new(|app, _, _| {
             let engine = app.engine.borrow();
-            if !engine.roster().find("rachel").is_some_and(|a| a.focused) { return false; }
+            // Wait for the read after chat-unread to reach the normal receiver.
+            let root = std::path::PathBuf::from(std::env::var_os("CLARP_TRANSCRIPT_CACHE").unwrap());
+            let cache = clarp_core::transcript_cache::TranscriptCache::new(root.join("notification-reads"));
+            let saved = cache.load("host-1", "reads");
+            if !saved.get("boundaries").and_then(Value::as_array).is_some_and(|bs| bs.contains(&json!(["host-1","mike","one",[51,99]]))) {
+                return false;
+            }
             check(engine.roster().find("mike").unwrap().unread, "chat-unread survives a read without comparable order");
             check(journal().iter().all(|r| r["body"] != "quiet failure"), "chat-unread never pops up");
             true

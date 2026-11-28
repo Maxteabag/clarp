@@ -3130,7 +3130,6 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "notification-settings-changed", **document})
             return self.reply(200, document)
         if url.path == "/chat-read":
-            record({"method": "POST", "path": url.path, "body": body})
             session = body.get("session", "")
             agent_id = next((a["agent_id"] for a in agents if a["session"] == session), "")
             receipt = {"session": session, "agent_id": agent_id, "at_ms": int(time.time() * 1000)}
