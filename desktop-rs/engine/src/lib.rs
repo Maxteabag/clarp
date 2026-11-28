@@ -266,6 +266,9 @@ pub struct Engine {
     connected: bool,
     connecting: bool,
     connection_state: String,
+    /// Bumped each time this Host's connection turns live: media that failed
+    /// while it was out of reach is asked for again after it.
+    live_epoch: u64,
     error: String,
     error_is_transport: bool,
     /// The Host out of reach for a moment (`outage.rs`).
@@ -444,6 +447,7 @@ impl Engine {
             connected: false,
             connecting: false,
             connection_state: "offline".into(),
+            live_epoch: 0,
             error: String::new(),
             error_is_transport: false,
             outage: Default::default(),
@@ -1037,7 +1041,21 @@ impl Engine {
         if self.connection_state != value {
             self.connection_state = value.into();
             self.changes.push(Change::Connection);
+            if value == "live" {
+                self.live_epoch += 1;
+                self.media_back_online();
+            }
         }
+    }
+
+    /// How many times the connection to `host` (this engine's or a peer's
+    /// base URL) has turned live; None for a Host this engine does not
+    /// read. A picture that failed under an older epoch is fetched again.
+    pub fn live_epoch(&self, host: &str) -> Option<u64> {
+        if self.base_url == host {
+            return Some(self.live_epoch);
+        }
+        self.peers.list.iter().find(|peer| peer.url == host).map(|peer| peer.engine.live_epoch)
     }
     fn set_error(&mut self, message: &str) {
         self.error_source.clear();

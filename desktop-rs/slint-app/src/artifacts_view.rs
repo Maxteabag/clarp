@@ -530,7 +530,10 @@ fn open_directory(app: &App, artifact: &Value) {
 enum Picture {
     Loading,
     Loaded(slint::Image),
-    Failed,
+    /// It could not be fetched or shown. With the Host's live epoch at the
+    /// time, it is fetched again once that Host has been live since (it
+    /// was out of reach); without one (not an image) never.
+    Failed(Option<u64>),
 }
 
 /// Host endpoint and image path. Different Hosts may use the same asset id.
@@ -545,7 +548,22 @@ thread_local! {
 
 fn settle_pictures(app: &App) {
     let mut engine = app.engine.borrow_mut();
+    // Failed while its Host was out of reach, and that Host has been live
+    // since: forgotten, so its rows ask for it again (once per return).
+    let retried = PICTURES.with(|pictures| {
+        let mut pictures = pictures.borrow_mut();
+        let before = pictures.len();
+        pictures.retain(|key, picture| match picture {
+            Picture::Failed(Some(failed_at)) => engine.live_epoch(&key.0).is_none_or(|now| now == *failed_at),
+            _ => true,
+        });
+        before != pictures.len()
+    });
+    if retried {
+        PICTURES_LANDED.with(|landed| landed.set(landed.get() + 1));
+    }
     PICTURE_REQUESTS.with(|requests| requests.borrow_mut().retain(|key, request| {
+        let epoch = engine.live_epoch(&key.0);
         match engine.take_transcript_image(request) {
             TranscriptImageReply::Pending => return true,
             TranscriptImageReply::Abandoned => {
@@ -553,10 +571,10 @@ fn settle_pictures(app: &App) {
                 PICTURES_LANDED.with(|landed| landed.set(landed.get() + 1));
             }
             TranscriptImageReply::Received(Ok(bytes)) if picture_is_small(&bytes) => {
-                store_picture(key.clone(), picture_pixels(&bytes));
+                store_picture(key.clone(), picture_pixels(&bytes), None);
             }
             TranscriptImageReply::Received(Ok(bytes)) => decode_picture_later(key.clone(), bytes),
-            TranscriptImageReply::Received(Err(error)) => store_picture(key.clone(), Err(error)),
+            TranscriptImageReply::Received(Err(error)) => store_picture(key.clone(), Err(error), epoch),
         }
         false
     }));
@@ -620,18 +638,20 @@ fn picture_pixels(bytes: &[u8]) -> Result<slint::SharedPixelBuffer<slint::Rgba8P
 
 /// A picture decoded off the UI thread: stored, and the chats drawn again.
 fn picture_landed(key: PictureKey, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
-    store_picture(key, pixels);
+    store_picture(key, pixels, None);
     if let Some(app) = crate::app() {
         app.refresh(&[Change::Updates]);
     }
 }
 
-fn store_picture(key: PictureKey, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
+/// `epoch`: the Host's live epoch when a fetch failed (None when the bytes
+/// arrived but are no picture).
+fn store_picture(key: PictureKey, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>, epoch: Option<u64>) {
     let picture = match pixels {
         Ok(pixels) => Picture::Loaded(slint::Image::from_rgba8(pixels)),
         Err(error) => {
             eprintln!("clarp-slint: could not show {} at {}: {error}", key.1, key.0);
-            Picture::Failed
+            Picture::Failed(epoch)
         }
     };
     PICTURES.with(|p| p.borrow_mut().insert(key, picture));
@@ -696,7 +716,7 @@ fn message_image(alt: &str, reference: &str, session: &str, host: Option<&str>) 
             image.image = picture;
             image.loaded = true;
         }
-        Some(Picture::Failed) => image.failed = true,
+        Some(Picture::Failed(_)) => image.failed = true,
         Some(Picture::Loading) => {}
         None => {
             if let Some(app) = crate::app()

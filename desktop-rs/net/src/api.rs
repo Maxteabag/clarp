@@ -21,6 +21,16 @@ use clarp_core::tr;
 mod media_range;
 pub use media_range::MediaRange;
 
+/// How long a request waits for its Host to accept the connection. A Host
+/// that is off, asleep or out of reach fails within this instead of the
+/// operating system's two minutes, so its chats say so soon.
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// How long a media download may go without receiving anything (images,
+/// avatars). A large image keeps going while bytes arrive; a stalled one
+/// fails instead of leaving its picture loading for good.
+pub const MEDIA_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum ApiReply {
     Json { tag: String, object: Object },
@@ -84,6 +94,7 @@ impl ApiClient {
     pub fn new(runtime: Handle, sink: impl Fn(ApiReply) + Send + Sync + 'static) -> Self {
         let api = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
             .redirect(redirect::Policy::custom(|attempt| {
                 let safe = attempt
                     .previous()
@@ -103,6 +114,8 @@ impl ApiClient {
         // redirect may never leave the origin, even an "upgrade" to https.
         let media = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            .connect_timeout(CONNECT_TIMEOUT)
+            .read_timeout(MEDIA_READ_TIMEOUT)
             .redirect(redirect::Policy::custom(|attempt| {
                 let first = attempt.previous().first().cloned();
                 match first {
