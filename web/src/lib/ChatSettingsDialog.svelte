@@ -10,7 +10,8 @@
   import { coordination, setCoordinationVisibility } from '../stores/coordination.svelte.js';
   import { live } from '../stores/live.svelte.js';
   import LanguageSetting from './LanguageSetting.svelte';
-  import { COPY, sinceTime } from '@core/host-reach.js';
+  import { sinceTime } from '@core/host-reach.js';
+  import { i18n, t } from '../stores/i18n.svelte.js';
   import { isDown, openPanel, reach } from '../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
@@ -59,7 +60,7 @@
             {#if hostsState.allHosts && isDown(h.id)}
               <!-- Its line opens the full Host-down panel (HostDownDialog). -->
               <button type="button" class="hosts-state hosts-down" onclick={() => { openPanel(h.id); open = false; }}>
-                {COPY.row(reach.hosts[h.id]?.label || h.name || h.url, sinceTime(reach.hosts[h.id]?.downSince || reach.now, reach.now))}
+                {t('host_down.row', { host: reach.hosts[h.id]?.label || h.name || h.url, time: sinceTime(reach.hosts[h.id]?.downSince || reach.now, reach.now, t, i18n.locale) })}
               </button>
             {:else}
               <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}{#if h.via === 'host'} · via this Host{/if}</span>

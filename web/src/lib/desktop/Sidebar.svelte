@@ -14,7 +14,8 @@
   import { movedLine } from '@core/agent-moved.js';
   import { resolveAvatarUrl } from '@core/avatar.js';
   import { mergeChats, PRIMARY } from '@core/all-hosts.js';
-  import { COPY, sinceTime } from '@core/host-reach.js';
+  import { sinceTime } from '@core/host-reach.js';
+  import { i18n, t } from '../../stores/i18n.svelte.js';
   import { hostsState, openOnHost, readHosts } from '../../stores/hosts.svelte.js';
   import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../../stores/reach.svelte.js';
   import HostBadge from '../HostBadge.svelte';
@@ -73,7 +74,7 @@
   // One line per Host that does not answer, opening its full panel (HostDownDialog). The serving
   // Host's own line only while other Hosts are listed: alone, its chat shows the panel itself.
   let down = $derived(downHosts([...(others.length ? [SERVING] : []), ...others.map(h => h.id)])
-    .map(h => ({ id: h.id, text: COPY.row(h.label, sinceTime(h.since, reach.now)) })));
+    .map(h => ({ id: h.id, text: t('host_down.row', { host: h.label, time: sinceTime(h.since, reach.now, t, i18n.locale) }) })));
 
   function open(chat) {
     if (chat.remote) openOnHost(chat.remote, chat.sid);

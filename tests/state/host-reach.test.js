@@ -2,8 +2,9 @@
 // the copy, the private-data-free diagnostics, and that one Host's state never touches another's.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
 import {
-  BACKOFF_MS, COPY, addressKind, answerFailure, attemptLabel, backoffDelay, blankReach, classify,
+  BACKOFF_MS, EN, english, addressKind, answerFailure, attemptLabel, backoffDelay, blankReach, classify,
   diagnosticsText, fetchFailure, peerAttempt, reachFail, reachOk, reasonSentence, sha256Hex,
   sinceTime, statusLine,
 } from '../../static/lib/host-reach.js';
@@ -96,13 +97,27 @@ describe('classifier', () => {
 
 describe('copy', () => {
   it('uses the spec\'s exact strings', () => {
-    expect(COPY.title('Studio')).toBe('Studio isn\'t answering');
-    expect(COPY.row('Studio', '09:14')).toBe('Studio isn\'t answering · since 09:14');
-    expect(COPY.readOnly('Studio')).toBe('Showing saved messages. You can send again when Studio is back.');
-    expect(COPY.deviceOffline).toBe('This device is offline');
+    expect(english('host_down.title', { host: 'Studio' })).toBe('Studio isn\'t answering');
+    expect(english('host_down.row', { host: 'Studio', time: '09:14' })).toBe('Studio isn\'t answering · since 09:14');
+    expect(english('host_down.read_only', { host: 'Studio' })).toBe('Showing saved messages. You can send again when Studio is back.');
+    expect(english('host_down.device_offline')).toBe('This device is offline');
     expect(reasonSentence('wrong_address', 'Studio')).toBe('Nothing at this address is Studio. The address may have changed.');
     expect(reasonSentence('server_stopped', 'Studio')).toBe('The computer is on, but Clarp isn\'t running on it.');
     expect(reasonSentence('nonsense', 'Studio')).toBe('Studio isn\'t responding right now.');
+    expect(reasonSentence('toString', 'Studio')).toBe('Studio isn\'t responding right now.');
+  });
+
+  it('keeps the web catalog\'s English the same as the rules\'', () => {
+    const en = JSON.parse(fs.readFileSync(new URL('../../web/src/lib/i18n/en.json', import.meta.url), 'utf8'));
+    for (const [key, text] of Object.entries(EN)) expect(en[key]).toBe(text);
+  });
+
+  it('takes a translator', () => {
+    const tr = (key, p) => `<${key}${p ? ':' + Object.values(p).join(',') : ''}>`;
+    expect(reasonSentence('host_asleep', 'Studio', tr)).toBe('<host_down.reason.host_asleep:Studio>');
+    const now = new Date(2026, 10, 28, 10, 0).getTime();
+    expect(sinceTime(new Date(2026, 10, 27, 21, 3).getTime(), now, tr)).toBe('<host_down.yesterday:21:03>');
+    expect(sinceTime(new Date(2026, 9, 3, 21, 3).getTime(), now, tr, 'nb')).toMatch(/^3 okt\.? 21:03$/);
   });
 
   it('formats since as today, yesterday, or a date, on a 24-hour clock', () => {

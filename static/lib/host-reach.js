@@ -11,36 +11,62 @@
 
 // ---- copy (exact strings, shared spec) -------------------------------------------------------
 
-export const COPY = Object.freeze({
-  title: host => `${host} isn't answering`,
-  since: time => `Since ${time}`,
-  reconnecting: 'Reconnecting automatically…',
-  tryingIn: (n, unit) => `Trying again in ${n} ${unit}`,
-  backOnline: 'Back online',
-  readOnly: host => `Showing saved messages. You can send again when ${host} is back.`,
-  row: (host, time) => `${host} isn't answering · since ${time}`,
-  deviceOffline: 'This device is offline',
-  tryAgain: 'Try again',
-  checkTailscale: 'Check Tailscale',
-  pairAgain: 'Pair again',
-  editAddress: 'Edit address',
-  switchHost: 'Switch Host',
-  copyDiagnostics: 'Copy diagnostics',
-  copied: 'Diagnostics copied',
+/**
+ * The English of every string the panel shows, by its key in the web app's catalogs
+ * (web/src/lib/i18n/en.json carries the same; a test keeps them equal). The views pass their
+ * `t` as `tr`; without one these English strings are used (the diagnostics, the tests).
+ */
+export const EN = Object.freeze({
+  'host_down.title': '{host} isn\'t answering',
+  'host_down.since': 'Since {time}',
+  'host_down.yesterday': 'yesterday {time}',
+  'host_down.reconnecting': 'Reconnecting automatically…',
+  'host_down.trying_in_s': 'Trying again in {n} s',
+  'host_down.trying_in_min': 'Trying again in {n} min',
+  'host_down.back_online': 'Back online',
+  'host_down.read_only': 'Showing saved messages. You can send again when {host} is back.',
+  'host_down.row': '{host} isn\'t answering · since {time}',
+  'host_down.device_offline': 'This device is offline',
+  'host_down.try_again': 'Try again',
+  'host_down.check_tailscale': 'Check Tailscale',
+  'host_down.pair_again': 'Pair again',
+  'host_down.edit_address': 'Edit address',
+  'host_down.switch_host': 'Switch Host',
+  'host_down.copy_diagnostics': 'Copy diagnostics',
+  'host_down.copied': 'Diagnostics copied',
+  'host_down.close': 'Close',
+  'host_down.token_or_link': 'Token or ?token= link',
+  'host_down.token': 'Token',
+  'host_down.token_needed': 'Paste the token or the link clarp-admin url prints.',
+  'host_down.reason.device_offline': 'This device is offline.',
+  'host_down.reason.auth_expired': 'This device is no longer signed in to {host}.',
+  'host_down.reason.wrong_address': 'Nothing at this address is {host}. The address may have changed.',
+  'host_down.reason.server_stopped': 'The computer is on, but Clarp isn\'t running on it.',
+  'host_down.reason.tailscale_off': 'Tailscale doesn\'t seem to be connected on this device.',
+  'host_down.reason.host_asleep': 'The computer seems to be off or asleep.',
+  'host_down.reason.unknown': '{host} isn\'t responding right now.',
 });
 
-export const REASONS = Object.freeze({
-  device_offline: { sentence: () => 'This device is offline.', action: '' },
-  auth_expired: { sentence: h => `This device is no longer signed in to ${h}.`, action: 'pair' },
-  wrong_address: { sentence: h => `Nothing at this address is ${h}. The address may have changed.`, action: 'edit' },
-  server_stopped: { sentence: () => 'The computer is on, but Clarp isn\'t running on it.', action: '' },
-  tailscale_off: { sentence: () => 'Tailscale doesn\'t seem to be connected on this device.', action: 'tailscale' },
-  host_asleep: { sentence: () => 'The computer seems to be off or asleep.', action: '' },
-  unknown: { sentence: h => `${h} isn't responding right now.`, action: '' },
+/** The English translator: `{name}` placeholders filled from params. */
+export function english(key, params) {
+  const msg = EN[key] ?? key;
+  if (!params) return msg;
+  return msg.replace(/\{(\w+)\}/g, (whole, name) => (params[name] == null ? whole : String(params[name])));
+}
+
+/** What each reason offers besides Try again. */
+export const REASON_ACTIONS = Object.freeze({
+  device_offline: '', auth_expired: 'pair', wrong_address: 'edit', server_stopped: '',
+  tailscale_off: 'tailscale', host_asleep: '', unknown: '',
 });
 
-export function reasonSentence(id, host) {
-  return (REASONS[id] || REASONS.unknown).sentence(host);
+export function reasonAction(id) {
+  return REASON_ACTIONS[id] ?? '';
+}
+
+export function reasonSentence(id, host, tr = english) {
+  const key = Object.hasOwn(REASON_ACTIONS, id) ? id : 'unknown';
+  return tr(`host_down.reason.${key}`, { host });
 }
 
 /** Which picture goes with a reason: calm, never an alarm. */
@@ -249,27 +275,34 @@ export function classify(attempt, { deviceOnline = true, address = 'unknown', vi
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const pad = n => String(n).padStart(2, '0');
 
-/** `HH:mm` today, `yesterday HH:mm`, else `d MMM HH:mm`; 24-hour clock, local time. */
-export function sinceTime(ts, now = Date.now()) {
+/**
+ * `HH:mm` today, `yesterday HH:mm`, else `d MMM HH:mm`; 24-hour clock, local time. In another
+ * language "yesterday" comes from `tr` and the month's short name from Intl.
+ */
+export function sinceTime(ts, now = Date.now(), tr = english, locale = 'en') {
   const d = new Date(ts);
   const n = new Date(now);
   const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
   const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((day(n) - day(d)) / 86400000);
   if (days <= 0) return hm;
-  if (days === 1) return `yesterday ${hm}`;
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${hm}`;
+  if (days === 1) return tr('host_down.yesterday', { time: hm });
+  let month = MONTHS[d.getMonth()];
+  if (locale && locale !== 'en') {
+    try { month = new Intl.DateTimeFormat(locale, { month: 'short' }).format(d); } catch (_) {}
+  }
+  return `${d.getDate()} ${month} ${hm}`;
 }
 
 /** The quiet status line under the panel. */
-export function statusLine(rec, now = Date.now()) {
+export function statusLine(rec, now = Date.now(), tr = english) {
   if (!rec) return '';
-  if (!rec.down && rec.backUntil > now) return COPY.backOnline;
+  if (!rec.down && rec.backUntil > now) return tr('host_down.back_online');
   if (!rec.down) return '';
-  if (rec.inFlight || !rec.nextAt) return COPY.reconnecting;
+  if (rec.inFlight || !rec.nextAt) return tr('host_down.reconnecting');
   const s = Math.max(1, Math.ceil((rec.nextAt - now) / 1000));
-  if (s < 60) return COPY.tryingIn(s, 's');
-  return COPY.tryingIn(Math.round(s / 60), 'min');
+  if (s < 60) return tr('host_down.trying_in_s', { n: s });
+  return tr('host_down.trying_in_min', { n: Math.round(s / 60) });
 }
 
 function duration(ms) {

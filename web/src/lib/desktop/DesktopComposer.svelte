@@ -9,7 +9,7 @@
   import { send, sendText } from '../../stores/send.svelte.js';
 
   import { setInsert } from '../../stores/input.svelte.js';
-  import { COPY } from '@core/host-reach.js';
+  import { t } from '../../stores/i18n.svelte.js';
   import { PRIMARY, isDown, reach } from '../../stores/reach.svelte.js';
 
   let value = $state('');
@@ -20,7 +20,7 @@
   // The serving Host does not answer, or this device has no network: the chat is its saved
   // messages, the draft stays, and sending waits (docs/design/host-not-answering.md).
   let readOnly = $derived(isDown(PRIMARY) || !reach.deviceOnline);
-  let readOnlyNote = $derived(COPY.readOnly(reach.hosts[PRIMARY]?.label || 'the Host'));
+  let readOnlyNote = $derived(t('host_down.read_only', { host: reach.hosts[PRIMARY]?.label || location.host }));
   let inputEl = $state(null);
 
   // Registered rather than bound, because the click-anywhere-refocuses

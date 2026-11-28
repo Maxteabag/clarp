@@ -5,7 +5,7 @@
   // otherwise the compact panel at the top of one of its chats. Never a raw error: that goes
   // only into the diagnostics text.
   import {
-    COPY, diagnosticsText, reasonIcon, reasonSentence, REASONS, sinceTime, statusLine,
+    diagnosticsText, reasonAction, reasonIcon, reasonSentence, sinceTime, statusLine,
   } from '@core/host-reach.js';
   import {
     PRIMARY, deviceNetworkKind, othersAnswering, reach, retry,
@@ -13,13 +13,14 @@
   import { hostsState, knownHosts, updateHost } from '../stores/hosts.svelte.js';
   import { app, flash } from '../stores/app.svelte.js';
   import { APP_VERSION, setAuthToken } from './net.js';
+  import { i18n, t } from '../stores/i18n.svelte.js';
 
   let { id, full = false } = $props();
 
   let rec = $derived(reach.hosts[id] || null);
   let label = $derived(rec?.label || 'This Host');
   let back = $derived(!!rec && !rec.down && rec.backUntil > reach.now);
-  let action = $derived(rec ? (REASONS[rec.reason] || REASONS.unknown).action : '');
+  let action = $derived(rec ? reasonAction(rec.reason) : '');
   let icon = $derived(back ? 'cloud' : reasonIcon(rec?.reason));
   // Pair again and Edit address need something this device can change: its own token for the
   // serving Host, the saved token and address of a Host added here. A peer's are its Host's.
@@ -45,7 +46,7 @@
   async function savePair() {
     formError = '';
     if (id === PRIMARY) {
-      if (!setAuthToken(value)) { formError = 'Paste the token or the link clarp-admin url prints.'; return; }
+      if (!setAuthToken(value)) { formError = t('host_down.token_needed'); return; }
     } else {
       const err = await updateHost(id, { token: value });
       if (err) { formError = err; return; }
@@ -88,7 +89,7 @@
       // Only in a secure context (https, localhost); a Host on http://100.x is not one.
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(text);
-        flash(COPY.copied);
+        flash(t('host_down.copied'));
         return;
       }
     } catch (_) {}
@@ -102,7 +103,7 @@
     let ok = false;
     try { ok = document.execCommand('copy'); } catch (_) {}
     area.remove();
-    if (ok) { flash(COPY.copied); return; }
+    if (ok) { flash(t('host_down.copied')); return; }
     // Nothing could copy: show the text, selected, for the user's own copy.
     fallbackText = text;
   }
@@ -114,7 +115,7 @@
 
 {#if rec && (rec.down || back)}
   <section class="host-down" class:full class:back role="status" aria-live="polite"
-           aria-label={back ? COPY.backOnline : COPY.title(label)}>
+           aria-label={back ? t('host_down.back_online') : t('host_down.title', { host: label })}>
     <span class="hd-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" width={full ? 40 : 22} height={full ? 40 : 22} fill="none"
            stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -139,39 +140,39 @@
     </span>
     <div class="hd-body">
       {#if back}
-        <p class="hd-status-line"><span class="hd-dot ok"></span>{COPY.backOnline}</p>
+        <p class="hd-status-line"><span class="hd-dot ok"></span>{t('host_down.back_online')}</p>
       {:else}
-        <h2 class="hd-title">{COPY.title(label)}</h2>
-        <p class="hd-reason">{reasonSentence(rec.reason, label)}</p>
+        <h2 class="hd-title">{t('host_down.title', { host: label })}</h2>
+        <p class="hd-reason">{reasonSentence(rec.reason, label, t)}</p>
         <p class="hd-meta">
-          {#if rec.downSince}<span>{COPY.since(sinceTime(rec.downSince, reach.now))}</span><span class="hd-sep">·</span>{/if}
-          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now)}</span>
+          {#if rec.downSince}<span>{t('host_down.since', { time: sinceTime(rec.downSince, reach.now, t, i18n.locale) })}</span><span class="hd-sep">·</span>{/if}
+          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t)}</span>
         </p>
         <div class="hd-actions">
-          <button type="button" class="hd-btn primary" onclick={() => retry(id)}>{COPY.tryAgain}</button>
+          <button type="button" class="hd-btn primary" onclick={() => retry(id)}>{t('host_down.try_again')}</button>
           {#if action === 'pair' && canPair}
-            <button type="button" class="hd-btn" aria-expanded={form === 'pair'} onclick={() => openForm('pair')}>{COPY.pairAgain}</button>
+            <button type="button" class="hd-btn" aria-expanded={form === 'pair'} onclick={() => openForm('pair')}>{t('host_down.pair_again')}</button>
           {:else if action === 'edit' && canEdit}
-            <button type="button" class="hd-btn" aria-expanded={form === 'edit'} onclick={() => openForm('edit')}>{COPY.editAddress}</button>
+            <button type="button" class="hd-btn" aria-expanded={form === 'edit'} onclick={() => openForm('edit')}>{t('host_down.edit_address')}</button>
           {:else if action === 'tailscale'}
-            <button type="button" class="hd-btn" onclick={checkTailscale}>{COPY.checkTailscale}</button>
+            <button type="button" class="hd-btn" onclick={checkTailscale}>{t('host_down.check_tailscale')}</button>
           {/if}
           {#if switchTo.length}
             <button type="button" class="hd-btn" aria-expanded={form === 'switch'}
-                    onclick={() => switchTo.length === 1 ? switchHost(switchTo[0]) : openForm('switch')}>{COPY.switchHost}</button>
+                    onclick={() => switchTo.length === 1 ? switchHost(switchTo[0]) : openForm('switch')}>{t('host_down.switch_host')}</button>
           {/if}
-          <button type="button" class="hd-btn" onclick={copyDiagnostics}>{COPY.copyDiagnostics}</button>
+          <button type="button" class="hd-btn" onclick={copyDiagnostics}>{t('host_down.copy_diagnostics')}</button>
         </div>
         {#if form === 'pair'}
           <form class="hd-form" onsubmit={e => { e.preventDefault(); savePair(); }}>
-            <input type="password" autocomplete="off" bind:value aria-label={COPY.pairAgain}
-                   placeholder={id === PRIMARY ? 'Token or ?token= link' : 'Token'} />
-            <button type="submit" class="hd-btn" disabled={!value.trim()}>{COPY.pairAgain}</button>
+            <input type="password" autocomplete="off" bind:value aria-label={t('host_down.pair_again')}
+                   placeholder={id === PRIMARY ? t('host_down.token_or_link') : t('host_down.token')} />
+            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.pair_again')}</button>
           </form>
         {:else if form === 'edit'}
           <form class="hd-form" onsubmit={e => { e.preventDefault(); saveAddress(); }}>
-            <input type="url" autocomplete="off" bind:value aria-label={COPY.editAddress} />
-            <button type="submit" class="hd-btn" disabled={!value.trim()}>{COPY.editAddress}</button>
+            <input type="url" autocomplete="off" bind:value aria-label={t('host_down.edit_address')} />
+            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.edit_address')}</button>
           </form>
         {:else if form === 'switch'}
           <div class="hd-switch">
