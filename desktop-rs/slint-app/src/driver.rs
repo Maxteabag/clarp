@@ -13,6 +13,7 @@ use crate::headless;
 // ---- launch dialogs
 #[path = "launch_checks.rs"]
 mod launch_checks;
+#[path = "host_down_checks.rs"]
 mod host_down_checks;
 // ---- profile and overview
 #[path = "profile_checks.rs"]

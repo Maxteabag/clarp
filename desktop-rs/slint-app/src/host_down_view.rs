@@ -177,7 +177,7 @@ fn show_copied(window: &AppWindow) {
     });
 }
 
-fn open_connection(app: &App, window: &AppWindow) {
+fn open_connection(app: &std::rc::Rc<App>, window: &AppWindow) {
     crate::commands::run(app, window, "connection");
 }
 
