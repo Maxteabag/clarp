@@ -149,9 +149,22 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
         assert_eq!(legacy["provider"], "elevenlabs");
         assert_eq!(legacy["available"], json!(["elevenlabs"]));
         assert!(legacy.get("elevenlabs").is_none());
-        let device = End::of_a_phone(socket_at(&host, &phone, "/oracle/v2").unwrap());
+        let path = if model == MINI {
+            "/oracle/v2?transcription_language=no"
+        } else {
+            "/oracle/v2"
+        };
+        let device = End::of_a_phone(socket_at(&host, &phone, path).unwrap());
         let (mint, provider) = calls.recv_timeout(Duration::from_secs(10)).unwrap();
         assert_eq!(mint["session"]["model"], model);
+        assert_eq!(
+            mint["session"]["audio"]["input"]["transcription"],
+            if model == MINI {
+                json!({"language":"no"})
+            } else {
+                json!({})
+            }
+        );
         assert_eq!(mint["session"]["audio"]["input"]["format"]["rate"], 24000);
         assert_eq!(
             mint["session"]["audio"]["input"]["turn_detection"]["create_response"],

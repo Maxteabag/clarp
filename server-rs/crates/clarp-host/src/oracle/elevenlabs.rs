@@ -21,6 +21,7 @@ pub(super) async fn connect(
     model: &str,
     voice: &str,
     direct: bool,
+    norwegian_transcription: bool,
 ) -> Option<Voice> {
     let base = if base.is_empty() { API } else { base };
     let mint = format!("{base}{ROUTE}/client_secrets");
@@ -32,7 +33,7 @@ pub(super) async fn connect(
             "audio": {
                 "input": {
                     "format": {"type": "audio/pcm", "rate": 24000},
-                    "transcription": {},
+                    "transcription": if norwegian_transcription { json!({"language": "no"}) } else { json!({}) },
                     "turn_detection": {
                         "type": "semantic_vad", "eagerness": "medium",
                         "create_response": true, "interrupt_response": false,

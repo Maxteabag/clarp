@@ -43,7 +43,12 @@ async fn connect(address: &str) -> Option<Voice> {
         .map(|v| v.0)
 }
 impl Upstream {
-    pub async fn open(app: &App, key: &str, direct: bool) -> Option<Self> {
+    pub async fn open(
+        app: &App,
+        key: &str,
+        direct: bool,
+        norwegian_transcription: bool,
+    ) -> Option<Self> {
         let choice = super::voice_told(app, &app.fleet.directory());
         if choice["provider"] == "elevenlabs" {
             let secret = app.ears.key("elevenlabs")?;
@@ -55,6 +60,7 @@ impl Upstream {
                 model,
                 voice,
                 direct,
+                norwegian_transcription,
             )
             .await?;
             return Some(Self {

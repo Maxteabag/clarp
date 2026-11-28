@@ -176,6 +176,7 @@ impl Drop for Claimed {
 
 /// What a phone asked its call with, as the Host takes it.
 struct Asked {
+    norwegian_transcription: bool,
     strategy: Strategy,
     /// The Oracle's contact for this call, where there is one.
     contact: String,
@@ -308,7 +309,9 @@ impl Asked {
         if !handoff_id.is_empty() && !phone::handoff_id(handoff_id) {
             return Err("Invalid handoff_id".to_string());
         }
+        let norwegian_transcription = named(query, "transcription_language").as_slice() == ["no"];
         Ok(Self {
+            norwegian_transcription,
             strategy,
             contact,
             thread_id: named(query, "thread_id")
@@ -396,9 +399,14 @@ async fn reached(
         Ok(Err(why)) => return Err((StatusCode::BAD_REQUEST, why)),
         Err(_) => return Err(UNAVAILABLE),
     };
-    let voice = Upstream::open(app, key, asked.strategy == Strategy::DirectContact)
-        .await
-        .ok_or(UNAVAILABLE)?;
+    let voice = Upstream::open(
+        app,
+        key,
+        asked.strategy == Strategy::DirectContact,
+        asked.norwegian_transcription,
+    )
+    .await
+    .ok_or(UNAVAILABLE)?;
     Ok((thread_id, voice))
 }
 

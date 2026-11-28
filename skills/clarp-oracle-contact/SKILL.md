@@ -44,3 +44,5 @@ Realtime v1 Mini or v1 Max. The user selects the model in Oracle settings on a
 supporting app. The Host offers it when its owner enables `eleven_realtime_enabled`
 under `[oracle]` and the existing ElevenLabs key is present. The choice applies
 to the next call and uses the existing Oracle contact and routing.
+
+When the Host advertises `oracle_eleven_norwegian_transcription`, an app with an explicit Norwegian spoken-language selection can add `transcription_language=no` to that call’s `/oracle/v2` socket URL. Omit it for automatic language detection.
