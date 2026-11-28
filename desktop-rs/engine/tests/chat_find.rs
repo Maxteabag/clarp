@@ -33,3 +33,22 @@ fn contract_without_search_positions_pages_hits() {
 fn missing_feature_map_pages_hits() {
     legacy_find("find-legacy-map", json!({"host": 220}));
 }
+
+#[test]
+fn advertised_positions_use_one_request() {
+    let host = Host::start("find-explicit-positions");
+    host.control("/__control/message-search", json!({"positions": true, "page": 1,
+        "contract": {"host": 220, "features": {"message_search": 196, "search_positions": 218}}}));
+    host.control("/__control/turns", json!({"session": "rachel", "turns": [
+        {"id": "older", "role": "user", "text": "heron"},
+        {"id": "newer", "role": "assistant", "text": "heron"}
+    ]}));
+    let mut d = Driver::new(&host.base);
+    d.connect();
+    d.engine.find_in_chat("rachel", "heron");
+    d.until("positions answered", |e| e.chat_find_results("rachel", "heron").answered);
+    let requests = host.requests("GET", "/search");
+    assert_eq!(requests.len(), 1, "{requests:?}");
+    assert_eq!(requests[0]["query"]["positions"], "1");
+    assert_eq!(d.engine.chat_find_results("rachel", "heron").ids, ["older", "newer"]);
+}
