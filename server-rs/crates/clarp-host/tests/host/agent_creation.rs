@@ -369,6 +369,13 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
     let (owner_id, mixed_id) = {
         let host = place.start();
+        assert_eq!(host.get("/peers"), json!([]));
+        assert!(
+            host.get("/agents/snapshot")["agents"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
         let lead = host.post(
             "/agents",
             json!({"name":"lead","cwd":product,"backend":"scripted"}),
@@ -400,6 +407,12 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         "helper-test",
         &["--config", place.root.to_str().unwrap()],
         &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+    );
+    assert_eq!(host.get("/peers"), json!([]));
+    eprintln!(
+        "Disposable Host listening on {} with data under {} and no peers",
+        host.address,
+        place.root.display()
     );
     for (name, parent, cwd, expected) in [
         ("product-child", "mixed", &product, "codex"),
