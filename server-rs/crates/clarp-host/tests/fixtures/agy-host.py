@@ -65,6 +65,7 @@ def prompt(mid, sid, words):
                          "effort": selected("thought_level"), "home": str(Path.home()),
                          "login_linked": (Path.home() / ".gemini/oauth_creds.json").is_symlink()})
         if "broken" in packet["utterance"]:
+            print("workspace discovery warning", file=sys.stderr, flush=True)
             return peer.error(mid, -32603, "out of quota")
         return finish(mid, sid, json.dumps({"kind": "agent_message", "target_session": "anna",
                                            "confidence": 0.95, "addressing": True}))
