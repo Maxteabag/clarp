@@ -300,7 +300,7 @@ impl Failure {
     /// action. `copy_details` has no place in a popup.
     pub fn turn_error(&self, message_id: &str, fallback: &str) -> TurnError {
         let mut params = Object::new();
-        let template = crate::turn_error_text::ENGLISH.iter().find(|(k, _)| *k == self.body_loc_key).map_or("", |(_, t)| t);
+        let template = crate::turn_error_text::english(&self.body_loc_key).unwrap_or_default();
         let mut names: Vec<&str> = Vec::new();
         for part in template.split('{').skip(1) {
             if let Some((name, _)) = part.split_once('}')

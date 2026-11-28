@@ -30,7 +30,12 @@ pub const REPEAT_COUNT: &str = "error.repeat_count";
 /// The catalog's text for `key` in the language in use, its `{name}`
 /// placeholders still in it (`tr!` fills only `{}`, `{0}` and `{n}`); `None`
 /// for a key the catalog does not have. Untranslated, it is the English.
-fn template(key: &str) -> Option<String> {
+fn template(language: &str, key: &str) -> Option<String> {
+    macro_rules! tr {
+        ($context:literal => $text:literal) => {
+            i18n::translate_in(language, $context, $text, "", None, &[])
+        };
+    }
     Some(match key {
         // i18n: chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated
         "error.usage_limit" => tr!("error.usage_limit" => "Your {backend} account is out of usage. Try again later, or switch model."),
@@ -116,13 +121,12 @@ pub fn tr(language: &str, key: &str) -> Option<String> {
     if !i18n::translated(language, key) {
         return None;
     }
-    template(key)
+    template(language, key)
 }
 
-/// The English source for `key`, when the language in use is English (the
-/// catalog is read in the language in use); `None` otherwise.
+/// The English template for `key`, with placeholders in source order.
 pub fn english(key: &str) -> Option<String> {
-    if i18n::current() == "en" { template(key) } else { None }
+    template("en", key)
 }
 
 /// The app's language: the one in use (`i18n::current()`, the device's or
@@ -188,14 +192,13 @@ pub fn say(language: &str, key: &str, params: &Object, now_ms: i64) -> Option<St
 /// A string the Host sends no words for (a note, a label): the catalog's in
 /// the language in use, its English source where it has no translation.
 pub fn say_any(language: &str, key: &str, params: &Object, now_ms: i64) -> Option<String> {
-    template(key).and_then(|template| fill(&template, params, language, now_ms))
+    template(language, key).and_then(|template| fill(&template, params, language, now_ms))
 }
 
 /// A string without parameters the Host sends no words for: the catalog's
 /// in the language in use, its English source where it has no translation.
 pub fn word(language: &str, key: &str) -> String {
-    let _ = language;
-    template(key).unwrap_or_else(|| key.to_owned())
+    template(language, key).unwrap_or_else(|| key.to_owned())
 }
 
 /// The Host's own words for a fallback: Norwegian when the app speaks it,
