@@ -74,7 +74,7 @@
       <button type="button" class="bv-btn" aria-label={STRINGS.close} title={STRINGS.close}
               onclick={closeBlockViewer}>{@html ICONS.close}</button>
     </div>
-    <div class="bv-body" class:bv-table={item.kind === 'table'}>
+    <div class="bv-body" class:bv-table={item.kind === 'table'} class:bv-code={item.kind === 'code'}>
       {#if item.kind === 'code'}
         {#key item}
           {#if item.html}
@@ -162,6 +162,8 @@
     width: auto;
   }
   .bv-body pre code { background: transparent; padding: 0; font: inherit; }
+  /* The same dark ground as the code in the chat (the highlight theme is dark). */
+  .bv-code { background: #14141d; color: #a9b1d6; }
   .bv-table { padding: 0 0 env(safe-area-inset-bottom); }
   .bv-table :global(table) {
     border-collapse: separate;
