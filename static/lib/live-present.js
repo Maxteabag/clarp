@@ -238,18 +238,6 @@ const KNOWN_ACTIONS = new Set(['retry', 'fresh_retry', 'retry_at', 'compact_retr
 /** The actions that send the failed message again (`POST /turn-retry`). */
 export const isRetry = id => ['retry', 'fresh_retry', 'retry_at', 'compact_retry'].includes(id);
 
-/** Norwegian when the browser's first language is nb, nn or no. */
-export function prefersNorwegian(languages = (typeof navigator !== 'undefined' && (navigator.languages || [navigator.language])) || []) {
-  return /^(nb|nn|no)\b/i.test(String(languages[0] || ''));
-}
-
-/** One string of `{en, nb}` in the reader's language, the other as fallback. */
-export function said(words, nb = prefersNorwegian()) {
-  if (!words) return '';
-  if (typeof words === 'string') return words;
-  return String((nb ? words.nb || words.en : words.en || words.nb) || '');
-}
-
 /** The buttons the web draws for an explained error at `now`: known ids only,
  * and a `retry_at` whose time has passed as a plain Try again (no `at_ms`). */
 export function errorActions(error, now = Date.now()) {
@@ -258,7 +246,7 @@ export function errorActions(error, now = Date.now()) {
     if (!a || !KNOWN_ACTIONS.has(a.id)) continue;
     const at = a.at_ms || error.resets_at_ms;
     const action = a.id === 'retry_at' && at && at <= now
-      ? { id: 'retry', label: { en: 'Try again', nb: 'Prøv igjen' } } : a;
+      ? { id: 'retry' } : a; // its words come from the catalog (error.action.retry)
     if (!out.some(o => o.id === action.id)) out.push(action);
   }
   return out;
