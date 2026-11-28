@@ -80,7 +80,7 @@
           {#if item.html}
             <pre class:wrap><code class="hljs">{@html item.html}</code></pre>
           {:else}
-            <pre class:wrap><code class={item.lang ? `language-${item.lang}` : ''} use:highlight>{item.text}</code></pre>
+            <pre class:wrap><code class={item.tag ? `language-${item.tag}` : ''} use:highlight>{item.text}</code></pre>
           {/if}
         {/key}
       {:else}
@@ -117,8 +117,8 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font: 400 13px/1 var(--font-mono);
-    color: var(--washi-low, #999);
+    font: 500 15px/1.2 var(--font-body);
+    color: var(--washi-dim, #bbb);
   }
   .bv-btn {
     display: inline-flex;

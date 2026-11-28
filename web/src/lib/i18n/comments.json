@@ -4,9 +4,9 @@
   "chat.code.copy": "Chat, code block head line: accessibility label and tooltip of the copy icon button (verb, command: copy the code).",
   "chat.table.copy": "Full screen table view, top bar: accessibility label and tooltip of the copy icon button (verb, command: copy the table as Markdown text).",
   "chat.copied": "Chat and full screen views: accessibility label the copy icon takes for 1.5 s after copying, shown as a checkmark (status, past participle: the text was copied).",
-  "chat.table.expand": "Chat, above a wide table: accessibility label and tooltip of the expand icon button that opens the table full screen (action; noun phrase is fine).",
   "viewer.close": "Full screen code or table view, top bar: accessibility label and tooltip of the close icon button (verb, command).",
   "viewer.wrap": "Full screen code view, top bar: accessibility label and tooltip of a toggle icon; on, long lines wrap; off, they scroll sideways (verb phrase, command).",
-  "viewer.code": "Full screen code view: its name for screen readers when the code block names no language (noun: program code).",
-  "viewer.table": "Full screen table view: its name for screen readers (noun: a data table)."
+  "viewer.code": "Chat code block header row, when the code names no language, and the full screen code view's name for screen readers (noun: program code).",
+  "viewer.table": "Full screen table view: its name for screen readers (noun: a data table).",
+  "chat.expand": "Chat: accessibility label and tooltip of the expand icon button in a code block's header row, and above a wide table; opens it full screen (verb, command)."
 }

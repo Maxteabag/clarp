@@ -1,22 +1,30 @@
 // Code blocks and tables in a chat message (web/src/lib/blocks.js).
 import { describe, expect, it } from 'vitest';
 import {
-  codeBlockHtml, fenceLanguage, isTap, tableBlockHtml, tableToMarkdown,
+  codeBlockHtml, fenceLanguage, isTap, languageName, tableBlockHtml, tableToMarkdown,
 } from '../../web/src/lib/blocks.js';
 
-describe('code block head line', () => {
-  it('names the fence language and keeps the code as written', () => {
+describe('code block header row', () => {
+  it('names the language, has Copy and Expand, and keeps the code as written', () => {
     const html = codeBlockHtml('fn main() {\n    run();\n}\n', 'rust ignore');
-    expect(html).toContain('<span class="blk-lang">rust</span>');
+    expect(html).toContain('<span class="blk-lang">Rust</span>');
     expect(html).toContain('class="language-rust"');
     expect(html).toContain('fn main() {\n    run();\n}</code>');
     expect(html).toContain('aria-label="Copy code"');
+    expect(html).toContain('aria-label="Expand"');
   });
 
-  it('shows no language when the fence names none', () => {
+  it('says Code when the fence names no language', () => {
     expect(fenceLanguage('')).toBe('');
-    expect(codeBlockHtml('<b>', '')).not.toContain('blk-lang');
+    expect(codeBlockHtml('<b>', '')).toContain('<span class="blk-lang">Code</span>');
     expect(codeBlockHtml('<b>', '')).toContain('&lt;b&gt;');
+  });
+
+  it('writes language names the way people do', () => {
+    expect(languageName('py')).toBe('Python');
+    expect(languageName('SH')).toBe('Shell');
+    expect(languageName('cpp')).toBe('C++');
+    expect(languageName('elm')).toBe('Elm');
   });
 });
 

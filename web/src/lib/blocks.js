@@ -1,8 +1,9 @@
 // Code blocks and tables in a chat message.
 //
-// A fenced code block gets a thin line above it: the fence's language on the
-// left, a copy icon on the right. A tap or click on the code opens it full
-// screen (BlockViewer.svelte). A table wider than its message scrolls sideways
+// A fenced code block has a header row above the code, split from it by a
+// hairline: the language's name on the left ("Code" when the fence names
+// none), Copy and Expand icons on the right. Expand, or a tap or click on the
+// code, opens it full screen (BlockViewer.svelte). A table wider than its message scrolls sideways
 // with an edge fade, and gets an expand icon in the same kind of line; the
 // full screen view copies the table's Markdown source.
 //
@@ -20,7 +21,8 @@ const KEYS = {
   copyCode: 'chat.code.copy',
   copyTable: 'chat.table.copy',
   copied: 'chat.copied',
-  expandTable: 'chat.table.expand',
+  expand: 'chat.expand',
+  untitledCode: 'viewer.code',
   close: 'viewer.close',
   wrap: 'viewer.wrap',
   codeViewer: 'viewer.code',
@@ -47,13 +49,49 @@ export function fenceLanguage(info) {
   return m ? m[0] : '';
 }
 
+// The name a fence tag stands for, as people write it. Language names are
+// not translated; an unknown tag is shown with a capital first letter.
+const LANGUAGE_NAMES = {
+  py: 'Python', python: 'Python', python3: 'Python',
+  js: 'JavaScript', javascript: 'JavaScript', mjs: 'JavaScript', cjs: 'JavaScript', jsx: 'JSX',
+  ts: 'TypeScript', typescript: 'TypeScript', tsx: 'TSX',
+  sh: 'Shell', shell: 'Shell', bash: 'Bash', zsh: 'Zsh', fish: 'Fish', console: 'Console',
+  ps1: 'PowerShell', powershell: 'PowerShell', pwsh: 'PowerShell', bat: 'Batch', cmd: 'Batch',
+  rs: 'Rust', rust: 'Rust', swift: 'Swift', kt: 'Kotlin', kotlin: 'Kotlin', kts: 'Kotlin',
+  java: 'Java', go: 'Go', golang: 'Go', c: 'C', h: 'C', cpp: 'C++', 'c++': 'C++', cc: 'C++', hpp: 'C++',
+  cs: 'C#', csharp: 'C#', fs: 'F#', fsharp: 'F#', objc: 'Objective-C', 'objective-c': 'Objective-C',
+  rb: 'Ruby', ruby: 'Ruby', php: 'PHP', pl: 'Perl', perl: 'Perl', lua: 'Lua', r: 'R',
+  scala: 'Scala', dart: 'Dart', ex: 'Elixir', exs: 'Elixir', elixir: 'Elixir', erl: 'Erlang',
+  hs: 'Haskell', haskell: 'Haskell', clj: 'Clojure', clojure: 'Clojure', zig: 'Zig', nim: 'Nim',
+  html: 'HTML', xml: 'XML', svg: 'SVG', css: 'CSS', scss: 'SCSS', sass: 'Sass', less: 'Less',
+  svelte: 'Svelte', vue: 'Vue', json: 'JSON', jsonc: 'JSON', json5: 'JSON5', jsonl: 'JSON Lines',
+  yaml: 'YAML', yml: 'YAML', toml: 'TOML', ini: 'INI', env: 'Env', csv: 'CSV', sql: 'SQL',
+  graphql: 'GraphQL', gql: 'GraphQL', proto: 'Protocol Buffers', md: 'Markdown', markdown: 'Markdown',
+  tex: 'LaTeX', latex: 'LaTeX', diff: 'Diff', patch: 'Diff', dockerfile: 'Dockerfile', docker: 'Dockerfile',
+  makefile: 'Makefile', make: 'Makefile', cmake: 'CMake', nix: 'Nix', hcl: 'HCL', tf: 'Terraform',
+  terraform: 'Terraform', slint: 'Slint', kql: 'KQL', dax: 'DAX', regex: 'Regex', vim: 'Vim script',
+  txt: 'Text', text: 'Text', plaintext: 'Text', plain: 'Text', log: 'Log', http: 'HTTP', nginx: 'Nginx',
+};
+
+export function languageName(tag) {
+  const key = String(tag || '').trim().toLowerCase();
+  if (!key) return '';
+  return LANGUAGE_NAMES[key] || key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+const iconButton = (cls, label, icon) =>
+  `<button type="button" class="blk-btn ${cls}" aria-label="${escapeAttr(label)}" title="${escapeAttr(label)}">${icon}</button>`;
+
 export function codeBlockHtml(code, info) {
   const lang = fenceLanguage(info);
   const cls = lang ? ` class="language-${escapeAttr(lang)}"` : '';
   return `<div class="code-block">` +
     `<div class="blk-head">` +
-    (lang ? `<span class="blk-lang">${escapeHTML(lang)}</span>` : '<span></span>') +
-    `<button type="button" class="blk-btn blk-copy" aria-label="${escapeAttr(STRINGS.copyCode)}" title="${escapeAttr(STRINGS.copyCode)}">${ICONS.copy}</button>` +
+    `<span class="blk-lang">${escapeHTML(languageName(lang) || STRINGS.untitledCode)}</span>` +
+    `<span class="blk-actions">` +
+    iconButton('blk-copy', STRINGS.copyCode, ICONS.copy) +
+    iconButton('blk-expand', STRINGS.expand, ICONS.expand) +
+    `</span>` +
     `</div>` +
     `<pre><code${cls}>${escapeHTML(String(code).replace(/\n$/, ''))}</code></pre>` +
     `</div>`;
@@ -63,7 +101,7 @@ export function codeBlockHtml(code, info) {
 export function tableBlockHtml(tableHtml, md) {
   return `<div class="table-block" data-md="${escapeAttr(String(md || '').trim())}">` +
     `<div class="blk-head"><span></span>` +
-    `<button type="button" class="blk-btn blk-expand" aria-label="${escapeAttr(STRINGS.expandTable)}" title="${escapeAttr(STRINGS.expandTable)}">${ICONS.expand}</button>` +
+    iconButton('blk-expand', STRINGS.expand, ICONS.expand) +
     `</div>` +
     `<div class="table-wrap">${tableHtml}</div>` +
     `</div>`;
@@ -182,6 +220,7 @@ function openCode(block) {
   openBlockViewer({
     kind: 'code',
     lang: block.querySelector('.blk-lang')?.textContent || '',
+    tag: (code.className.match(/(?:^|\s)language-(\S+)/) || [])[1] || '',
     text: code.textContent,
     // The chat's own markup: highlighted spans when highlight.js has run.
     html: code.dataset.highlighted ? code.innerHTML : '',
@@ -260,8 +299,9 @@ export function blockChrome(node) {
         const code = btn.closest('.code-block')?.querySelector('pre code');
         if (code) copyText(code.textContent).then(ok => { if (ok) flashCopied(btn); });
       } else if (btn.classList.contains('blk-expand')) {
-        const block = btn.closest('.table-block');
-        if (block) openTable(block);
+        const block = btn.closest('.code-block, .table-block');
+        if (block?.classList.contains('code-block')) openCode(block);
+        else if (block) openTable(block);
       }
       return;
     }
