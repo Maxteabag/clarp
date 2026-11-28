@@ -648,6 +648,7 @@ impl App {
                 }
                 Change::Notification(popup) => self.popup(popup),
                 Change::NotificationRead(session) => platform::desktop::close_chat(session),
+                Change::QuestionEnded(decision_id) => platform::desktop::close_decision(decision_id),
                 _ => {}
             }
         }

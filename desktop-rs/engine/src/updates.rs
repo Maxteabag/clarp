@@ -656,6 +656,7 @@ impl Engine {
                 self.request_list(feed, false);
             }
         } else if let Some(artifact_id) = tag.strip_prefix("artifact-item:") {
+            self.question_card_read(artifact_id, object);
             let mut item = object.get("artifact").cloned().unwrap_or(Value::Null);
             if !self.updates.plain_artifacts {
                 update_feeds::flatten(&mut item);
@@ -808,7 +809,13 @@ impl Engine {
                 // first list there is nothing to patch; that list has it.
                 "artifact-updated" => match json::string(event, "artifact_id") {
                     id if id.is_empty() => self.request_list(Feed::Artifacts, false),
-                    _ if self.updates.feeds[Feed::Artifacts as usize].generation == 0 => {}
+                    // Before the first list only an open question's card is
+                    // read (its popup closes once it is answered elsewhere).
+                    id if self.updates.feeds[Feed::Artifacts as usize].generation == 0 => {
+                        if self.question_popup_on(&id) {
+                            self.fetch_artifact(&id);
+                        }
+                    }
                     id => self.fetch_artifact(&id),
                 },
                 _ => {}

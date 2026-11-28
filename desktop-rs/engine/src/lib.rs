@@ -122,6 +122,9 @@ pub enum Change {
     Notification(Popup),
     /// This chat was opened or read on some device: its popup goes.
     NotificationRead(String),
+    /// This question (decision id) was answered, dismissed or withdrawn
+    /// elsewhere: its popup goes.
+    QuestionEnded(String),
     /// The Host's notification settings changed (or whether it has them).
     NotificationSettings,
     /// Launch data changed: the model catalog, idle contacts, launch

@@ -483,16 +483,26 @@ pub fn notify(note: Note) {
 
 /// The chat was opened or read on some device: its popup goes.
 pub fn close_chat(session: &str) {
+    close_where(|s| s.session == session, serde_json::json!({"closed": session}));
+}
+
+/// A question was answered, dismissed or withdrawn elsewhere: its popup goes.
+pub fn close_decision(decision_id: &str) {
+    close_where(|s| s.decision_id == decision_id, serde_json::json!({"closed_decision": decision_id}));
+}
+
+/// Closes the popups `which` picks (`logged` is what a check records).
+fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
-        let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| s.session == session);
+        let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| which(s));
         *shown = kept;
         gone
     });
     if gone.is_empty() {
         return;
     }
-    if test_log(serde_json::json!({"closed": session})) {
+    if test_log(logged) {
         return;
     }
     #[cfg(not(target_os = "macos"))]

@@ -5,7 +5,8 @@
 //! popup (`POST /chat-read`); and answering a question from its buttons. On
 //! a Host with `decision_undo` that answer is held a few seconds and the
 //! popup offers Undo (`POST /decisions/{id}/undo`), which brings the
-//! question back.
+//! question back. A question answered elsewhere closes its popup: its card
+//! is read again on `artifact-updated`, as Updates reads it.
 //! A Host without the feature keeps the old rule: a reply in a chat that
 //! is not the selected one pops up.
 
@@ -252,6 +253,39 @@ impl Engine {
         notification.options = vec![Choice { id: UNDO.into(), label: notify_events::text("notify.action.undo") }];
         let body = notify_events::you_answered(&words);
         self.changes.push(Change::Notification(Popup { body, notification, selected: false, ..question }));
+    }
+
+    /// A question that popped up is on this card.
+    pub(crate) fn question_popup_on(&self, artifact_id: &str) -> bool {
+        !artifact_id.is_empty() && self.notifications.questions.iter().any(|q| q.notification.artifact_id == artifact_id)
+    }
+
+    /// The card of a question that popped up was read again (Updates reads
+    /// it on `artifact-updated`): answered, dismissed or withdrawn elsewhere,
+    /// its popup goes. An answer this desktop sent that the Host still holds
+    /// for Undo keeps its popup until the hold ends.
+    pub(crate) fn question_card_read(&mut self, artifact_id: &str, object: &Object) {
+        if !self.question_popup_on(artifact_id) {
+            return;
+        }
+        let Some(decision) = object.get("artifact").and_then(|a| a.get("decision")).and_then(Value::as_object) else { return };
+        let status = json::string(decision, "status");
+        if status.is_empty() || status == "pending" || decision.get("undoable").and_then(Value::as_bool) == Some(true) {
+            return;
+        }
+        let said = json::string(decision, "decision_id");
+        let ended: Vec<String> = self
+            .notifications
+            .questions
+            .iter()
+            .filter(|q| q.notification.artifact_id == artifact_id && (said.is_empty() || q.notification.decision_id == said))
+            .map(|q| q.notification.decision_id.clone())
+            .collect();
+        for decision_id in ended {
+            self.notifications.questions.retain(|q| q.notification.decision_id != decision_id);
+            self.notifications.answers.remove(&decision_id);
+            self.changes.push(Change::QuestionEnded(decision_id));
+        }
     }
 
     fn question(&self, decision_id: &str) -> Option<Popup> {

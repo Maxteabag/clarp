@@ -1883,7 +1883,8 @@ fn voice_check(out: String) {
 /// replacing the older, none when the Host says no or the chat is on
 /// screen, a question's answers as buttons, the popup closed when the chat
 /// is read elsewhere, an answer from a popup held for Undo and taken back,
-/// a failed turn in its card's words with Try again,
+/// a failed turn in its card's words with Try again, a question answered on
+/// another device closing its popup,
 /// Mark read told to the Host, the NOTIFICATIONS settings and a contact's
 /// choices per event.
 fn desktop_check(out: String) {
@@ -2018,6 +2019,31 @@ fn desktop_check(out: String) {
         ("retried", Box::new(|_, _window, _| {
             let Some(retry) = posts("/turn-retry").first().cloned() else { return false };
             check(retry["body"] == serde_json::json!({"session": "rachel", "message_id": "m-f1"}), &format!("Try again sends the message again: {}", retry["body"]));
+            true
+        })),
+        ("asked on a card", Box::new(|_, _window, _| {
+            let card = serde_json::json!({"artifact_id": "q-end", "type": "question", "status": "active", "session": "rachel", "title": "Deploy now?",
+                                          "decision": {"decision_id": "d-end", "status": "pending", "revision": 1, "response_type": "approval"}});
+            check(control("/__control/artifact-update", &serde_json::json!({"add": [card], "session": "rachel"})).is_ok(), "the Host has a question card");
+            send(serde_json::json!({"type": "user-notification", "event": "needs_you", "alert": true, "unread": false, "notification_id": "decision-d-end",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Deploy now?",
+                                    "decision_id": "d-end", "artifact_id": "q-end", "response_type": "approval", "revision": 1,
+                                    "options": [{"id": "accepted", "label": "Deploy"}, {"id": "rejected", "label": "Wait"}]}));
+            true
+        })),
+        ("answered elsewhere", Box::new(|_, _window, _| {
+            let Some(asked) = popups().into_iter().find(|n| n["body"] == "Deploy now?") else { return false };
+            check(asked["actions"][1] == "choice:accepted" && asked["actions"][2] == "choice:rejected", &format!("an approval offers the card's words: {}", asked["actions"]));
+            // Another device answers the card: the Host says the card changed.
+            let answered = serde_json::json!({"decision_id": "d-end", "status": "accepted", "revision": 2, "response_type": "approval"});
+            check(control("/__control/artifact-update", &serde_json::json!({"id": "q-end", "set": {"decision": answered, "status": "completed"}, "session": "rachel"})).is_ok(), "the question is answered on another device");
+            true
+        })),
+        ("question closed", Box::new(|_, _window, _| {
+            if !notifications().iter().any(|n| n["closed_decision"] == "d-end") {
+                return false;
+            }
+            check(true, "a question answered elsewhere closes its popup");
             true
         })),
         ("mark read", Box::new(|app, _window, _| {
