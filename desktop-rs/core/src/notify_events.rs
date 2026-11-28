@@ -215,9 +215,62 @@ pub struct Choice {
     pub label: String,
 }
 
+/// The order assigned by the Host, comparable only inside one process generation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Order {
+    epoch: String,
+    position: (u64, u64),
+}
+
+impl Order {
+    fn parse(event: &Object, ms: &str, seq: &str) -> Option<Self> {
+        let epoch = event.get("order_epoch")?.as_str().filter(|s| !s.trim().is_empty())?;
+        let integer = |key: &str| {
+            let value = event.get(key)?;
+            match value.as_str() {
+                Some(s) if !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()) => s.parse::<u64>().ok(),
+                _ => value.as_u64(),
+            }
+        };
+        Some(Self { epoch: epoch.into(), position: (integer(ms)?, integer(seq).filter(|n| *n > 0)?) })
+    }
+
+    pub fn boundary(event: &Object) -> Option<Self> {
+        Self::parse(event, "read_through_ms", "read_through_seq")
+    }
+
+    pub fn covers(&self, event: &Self) -> bool {
+        self.epoch == event.epoch && event.position <= self.position
+    }
+}
+
+/// Maximum observed read per Host, chat and epoch for this desktop session.
+#[derive(Default)]
+pub struct ChatReads(HashMap<(String, String, String), (u64, u64)>);
+
+impl ChatReads {
+    pub fn observe(&mut self, host: &str, session: &str, boundary: &Order) {
+        if !host.is_empty() && !session.is_empty() {
+            let max = self.0.entry((host.into(), session.into(), boundary.epoch.clone())).or_default();
+            *max = (*max).max(boundary.position);
+        }
+    }
+
+    pub fn covers(&self, host: &str, session: &str, event: &Order) -> bool {
+        self.0.get(&(host.into(), session.into(), event.epoch.clone())).is_some_and(|max| event.position <= *max)
+    }
+}
+
+/// SSE identifies its Host through the authenticated connection when the envelope omits it.
+pub fn notification_host(event: &Object, connected: &str) -> String {
+    event.get("server_instance_id").map_or(connected, |v| v.as_str().unwrap_or_default()).to_owned()
+}
+
 /// What one `user-notification` says, as the desktop uses it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Incoming {
+    pub host: String,
+    pub order: Option<Order>,
     /// The catalog id (`reply` on a Host without the feature).
     pub event: String,
     /// The Host's effective choice; None from a Host without the feature.
@@ -390,6 +443,8 @@ impl Incoming {
         }
         let event_id = json::string(event, "event");
         Incoming {
+            host: json::string(event, "server_instance_id"),
+            order: Order::parse(event, "event_at_ms", "event_seq"),
             event: if event_id.is_empty() { "reply".into() } else { event_id },
             alert: event.get("alert").and_then(Value::as_bool),
             unread: event.get("unread").and_then(Value::as_bool),
@@ -809,6 +864,26 @@ mod tests {
             recent.first_time(&format!("x{i}"));
         }
         assert!(recent.first_time("pn-1"));
+    }
+
+    #[test]
+    fn chat_read_boundaries_are_monotonic_and_scoped() {
+        let mut reads = ChatReads::default();
+        let read = |seq| Order::boundary(&object(json!({"order_epoch":"x","read_through_ms":"1000","read_through_seq":seq}))).unwrap();
+        reads.observe("host1", "vera", &read(7));
+        reads.observe("host1", "vera", &read(2));
+        for (host, session, epoch, ms, seq, covered) in [
+            ("host1","vera","x",1000,7,true), ("host1","vera","x",999,99,true),
+            ("host1","vera","x",1000,8,false), ("host1","vera","x",1001,1,false),
+            ("host2","vera","x",1000,7,false), ("host1","other","x",1000,7,false),
+            ("host1","vera","y",1000,7,false),
+        ] {
+            let event = Incoming::parse(&object(json!({"order_epoch":epoch,"event_at_ms":ms,"event_seq":seq})));
+            assert_eq!(reads.covers(host, session, &event.order.unwrap()), covered);
+        }
+        for invalid in [json!(null), json!(""), json!(-1), json!("1.5"), json!(true), json!("+3"), json!("18446744073709551616")] {
+            assert!(Order::boundary(&object(json!({"order_epoch":"x","read_through_ms":1000,"read_through_seq":invalid}))).is_none());
+        }
     }
 
     #[test]

@@ -144,7 +144,6 @@ impl Engine {
             return;
         }
         self.mutate_roster(|r| r.clear_unread(session));
-        self.changes.push(Change::NotificationRead(session.to_owned()));
         if self.notifications.offered {
             self.api.post_json(&format!("chat-read:{session}"), "/chat-read", json!({"session": session}), None);
         }
@@ -282,9 +281,11 @@ impl Engine {
             .map(|q| q.notification.decision_id.clone())
             .collect();
         for decision_id in ended {
+            if let Some(question) = self.question(&decision_id) {
+                self.changes.push(Change::QuestionEnded(question.notification.host, question.session, decision_id.clone()));
+            }
             self.notifications.questions.retain(|q| q.notification.decision_id != decision_id);
             self.notifications.answers.remove(&decision_id);
-            self.changes.push(Change::QuestionEnded(decision_id));
         }
     }
 
@@ -412,14 +413,24 @@ impl Engine {
 
     /// `agent-focus` or `chat-read`: the chat was opened or read on some
     /// device, so its popup goes.
-    pub(crate) fn chat_read_event(&mut self, session: &str, read: bool) {
+    pub(crate) fn chat_read_event(&mut self, event: &Object, session: &str, read: bool) {
         if session.is_empty() {
+            return;
+        }
+        let host = notify_events::notification_host(event, &self.server_id);
+        let decision = json::string(event, "decision_id");
+        if !decision.is_empty() {
+            if !host.is_empty() {
+                self.changes.push(Change::QuestionEnded(host, session.to_owned(), decision));
+            }
             return;
         }
         if read {
             self.mutate_roster(|r| r.clear_unread(session));
         }
-        self.changes.push(Change::NotificationRead(session.to_owned()));
+        if !host.is_empty() && let Some(order) = notify_events::Order::boundary(event) {
+            self.changes.push(Change::NotificationRead(host, session.to_owned(), order));
+        }
     }
 
     /// `user-notification`: a popup when the event alerts, the contact is
@@ -440,6 +451,7 @@ impl Engine {
             return;
         }
         let mut incoming = incoming;
+        incoming.host = notify_events::notification_host(event, &self.server_id);
         // Words are made here, as the popup is shown: in the app's language now.
         let title = [incoming.title_text(), incoming.persona.clone()].into_iter().find(|t| !t.is_empty()).unwrap_or_else(|| session.clone());
         let mut body = incoming

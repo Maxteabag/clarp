@@ -115,6 +115,14 @@ fn reply(id: &str, preview: &str) -> Value {
            "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": preview, "message_id": format!("m-{id}")})
 }
 
+fn ordered_reply(id: &str, preview: &str, seq: u64) -> Value {
+    let mut event = reply(id, preview);
+    event["order_epoch"] = json!("day");
+    event["event_at_ms"] = json!(1000);
+    event["event_seq"] = json!(seq);
+    event
+}
+
 fn send(event: Value) {
     check(control("/__control/event", &event).is_ok(), &format!("the Host sends {}", event["notification_id"]));
 }
@@ -161,8 +169,10 @@ pub fn notify_daemon_check(_out: String) {
             }
             window.invoke_chat_chosen("mike".into());
             // Two replies of one chat before the daemon has answered the first.
-            send(reply("q-1", "First reply"));
-            send(reply("q-2", "Second reply"));
+            send(ordered_reply("q-1", "First reply", 1));
+            send(ordered_reply("q-2", "Second reply", 3));
+            send(json!({"type":"agent-focus","session":"rachel","order_epoch":"day","read_through_ms":1000,"read_through_seq":2}));
+            send(ordered_reply("q-late-old", "Covered reply", 2));
             true
         })),
         ("chained", Box::new(|_, _window, elapsed| {
@@ -173,10 +183,10 @@ pub fn notify_daemon_check(_out: String) {
             check(notified.len() == 2, &format!("two replies of a chat make two Notify calls, one after the other: {notified:?}"));
             check(notified[0]["replaces_id"] == 0 && notified[1]["replaces_id"] == notified[0]["id"],
                   &format!("the second replaces the first's popup, by the id the daemon gave it: {notified:?}"));
-            check(notified[1]["body"] == "Second reply", "and shows the newer reply");
+            check(visible() == ["Second reply"], "a delayed read keeps the newer same-ms popup and suppresses the late covered reply");
             // A reply, then the chat read on another device before the daemon answers.
-            send(reply("q-3", "Third reply"));
-            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read elsewhere");
+            send(ordered_reply("q-3", "Third reply", 4));
+            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "order_epoch":"day","read_through_ms":1000,"read_through_seq":4})).is_ok(), "the chat is read elsewhere");
             true
         })),
         ("read meanwhile", Box::new(|_, _window, elapsed| {

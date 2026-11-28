@@ -674,8 +674,8 @@ impl App {
                     platform::desktop::muted_changed(muted);
                 }
                 Change::Notification(popup) => self.popup(popup),
-                Change::NotificationRead(session) => platform::desktop::close_chat(session),
-                Change::QuestionEnded(decision_id) => platform::desktop::close_decision(decision_id),
+                Change::NotificationRead(host, session, order) => platform::desktop::read_through(host, session, order),
+                Change::QuestionEnded(host, session, decision_id) => platform::desktop::close_decision(host, session, decision_id),
                 _ => {}
             }
         }
@@ -698,6 +698,8 @@ impl App {
         let image = self.engine.borrow_mut().avatar_source(&popup.session);
         platform::desktop::notify(platform::desktop::Note {
             title: popup.title.clone(),
+            host: incoming.host.clone(),
+            order: incoming.order.clone().filter(|_| incoming.event != "call"),
             name: Some(incoming.persona.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| popup.title.clone()),
             body: popup.body.clone(),
             session: popup.session.clone(),

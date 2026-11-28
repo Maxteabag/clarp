@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use super::runtime;
+use clarp_core::notify_events::{ChatReads, Order};
 
 /// What the tray asks the window to do.
 #[derive(Debug, Clone, Copy)]
@@ -410,6 +411,8 @@ pub fn muted_changed(muted: bool) {
 /// do. On Linux only with a tray, as in the Qt and C++ clients.
 #[derive(Debug, Clone, Default)]
 pub struct Note {
+    pub host: String,
+    pub order: Option<Order>,
     pub title: String,
     /// The contact's name, for "Mute <name>".
     pub name: String,
@@ -442,6 +445,8 @@ pub const FAILURE: &str = "failure:";
 #[derive(Debug, Clone)]
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 struct Shown {
+    host: String,
+    order: Option<Order>,
     id: u32,
     action_generation: u64,
     session: String,
@@ -451,6 +456,7 @@ struct Shown {
 }
 
 thread_local! {
+    static READS: RefCell<ChatReads> = RefCell::new(ChatReads::default());
     /// The open popups, newest last (one per chat).
     static SHOWN: RefCell<Vec<Shown>> = const { RefCell::new(Vec::new()) };
 }
@@ -484,11 +490,14 @@ fn test_log(line: serde_json::Value) -> bool {
 
 /// Shows a popup. `sound` asks the desktop for its message sound.
 pub fn notify(note: Note) {
+    if note.order.as_ref().is_some_and(|o| READS.with(|r| r.borrow().covers(&note.host, &note.session, o))) {
+        return;
+    }
     let logged = test_log(serde_json::json!({
         "title": note.title, "body": note.body, "sound": note.sound, "session": note.session,
         "message_id": note.message_id, "image": note.image, "category": "im.received",
         "actions": actions(&note).chunks(2).map(|pair| pair[0].clone()).collect::<Vec<_>>(),
-        "replaces": SHOWN.with(|shown| shown.borrow().iter().any(|s| s.session == note.session)),
+        "replaces": SHOWN.with(|shown| shown.borrow().iter().any(|s| s.host == note.host && s.session == note.session)),
     }));
     if logged {
         // A check's popup is kept as shown, so the next of its chat replaces it.
@@ -496,7 +505,10 @@ pub fn notify(note: Note) {
         return;
     }
     #[cfg(target_os = "macos")]
-    notify_macos(note.title, note.body, note.sound);
+    {
+        remember(shown_of(&note, 0));
+        macos_popup(&note.host, &note.session, Some(note.clone()));
+    }
     #[cfg(not(target_os = "macos"))]
     notify_freedesktop(note);
 }
@@ -508,8 +520,18 @@ pub fn close_chat(session: &str) {
 
 /// A question was answered, dismissed or withdrawn elsewhere: its popup
 /// goes, and only it (a newer popup of the chat stays).
-pub fn close_decision(decision_id: &str) {
-    close_where(|s| s.decision_id == decision_id, false, serde_json::json!({"closed_decision": decision_id}));
+pub fn close_decision(host: &str, session: &str, decision_id: &str) {
+    close_where(|s| s.host == host && s.session == session && s.decision_id == decision_id, false, serde_json::json!({"closed_decision": decision_id}));
+}
+
+/// A read observed by the Host also suppresses covered alerts that arrive later.
+pub fn read_through(host: &str, session: &str, order: &Order) {
+    READS.with(|r| r.borrow_mut().observe(host, session, order));
+    close_where(
+        |s| s.host == host && s.session == session && s.order.as_ref().is_some_and(|event| order.covers(event)),
+        false,
+        serde_json::json!({"closed": session}),
+    );
 }
 
 /// Closes the popups `which` picks (`logged` is what a check records). A
@@ -550,6 +572,10 @@ fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_j
     }
     if test_log(logged) {
         return;
+    }
+    #[cfg(target_os = "macos")]
+    for popup in &gone {
+        macos_popup(&popup.host, &popup.session, None);
     }
     #[cfg(not(target_os = "macos"))]
     for popup in gone {
@@ -593,6 +619,8 @@ fn close_id(id: u32) {
 /// What a popup is for, as kept once the desktop has named it `id`.
 fn shown_of(note: &Note, id: u32) -> Shown {
     Shown {
+        host: note.host.clone(),
+        order: note.order.clone(),
         id,
         action_generation: 0,
         session: note.session.clone(),
@@ -635,11 +663,8 @@ fn actions(note: &Note) -> Vec<String> {
 fn remember(popup: Shown) {
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
-        shown.retain(|s| s.session != popup.session && (popup.id == 0 || s.id != popup.id));
+        shown.retain(|s| (s.host != popup.host || s.session != popup.session) && (popup.id == 0 || s.id != popup.id));
         shown.push(popup);
-        // A desktop closes popups on its own; this keeps the newest few.
-        let extra = shown.len().saturating_sub(32);
-        shown.drain(..extra);
     });
 }
 
@@ -744,24 +769,34 @@ struct InFlight {
     replaces_closed: Option<u32>,
 }
 
-/// Through Notification Center (as Script Editor, the sender `osascript`
-/// is): the texts go as arguments, never into the script. No buttons.
+/// Notification Center needs an identifier for selective removal. Serialize its
+/// commands so a slow delivery cannot finish after its matching removal.
 #[cfg(target_os = "macos")]
-fn notify_macos(title: String, body: String, sound: bool) {
-    let script = if sound {
-        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name \"Glass\"\nend run"
-    } else {
-        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
-    };
-    let spawned = std::thread::Builder::new().name("notify".into()).spawn(move || {
-        match std::process::Command::new("/usr/bin/osascript").args(["-e", script, &title, &body]).stdout(std::process::Stdio::null()).output() {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr).trim()),
-            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
-        }
+fn macos_popup(host: &str, session: &str, note: Option<Note>) {
+    use std::sync::{OnceLock, mpsc};
+    type Command = (String, Option<Note>);
+    static WORKER: OnceLock<mpsc::Sender<Command>> = OnceLock::new();
+    let worker = WORKER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<Command>();
+        std::thread::spawn(move || {
+            for (id, note) in rx {
+                let mut command = std::process::Command::new("/usr/bin/osascript");
+                command.args(["-l", "JavaScript", "-e", include_str!("notification_macos.js"), "--", &id]);
+                if let Some(note) = note {
+                    command.args([note.title, note.body, if note.sound { "Glass".into() } else { String::new() }]);
+                }
+                match command.output() {
+                    Ok(output) if output.status.success() => {}
+                    Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr)),
+                    Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
+                }
+            }
+        });
+        tx
     });
-    if let Err(error) = spawned {
-        eprintln!("clarp-slint: notification failed: {error}");
+    let id = serde_json::json!(["clarp", std::process::id(), host, session]).to_string();
+    if worker.send((id, note)).is_err() {
+        eprintln!("clarp-slint: notification worker stopped");
     }
 }
 
@@ -787,13 +822,13 @@ fn send(note: Note, closed: Option<u32>) {
     // replacing the popup it names.
     let note = IN_FLIGHT.with(|flights| {
         let mut flights = flights.borrow_mut();
-        match flights.iter_mut().find(|f| f.popup.session == note.session) {
+        match flights.iter_mut().find(|f| f.popup.host == note.host && f.popup.session == note.session) {
             Some(flight) => {
-                (flight.next, flight.close) = (Some(note), false);
+                flight.next = Some(note);
                 None
             }
             None => {
-                let replaces = closed.or_else(|| SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map(|s| s.id)));
+                let replaces = closed.or_else(|| SHOWN.with(|shown| shown.borrow().iter().find(|s| s.host == note.host && s.session == note.session).map(|s| s.id)));
                 flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false, replacing: replaces, replaces_closed: closed });
                 Some(note)
             }
@@ -801,7 +836,7 @@ fn send(note: Note, closed: Option<u32>) {
     });
     let Some(note) = note else { return };
     // The shown popup's buttons stay its own until this Notify returns.
-    let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
+    let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.host == note.host && f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
     // The daemon may reuse a popup ID. Give each explicit button an identity
     // that stays with the popup that supplied it, even if its signal arrives late.
     thread_local! {
@@ -859,7 +894,7 @@ fn delivered(popup: Shown, id: Option<u32>) {
     let session = popup.session.clone();
     let flight = IN_FLIGHT.with(|flights| {
         let mut flights = flights.borrow_mut();
-        let at = flights.iter().position(|f| f.popup.session == session)?;
+        let at = flights.iter().position(|f| f.popup.host == popup.host && f.popup.session == session)?;
         Some(flights.remove(at))
     });
     let (close, next, replaces_closed) = flight.map_or((false, None, None), |f| (f.close, f.next, f.replaces_closed));

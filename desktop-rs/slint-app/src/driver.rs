@@ -1964,14 +1964,14 @@ fn desktop_check(out: String) {
             check(shown[1]["replaces"] == true && shown[1]["message_id"] == "m-pn-2", &format!("a newer reply replaces the chat's popup and opens at its message: {}", shown[1]));
             check(shown[2]["actions"] == serde_json::json!(["default", "choice:a", "choice:b", "mark-read", "mute", "settings"]), &format!("a question's answers are its first buttons: {}", shown[2]["actions"]));
             check(shown[2]["sound"] == false, "no sound while Sound is off");
-            check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read on another device");
+            check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "decision_id": "d1"})).is_ok(), "the question is cleared on another device");
             true
         })),
         ("closed", Box::new(|_, _window, _| {
-            if !notifications().iter().any(|n| n["closed"] == "rachel") {
+            if !notifications().iter().any(|n| n["closed_decision"] == "d1") {
                 return false;
             }
-            check(true, "a chat read elsewhere closes its popup");
+            check(true, "an exact decision clear closes its question");
             send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": true, "notification_id": "pn-4",
                                     "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Fourth"}));
             true

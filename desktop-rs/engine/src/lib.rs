@@ -127,10 +127,10 @@ pub enum Change {
     /// Something for the user the desktop may pop up (`notifications.rs`).
     Notification(Popup),
     /// This chat was opened or read on some device: its popup goes.
-    NotificationRead(String),
+    NotificationRead(String, String, clarp_core::notify_events::Order),
     /// This question (decision id) was answered, dismissed or withdrawn
     /// elsewhere: its popup goes.
-    QuestionEnded(String),
+    QuestionEnded(String, String, String),
     /// The Host's notification settings changed (or whether it has them).
     NotificationSettings,
     /// Launch data changed: the model catalog, idle contacts, launch
@@ -2079,9 +2079,9 @@ impl Engine {
             }
             "agent-focus" => {
                 self.mutate_roster(|r| r.apply_focus_event(event));
-                self.chat_read_event(&session, false);
+                self.chat_read_event(event, &session, false);
             }
-            clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, true),
+            clarp_core::notify_events::CHAT_READ => self.chat_read_event(event, &session, true),
             clarp_core::notify_events::SETTINGS_CHANGED => self.notification_settings_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
             "user-notification" => {
