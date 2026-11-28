@@ -27,9 +27,14 @@ fn a_failure_is_read_as_the_python_host_reads_it() {
         let text = vector["text"].as_str().unwrap();
         // A kind of this Host's own reads what the Python Host reads as something plainer
         // (`docs/differences.md`): there it is held to its own tests, here to the rest.
+        // Only where the Python Host saw nothing plainer than a bad exit: an own kind that
+        // swallowed a usage limit, a sign-in or a transient failure would be caught here.
         let kind = classify_error(text);
-        let kind = if failures::OWN_KINDS.contains(&kind) {
-            vector["kind"].as_str().unwrap()
+        let theirs_kind = vector["kind"].as_str().unwrap();
+        let kind = if failures::OWN_KINDS.contains(&kind)
+            && matches!(theirs_kind, failures::UNKNOWN | failures::RUNNER_EXIT)
+        {
+            theirs_kind
         } else {
             kind
         };

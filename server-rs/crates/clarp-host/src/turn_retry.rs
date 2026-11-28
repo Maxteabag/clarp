@@ -228,8 +228,8 @@ pub async fn run_due(app: &App) {
         else {
             continue;
         };
-        // What came of it meanwhile decides: an answer, or a try sent by hand, and there is
-        // nothing to send.
+        // What came of it meanwhile decides: an answer, or a try sent with the button, and there
+        // is nothing to send. The same words typed again by hand are not recognised.
         if let Some(why) = settled_otherwise(member, &planned.message_id).await {
             eprintln!(
                 "clarp-host: the message {} of {} is not sent again at its time: {why}",
