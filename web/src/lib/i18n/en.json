@@ -1,12 +1,13 @@
 {
   "settings.language.title": "Language",
   "settings.language.system": "System",
-  "chat.code.copy": "Copy code",
-  "chat.table.copy": "Copy table",
-  "chat.copied": "Copied",
-  "viewer.close": "Close",
-  "viewer.wrap": "Wrap lines",
-  "viewer.code": "Code",
-  "viewer.table": "Table",
-  "chat.expand": "Expand"
+  "codeblock.copy": "Copy code",
+  "codeblock.copied": "Copied",
+  "codeblock.expand": "Expand",
+  "codeblock.wrap": "Wrap lines",
+  "codeblock.untitled": "Code",
+  "table.copy": "Copy table",
+  "table.expand": "Expand",
+  "table.fullscreen_title": "Table",
+  "fullscreen.close": "Close"
 }
