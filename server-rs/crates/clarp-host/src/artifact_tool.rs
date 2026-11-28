@@ -772,7 +772,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
             let body = json!({ "session": rest[0] });
             let body = body.as_object().cloned().unwrap_or_default();
             let rest = format!("{}/withdraw", rest[1]);
-            match library::decide(app, &rest, None, &body).await {
+            match library::decide(app, &rest, None, None, &body).await {
                 Ok(done) => Ok(done["artifact"].clone()),
                 Err(error) => Err(refusal(&error)),
             }
@@ -811,7 +811,7 @@ pub async fn run(app: &App, call: &ToolCall) -> ToolAnswer {
                 Ok((decision_id, sent)) => {
                     let turn = call.env.get(crate::turn_identity::TURN_ENV);
                     let rest = format!("{decision_id}/resolve");
-                    match library::decide(app, &rest, turn.map(String::as_str), &sent).await {
+                    match library::decide(app, &rest, turn.map(String::as_str), None, &sent).await {
                         Ok(done) => Ok(done["artifact"].clone()),
                         Err(error) => Err(refusal(&error)),
                     }
