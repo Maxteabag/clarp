@@ -56,6 +56,7 @@ pub mod fcm;
 pub mod files;
 pub mod fleet;
 pub mod forks;
+mod helper_defaults;
 pub mod gallery;
 pub mod goal_listener;
 pub mod goaltool;

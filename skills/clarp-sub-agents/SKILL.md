@@ -181,7 +181,17 @@ start, and the command exits 1.
      --clarp-agent --backend codex --title "Refactor stream A"
    ```
 
-   Without `--model`, a helper gets the Host's default model for its tool, the
+   On Rust Hosts with `scoped_helper_defaults` (contract 220), `clarp-admin
+   agent helper-state SESSION` shows the backend, model and effort selected for
+   new children in `helper_defaults`. A Host can read `helper-defaults.json`
+   in its own configuration directory at startup. Its `parent_ids` are agent
+   IDs, `parent_directories` are absolute directory roots, and `selection`
+   holds `backend`, `model` and `effort`. A helper also qualifies through its
+   helper ancestry. Fresh Clarp helper starts and forks use that selection
+   when flags are omitted. Explicit choices take precedence. Plain systemd
+   workers keep their own defaults.
+
+   Without a scoped selection or `--model`, a helper gets the Host's default model for its tool, the
    owner's `[agents] <tool>_model` (a plain worker without `--clarp-agent` reads
    the same setting for Codex). Pass `--model` only to choose another.
 

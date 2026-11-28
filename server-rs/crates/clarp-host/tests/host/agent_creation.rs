@@ -357,3 +357,43 @@ fn a_turn_uses_owner_model_and_effort_defaults_when_the_agent_has_no_override() 
         }
     }
 }
+
+#[test]
+fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() {
+    let place = Place::new("helper-defaults");
+    let product = place.root.join("product");
+    let unrelated = place.root.join("product-personal");
+    for dir in [&product, &unrelated] {
+        std::fs::create_dir(dir).unwrap();
+    }
+    let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
+    std::fs::write(
+        place.root.join("helper-defaults.json"),
+        json!({
+            "parent_ids": [], "parent_directories": [product], "selection": selection
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let host = place.start_with("", &["--config", place.root.to_str().unwrap()]);
+    for (name, dir) in [("lead", &product), ("other", &unrelated)] {
+        host.post(
+            "/agents",
+            json!({"name":name,"cwd":dir,"backend":"scripted"}),
+        );
+    }
+    for (name, parent) in [("child", "lead"), ("nested", "child"), ("control", "other")] {
+        let made = host.post(
+            "/agents",
+            json!({"name":name,"role":"helper","parent":parent,"cwd":unrelated}),
+        );
+        let row = &made["agent"];
+        if name == "control" {
+            assert_eq!(row["backend"], "claude", "{made}");
+        } else {
+            for key in ["backend", "model", "effort"] {
+                assert_eq!(row[key], selection[key], "{made}");
+            }
+        }
+    }
+}
