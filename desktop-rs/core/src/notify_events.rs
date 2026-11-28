@@ -372,12 +372,21 @@ impl Incoming {
             .take(4)
             .collect();
         let response_type = json::string(event, "response_type");
-        // An approval from a Host that sends no answers: Yes and No.
+        // An approval from a Host that sends no answers: Yes and No. The
+        // Host's own Yes and No (a card without labels) in the app's words.
         if options.is_empty() && response_type == "approval" {
             options = vec![
-                Choice { id: "accepted".into(), label: text("notify.action.yes").into() },
-                Choice { id: "rejected".into(), label: text("notify.action.no").into() },
+                Choice { id: "accepted".into(), label: text("notify.action.yes") },
+                Choice { id: "rejected".into(), label: text("notify.action.no") },
             ];
+        } else if response_type == "approval" {
+            for choice in options.iter_mut() {
+                match (choice.id.as_str(), choice.label.as_str()) {
+                    ("accepted", "Yes") => choice.label = text("notify.action.yes"),
+                    ("rejected", "No") => choice.label = text("notify.action.no"),
+                    _ => {}
+                }
+            }
         }
         let event_id = json::string(event, "event");
         Incoming {
@@ -782,6 +791,9 @@ mod tests {
         let older = Incoming::parse(&object(json!({"event": "needs_you", "decision_id": "d3", "response_type": "approval"})));
         assert_eq!(older.options, [Choice { id: "accepted".into(), label: "Yes".into() }, Choice { id: "rejected".into(), label: "No".into() }]);
         assert_eq!(older.revision, None);
+        let plain = Incoming::parse(&object(json!({"event": "needs_you", "decision_id": "d5", "response_type": "approval",
+            "options": [{"id": "accepted", "label": "Yes"}, {"id": "rejected", "label": "No"}]})));
+        assert_eq!(plain.options[0].label, text("notify.action.yes"), "the Host's default Yes in the app's words");
         let typed = Incoming::parse(&object(json!({"event": "needs_you", "decision_id": "d4", "response_type": "text_input"})));
         assert!(typed.options.is_empty(), "a text answer has no buttons");
     }
