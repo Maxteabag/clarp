@@ -279,7 +279,7 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
     };
     let helper = made["session"].as_str().unwrap_or_default().to_string();
     let mut row = json!({
-        "name": child.name, "session": helper, "cwd": cwd, "backend": made["agent"]["backend"],
+        "name": child.name, "session": helper, "cwd": cwd, "backend": backend,
         "fork": "seed", "delivered": false,
     });
     if !child.branch.is_empty() {

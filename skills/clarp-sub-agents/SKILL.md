@@ -181,21 +181,7 @@ start, and the command exits 1.
      --clarp-agent --backend codex --title "Refactor stream A"
    ```
 
-   On Rust Hosts with `scoped_helper_defaults` (contract 222), `clarp-admin
-   agent helper-state SESSION --child-cwd /path/to/worktree` shows the backend, model and effort selected for
-   new children in `helper_defaults`. A Host can read `helper-defaults.json`
-   in its own configuration directory at startup. Its `parent_ids` are agent
-   IDs of dedicated owners. Its `mixed_parents` maps other verified owner IDs
-   to the product directories their immediate child must work in. Descendants
-   qualify through that child. The `selection`
-   holds `backend`, `model` and `effort`. A helper also qualifies through its
-   helper ancestry. The Host enforces the selection when creating a qualified
-   Clarp helper, including forks and reviewer starts with explicit backend,
-   model or effort flags. Outside the scope, explicit flags and ordinary
-   launcher defaults apply. Test fixtures, bound providers and plain systemd
-   workers keep their own defaults.
-
-   Without a scoped selection or `--model`, a helper gets the Host's default model for its tool, the
+   Without `--model`, a helper gets the Host's default model for its tool, the
    owner's `[agents] <tool>_model` (a plain worker without `--clarp-agent` reads
    the same setting for Codex). Pass `--model` only to choose another.
 

@@ -160,7 +160,6 @@ pub struct Config {
     /// reset command ever runs. A Host started by hand for a test once read the installed
     /// Host's folder by itself (issue 780).
     pub config_dir: Option<PathBuf>,
-    pub(crate) helper_defaults: Option<crate::helper_defaults::ScopedDefaults>,
     /// The directory that holds the pictures this Host ships for its agents (`avatars/` in
     /// it). `None`: it ships none, and its agents are shown without a face.
     pub static_dir: Option<PathBuf>,
@@ -835,7 +834,6 @@ impl Config {
             speech_keys,
             push_keys,
             peers,
-            helper_defaults: crate::helper_defaults::ScopedDefaults::read(config_dir.as_deref())?,
             config_dir,
             static_dir,
             transcription_engine,

@@ -588,7 +588,6 @@ pub const FEATURES: &[(&str, u64)] = &[
     // words in the user's language, and `GET /log` carries the chat's line too.
     ("chat_preview_parts", 219),
     ("host_health_metrics", 221),
-    ("scoped_helper_defaults", 222),
     ("oracle_eleven_realtime", 224),
     ("oracle_eleven_norwegian_transcription", 224),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
@@ -2659,22 +2658,6 @@ pub(crate) async fn make_agent_as(
             .by_session(session)
             .map(|member| member.record.clone())
     });
-    if replaces.is_none()
-        && request.test != Some(true)
-        && !["resume_session_id", "fork_session_id", "codex_provider"]
-            .iter()
-            .any(|key| plain(key).is_some_and(|v| !v.trim().is_empty()))
-        && clarp_kernel::helpers::parse_role(request.role.as_deref().unwrap_or(""))
-            == Some("helper")
-        && let Some(scope) = &app.config.helper_defaults
-        && let Some(parent) = &request.parent
-        && let Some(selection) =
-            scope.for_parent(&app.fleet.directory(), parent, request.cwd.as_deref())
-    {
-        request.backend = Some(selection.backend.clone());
-        request.model = Some(selection.model.clone());
-        request.effort = Some(selection.effort.clone());
-    }
     let backend = request
         .backend
         .as_deref()
