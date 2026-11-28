@@ -258,6 +258,11 @@ pub fn decision(asked: &Asked<'_>) -> Value {
     let notification_id = decision_notification_id(asked.decision_id);
     let mut payload = turn_done(&Told {
         persona: asked.persona,
+        title: if asked.title_loc.is_some() {
+            asked.title
+        } else {
+            ""
+        },
         session: asked.session,
         body: &body,
         avatar_url: asked.avatar_url,
@@ -273,7 +278,10 @@ pub fn decision(asked: &Asked<'_>) -> Value {
         ..Told::default()
     });
     let heading = asked.title.trim();
-    if !heading.is_empty() && payload["aps"]["alert"]["body"] != heading {
+    if !heading.is_empty()
+        && payload["aps"]["alert"]["body"] != heading
+        && payload["aps"]["alert"]["title"] != heading
+    {
         payload["aps"]["alert"]["subtitle"] = json!(clip(heading, 120));
     }
     payload["aps"]["interruption-level"] = json!(if asked.time_sensitive {
