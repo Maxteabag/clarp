@@ -2099,6 +2099,10 @@ pub fn leave(app: &App) {
 
 /// A card's action (Enter on the selected card, or a click).
 pub fn open(app: &App, window: &AppWindow, id: &str) {
+    // A failed turn's card: its buttons and Details.
+    if crate::turn_error_view::open(app, window, id) {
+        return;
+    }
     if id.starts_with("receipt:") {
         show_decision(app, id);
         return;

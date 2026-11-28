@@ -66,6 +66,8 @@ pub mod time_format;
 pub mod transit;
 pub mod tree;
 pub mod turn_reason;
+pub mod turn_error;
+pub mod turn_error_text;
 pub mod ui_text;
 pub mod update_feeds;
 pub mod workspace;

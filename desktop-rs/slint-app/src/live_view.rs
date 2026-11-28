@@ -354,6 +354,7 @@ pub(crate) fn row(entry: &Entry, blocks: Vec<crate::MessageBlock>) -> MessageRow
         work_key: SharedString::new(),
         work_open: false,
         work_box: SharedString::new(),
+        error: crate::ErrorCard::default(),
     }
 }
 
