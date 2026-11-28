@@ -5,6 +5,55 @@ use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
 #[test]
+fn cli_replay_of_a_completed_part_preserves_distinct_repeated_words() {
+    let mut interpreter = by_id("opencode").unwrap().interpreter(1, "replayed-text");
+    let mut signals = Vec::new();
+    let words = "<speak>Summary.</speak>";
+    let new = "<speak>New words.</speak>";
+    let text = |id: &str, text: &str| {
+        json!({"type":"text","sessionID":"ses_1","part":{
+            "type":"text","id":id,"messageID":"msg_1","text":text,"time":{"end":1}
+        }})
+    };
+    for event in [
+        json!({"type":"step_start"}),
+        text("prt_1", words),
+        json!({"type":"step_finish"}),
+        json!({"type":"step_start"}),
+        text("prt_2", words),
+        json!({"type":"step_finish"}),
+        text("prt_1", words),
+        text("prt_2", &format!("{words}{new}")),
+    ] {
+        interpreter.on_record(
+            &Record {
+                t: 1,
+                entry: Entry::Out(event.to_string()),
+            },
+            &mut signals,
+        );
+    }
+    interpreter.on_record(
+        &Record {
+            t: 2,
+            entry: Entry::Shim(ShimEvent::Exited {
+                code: Some(0),
+                signal: None,
+            }),
+        },
+        &mut signals,
+    );
+    let replies: Vec<_> = signals
+        .iter()
+        .filter_map(|signal| match signal {
+            Signal::Reply(reply) => Some(reply.text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(replies, [words, words, new]);
+}
+
+#[test]
 fn stream_records_agree_with_the_reference_drain() {
     let cases: Value = serde_json::from_str(include_str!(
         "../../clarp-kernel/tests/fixtures/backend-opencode-vectors.json"

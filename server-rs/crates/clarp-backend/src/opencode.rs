@@ -668,12 +668,19 @@ impl Stream {
             _ => {
                 let s = rules::assistant_text(v);
                 if !s.is_empty() {
-                    self.text(
-                        &format!("{}:{}", self.step, self.order.len()),
-                        &s,
-                        false,
-                        out,
-                    );
+                    let id = if kind == "text" { word(part, "id") } else { "" };
+                    if id.is_empty() {
+                        self.text(
+                            &format!("{}:{}", self.step, self.order.len()),
+                            &s,
+                            false,
+                            out,
+                        );
+                    } else {
+                        // The CLI also carries the ID of the completed text part. A replay
+                        // belongs to that same part, as when it came through the server.
+                        self.text(id, &s, false, out);
+                    }
                 }
             }
         }
