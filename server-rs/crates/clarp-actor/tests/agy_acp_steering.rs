@@ -92,13 +92,25 @@ impl World {
     }
 
     fn open(&mut self) -> Actor {
+        self.open_for_transit(false)
+    }
+
+    fn open_for_transit(&mut self, held: bool) -> Actor {
         let log = self
             .engine
             .open(&self.profile.dir, standard_set("zstd").unwrap())
             .unwrap();
         let now = self.tick();
-        let (mut actor, out) =
-            Actor::open(self.profile.clone(), self.backend.clone(), log, now).unwrap();
+        let (mut actor, out) = Actor::open_with_teams(
+            self.profile.clone(),
+            self.backend.clone(),
+            log,
+            now,
+            None,
+            None,
+            held,
+        )
+        .unwrap();
         self.carry_out(&mut actor, out);
         actor
     }
@@ -292,6 +304,88 @@ fn ends(actor: &Actor) -> Vec<(String, String)> {
         .filter_map(|row| row.turn.as_ref())
         .map(|end| (end.id.clone(), end.status.clone()))
         .collect()
+}
+
+#[test]
+fn acp_retirement_replays_a_legacy_shim_before_launching_queued_work() {
+    let mut world = World::new("legacy-rejoin");
+    world.backend = clarp_backend::legacy_agy();
+    let mut old = world.open();
+    let message = |id: &str, text: &str| Message {
+        id: id.into(),
+        text: text.into(),
+        origin: Origin::User,
+        ..Message::default()
+    };
+    let (_, out) = old
+        .send(
+            &message("u-old", "started already"),
+            Admission::Queue,
+            world.tick(),
+        )
+        .unwrap();
+    world.carry_out(&mut old, out);
+    world.says(
+        1,
+        &json!({
+            "event": "init", "conversation_id": "legacy-native",
+            "init": {"model": "gemini-4-neon-medium"},
+        }),
+    );
+    world.hint(&mut old);
+    let (sent, out) = old
+        .send(
+            &message("u-queued", "still waiting"),
+            Admission::Queue,
+            world.tick(),
+        )
+        .unwrap();
+    assert!(sent.queued);
+    world.carry_out(&mut old, out);
+    drop(old);
+
+    // The old shim finishes while no Host is reading it.
+    world.says(
+        1,
+        &json!({
+            "event": "result", "result": {
+                "conversation_id": "legacy-native",
+                "status": "SUCCESS", "response": "one legacy reply",
+            }
+        }),
+    );
+    world.exits(1, Some(0), None);
+    let mut reopened = world.open_for_transit(true);
+    assert_eq!(world.took, [1], "opening must fence the second launch");
+    assert!(world.stopped.is_empty());
+    assert_eq!(replies(&reopened), [("one legacy reply".into(), 1, false)]);
+    assert_eq!(ends(&reopened).len(), 1);
+    let native = reopened.status().backend_session;
+    assert_eq!(native.as_deref(), Some("legacy-native"));
+    let (moved, _) = reopened
+        .change_tool(
+            "agy-acp",
+            clarp_kernel::agent::ToolSelection {
+                model: "gemini-4-neon-medium".into(),
+                effort: String::new(),
+            },
+            native,
+            None,
+            "",
+            world.tick(),
+        )
+        .unwrap();
+    assert!(moved.is_ok());
+    drop(reopened);
+
+    world.backend = Arc::new(AgyAcp::with_program("agy"));
+    let mut acp = world.open_for_transit(true);
+    let out = acp.hold_for_transit(false, world.tick()).unwrap();
+    world.carry_out(&mut acp, out);
+    assert_eq!(world.took, [1, 2]);
+    assert_eq!(world.orders[&2].args, ["agy-acp-turn", "agy"]);
+    assert_eq!(messages(&acp), ["u-old", "u-queued"]);
+    assert_eq!(ends(&acp).len(), 1);
 }
 
 /// Starts turn 1 and lets its driver open the conversation and begin to answer.
