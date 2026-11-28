@@ -1012,12 +1012,13 @@ mod tests {
             prompt_too_long(" Request too large "),
             "Prompt is too long: Request too large"
         );
-        // The other words of a long context are not this Host's to read differently.
+        // A provider's own words for a context that is too long are read the same way: the
+        // user is offered to compact (Claude) or a fresh session, not a try that fails again.
         assert_eq!(
             classify_error(
                 r#"{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}"#
             ),
-            UNKNOWN
+            PROMPT_TOO_LONG
         );
         let told = told(PROMPT_TOO_LONG, "Prompt is too long", "m", Known::default());
         assert_eq!(

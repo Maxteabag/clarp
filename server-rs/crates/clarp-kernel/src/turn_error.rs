@@ -685,19 +685,20 @@ pub fn placeholders(key: &str) -> &'static [&'static str] {
 /// out (a reset time, an index, a request id differ from one to the next).
 pub fn fingerprint(code: &str, backend: &str, detail: &str) -> String {
     let mut hash: u32 = 0x811c_9dc5;
-    let mut spaced = false;
+    // A run of digits, and a run of white space, count as one sign each.
+    let mut last = '\0';
     for sign in detail.chars().take(300).flat_map(char::to_lowercase) {
         let sign = if sign.is_ascii_digit() {
             '#'
         } else if sign.is_whitespace() {
-            if spaced {
-                continue;
-            }
             ' '
         } else {
             sign
         };
-        spaced = sign == ' ';
+        if (sign == '#' || sign == ' ') && sign == last {
+            continue;
+        }
+        last = sign;
         let mut bytes = [0; 4];
         for byte in sign.encode_utf8(&mut bytes).bytes() {
             hash ^= u32::from(byte);
