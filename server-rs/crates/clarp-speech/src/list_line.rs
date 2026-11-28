@@ -189,8 +189,8 @@ patterns! {
     TASK_BOX = r"^\[[ xX]\]\s+";
     RULE = r"^\s{0,3}(?:(?:-\s*){3,}|(?:\*\s*){3,}|(?:_\s*){3,}|(?:=\s*){3,})$";
     TABLE_DIVIDER = r"^\s*\|?\s*:?-{2,}:?\s*(?:\|\s*:?-{2,}:?\s*)*\|?\s*$";
-    INLINE_CODE = r"(`+)(.+?)\1";
-    STRONG = r"(\*\*|__)(\S(?:.*?\S)?)\1";
+    STRONG_STARS = r"\*\*(\S(?:.*?\S)?)\*\*";
+    STRONG_UNDERSCORES = r"__(\S(?:.*?\S)?)__";
     STRIKE = r"~~(\S(?:.*?\S)?)~~";
     EMPHASIS_STAR = r"\*(\S(?:[^*]*?\S)?)\*";
     EMPHASIS_UNDERSCORE = r"(^|[^\p{L}\p{N}_])_(\S(?:[^_]*?\S)?)_($|[^\p{L}\p{N}_])";
@@ -294,12 +294,7 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     // Inline code is words as written: no mark inside it is read. It is taken out first and
     // put back last, as it was.
     let mut kept: Vec<String> = Vec::new();
-    s = INLINE_CODE
-        .replace_all(&s, |caps: &Captures| {
-            kept.push(caps[2].trim().to_string());
-            format!("\u{E001}{}\u{E002}", kept.len() - 1)
-        })
-        .into_owned();
+    s = take_inline_code(&s, &mut kept);
     s = IMAGE
         .replace_all(&s, |caps: &Captures| {
             held.images.push(one_line(&caps[1]));
@@ -326,7 +321,8 @@ fn plain_line(line: &str, held: &mut Held) -> String {
         .into_owned();
     s = AUTOLINK.replace_all(&s, "$1").into_owned();
     s = HTML_TAG.replace_all(&s, " ").into_owned();
-    s = STRONG.replace_all(&s, "$2").into_owned();
+    s = STRONG_STARS.replace_all(&s, "$1").into_owned();
+    s = STRONG_UNDERSCORES.replace_all(&s, "$1").into_owned();
     s = STRIKE.replace_all(&s, "$1").into_owned();
     s = EMPHASIS_STAR.replace_all(&s, "$1").into_owned();
     s = EMPHASIS_UNDERSCORE.replace_all(&s, "$1$2$3").into_owned();
@@ -360,6 +356,46 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     }
     out.push_str(rest);
     one_line(&out)
+}
+
+/// A line with each span of inline code (a run of backticks, the code, and a run of as many)
+/// taken out into `kept`, trimmed, and a mark in its place that names it. A run with no run of
+/// as many after it is no code: its backticks stay as they are.
+fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
+    let run_at = |text: &str, at: usize| text[at..].bytes().take_while(|b| *b == b'`').count();
+    let mut out = String::with_capacity(line.len());
+    let mut at = 0;
+    while let Some(found) = line[at..].find('`') {
+        let open = at + found;
+        let width = run_at(line, open);
+        let body = open + width;
+        // The next run of exactly as many backticks closes it.
+        let mut look = body;
+        let mut close = None;
+        while let Some(next) = line[look..].find('`') {
+            let start = look + next;
+            let run = run_at(line, start);
+            if run == width {
+                close = Some(start);
+                break;
+            }
+            look = start + run;
+        }
+        out.push_str(&line[at..open]);
+        match close {
+            Some(close) if close > body => {
+                kept.push(line[body..close].trim().to_string());
+                out.push_str(&format!("\u{E001}{}\u{E002}", kept.len() - 1));
+                at = close + width;
+            }
+            _ => {
+                out.push_str(&line[open..body]);
+                at = body;
+            }
+        }
+    }
+    out.push_str(&line[at..]);
+    out
 }
 
 /// The opening of a fenced code block: its fence and its info word.
@@ -626,6 +662,21 @@ mod tests {
         assert_eq!(decision_receipt(&expired).unwrap().1, Resolved::Expired);
         assert_eq!(decision_receipt("[Clarp decision resolved]"), None);
         assert_eq!(decision_receipt("Ship it"), None);
+    }
+
+    #[test]
+    fn every_pattern_compiles_and_inline_code_pairs_its_backticks() {
+        assert_eq!(read("plain words").unwrap().english(), "plain words");
+        let mut kept = Vec::new();
+        let made = take_inline_code("a `x` b ``y ` z`` c ` d", &mut kept);
+        assert_eq!(kept, ["x", "y ` z"]);
+        assert_eq!(made, "a \u{E001}0\u{E002} b \u{E001}1\u{E002} c ` d");
+        assert_eq!(
+            read("**bold** and __strong__ and `**kept**`")
+                .unwrap()
+                .english(),
+            "bold and strong and **kept**"
+        );
     }
 
     #[test]
