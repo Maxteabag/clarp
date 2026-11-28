@@ -39,6 +39,8 @@ mod live;
 mod queue;
 mod send_while_working;
 mod stop;
+mod turn_retry;
+pub use turn_retry::RetryState;
 pub mod search;
 mod panels;
 pub mod profile;
@@ -330,6 +332,7 @@ pub struct Engine {
     /// Optional requests whose failure was already logged once.
     quiet_failures: HashSet<String>,
     stops: stop::Stops,
+    retries: turn_retry::Retries,
     /// Chats whose "not spoken" banner showed since their voice last worked:
     /// it shows once per chat, not after every reply.
     voice_errors_shown: HashSet<String>,
@@ -480,6 +483,7 @@ impl Engine {
             has_stored_credential: false,
             quiet_failures: HashSet::new(),
             stops: stop::Stops::default(),
+            retries: turn_retry::Retries::default(),
             voice_errors_shown: HashSet::new(),
             error_source: String::new(),
             narrator,
@@ -1686,7 +1690,7 @@ impl Engine {
         if self.voice_json(tag, object) || self.narrator_json(tag, object) {
             return;
         }
-        if self.host_status_json(tag, object) || self.stop_json(tag, object) || self.host_search_json(tag, object) {
+        if self.host_status_json(tag, object) || self.stop_json(tag, object) || self.turn_retry_json(tag, object) || self.host_search_json(tag, object) {
             return;
         }
         if tag.starts_with("tool-details:") {
@@ -1768,7 +1772,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail, status) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
+        if self.turn_retry_failure(tag, message, status) || self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail, status) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {
