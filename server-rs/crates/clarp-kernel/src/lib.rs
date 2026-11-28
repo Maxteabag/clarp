@@ -40,6 +40,7 @@ pub mod doors;
 pub mod experience;
 pub mod explain;
 pub mod failures;
+pub mod turn_error;
 pub mod fcm;
 pub mod fork;
 pub mod gallery;

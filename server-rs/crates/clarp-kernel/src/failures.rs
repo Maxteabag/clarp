@@ -40,6 +40,16 @@ pub const TIMEOUT: &str = "timeout";
 pub const NOT_STARTED: &str = "not_started";
 pub const UNKNOWN: &str = "unknown";
 pub const MUSE_SESSION_LOCKED: &str = "muse_session_locked";
+/// The provider turned the request down as malformed: a tool or call id it does not take, an
+/// empty tool result, a payload it calls invalid, a plain 400. Asked again in the same session
+/// it fails the same way, since the session's history is what it rejects. A kind of this
+/// Host's own.
+pub const INVALID_REQUEST: &str = "invalid_request";
+/// The model refused: a safety filter blocked its answer. A kind of this Host's own.
+pub const REFUSED: &str = "refused";
+/// The tool's session is held by another process (a Codex thread with another active
+/// writer). Worth a try again in a moment. A kind of this Host's own.
+pub const SESSION_LOCKED: &str = "session_locked";
 /// The tool would have run, or ran, on another model provider than the one its agent is
 /// bound to (an agent with a provider of its own, `codex_provider`). Never tried again: the
 /// agent's configuration has to be put right first. The Host names it itself, by the words
@@ -130,7 +140,10 @@ pub fn provider_mismatch(why: &str) -> String {
 }
 
 /// The kinds the user is told of, once the Host has stopped trying.
-pub const NOTIFY: [&str; 14] = [
+pub const NOTIFY: [&str; 17] = [
+    INVALID_REQUEST,
+    REFUSED,
+    SESSION_LOCKED,
     CONNECTION,
     TRANSIENT,
     INTERRUPTED,
@@ -148,7 +161,10 @@ pub const NOTIFY: [&str; 14] = [
 ];
 
 /// The kinds this Host reads that the Python Host does not (`docs/differences.md`).
-pub const OWN_KINDS: [&str; 4] = [
+pub const OWN_KINDS: [&str; 7] = [
+    INVALID_REQUEST,
+    REFUSED,
+    SESSION_LOCKED,
     PROMPT_TOO_LONG,
     PROVIDER_MISMATCH,
     FOLDER_MISSING,
@@ -276,6 +292,28 @@ static ACCOUNT_PLAN_RE: LazyLock<Regex> = LazyLock::new(|| {
         r"your (?:current )?plan does not (?:include|support|have access)",
     ))
 });
+// A request the provider refused as malformed: "API Error: 400 messages.125.content.1.tool_result:
+// content cannot be empty if `is_error` is true" (Claude Code), "Invalid response.create payload:
+// Invalid 'input[29].call_id': string too long" (Codex).
+static INVALID_REQUEST_RE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(concat!(
+        r"invalid_request_error|invalid [\w.]+ payload|invalid '?input\[\d+\]|",
+        r"\bcall_id\b|\btool_use_id\b|\btool_result\b.{0,40}(?:empty|must|cannot|invalid)|",
+        r"messages\.\d+\.content|api error:? 400\b|\b400 bad request\b|status(?: code)?:? 400\b|",
+        r"expected a string with maximum length",
+    ))
+});
+// A model's answer blocked by a safety filter.
+static REFUSED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(concat!(
+        r"content safety filters?|blocked by (?:the )?(?:content|safety) (?:filter|polic)|",
+        r"prohibited use policy|stop_reason\W{0,4}refusal",
+    ))
+});
+// A session another process holds: Codex's "thread-store conflict: thread ... already has an
+// active writer".
+static SESSION_LOCKED_RE: LazyLock<Regex> =
+    LazyLock::new(|| pattern(r"already has an active writer|thread-store conflict|session is locked"));
 // Claude Code 2.1.321: "Prompt is too long · the request is ~1050000 tokens (limit 1000000)
 // ...", with `terminal_reason` `prompt_too_long` on its result.
 static PROMPT_TOO_LONG_RE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bprompt is too long\b"));
@@ -342,19 +380,30 @@ pub fn classify_error(message: &str) -> &'static str {
     if text.starts_with(ENDED_FROM_OUTSIDE_MARK) {
         return ENDED_FROM_OUTSIDE;
     }
+    // A turn that ended while it waited for an account ended on a usage limit, whatever its
+    // process said of it.
+    if is_account_wait_message(text) {
+        return USAGE_LIMIT;
+    }
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a
     // stop. A turn that was stopped often also prints a broken pipe as it goes, and must
     // not be tried again. A prompt that is too long counts its tokens, and a count can read
     // as a server's error (`1,529,000`); the tool exits badly on it as well. A usage limit
     // that advertises a plan is a usage limit.
-    let order: [(&LazyLock<Regex>, &str); 9] = [
+    // A refusal is the model's answer, which a bad exit after it does not change. A malformed
+    // request names its status (400) and its indexes, which read as nothing else once the
+    // account's kinds are ruled out; a session another process holds says so before its exit.
+    let order: [(&LazyLock<Regex>, &str); 12] = [
         (&TIMEOUT_RE, TIMEOUT),
         (&INTERRUPTED_RE, INTERRUPTED),
         (&PROMPT_TOO_LONG_RE, PROMPT_TOO_LONG),
+        (&REFUSED_RE, REFUSED),
         (&USAGE_LIMIT_RE, USAGE_LIMIT),
         (&ACCOUNT_PLAN_RE, ACCOUNT_PLAN),
         (&AUTH_RE, AUTH),
+        (&SESSION_LOCKED_RE, SESSION_LOCKED),
+        (&INVALID_REQUEST_RE, INVALID_REQUEST),
         (&CONNECTION_RE, CONNECTION),
         (&TRANSIENT_RE, TRANSIENT),
         (&RUNNER_EXIT_RE, RUNNER_EXIT),
@@ -554,6 +603,12 @@ fn sentence(kind: &str, model: &str) -> String {
         INTERRUPTED => "Turn interrupted".to_string(),
         crate::agent_moves::MOVED => "The agent moved to another Host".to_string(),
         USAGE_LIMIT => "Usage limit reached".to_string(),
+        INVALID_REQUEST => "The provider rejected the conversation's history. Start a fresh \
+             session and try again"
+            .to_string(),
+        REFUSED => "The model refused to answer (a safety filter blocked it)".to_string(),
+        SESSION_LOCKED => "The tool's session is busy in another process. Try again in a moment"
+            .to_string(),
         AUTH => "Sign-in expired — could not refresh the account".to_string(),
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),
