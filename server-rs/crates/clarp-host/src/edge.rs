@@ -4481,13 +4481,8 @@ async fn send_as(
         session: member.record.session.clone(),
         dispatch: member.record.backend.clone(),
         trace_id,
-        admission: match receipt_id {
-            Some(id) => Some(clarp_protocol::responses::SendAdmission::new(
-                id,
-                sent.owner_admission,
-            )),
-            None => None,
-        },
+        admission: receipt_id
+            .map(|id| clarp_protocol::responses::SendAdmission::new(id, sent.owner_admission)),
         queued: Some(sent.queued),
         // Where the queue stands with this message in it. A message that did not have to
         // wait says nothing about the queue: the Python Host answers zeros, and so does this.
