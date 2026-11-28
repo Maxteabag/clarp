@@ -332,6 +332,19 @@ fn direct_queue_controls_record_the_signed_agent_and_keep_owner_work_held_on_sto
     let queue = host.get(&format!("/turn-queue?session={target}"));
     assert_eq!(queue["paused"], true);
     assert_eq!(queue["items"].as_array().unwrap().len(), 3);
+    let conversation = host.turns(&target);
+    let spool = place
+        .root
+        .join("data/agents")
+        .join(agent_id(&host, &target))
+        .join("spool");
+    let attempts = || {
+        std::fs::read_dir(&spool)
+            .unwrap()
+            .map(|file| file.unwrap().file_name())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let before_attempts = attempts();
     assert!(live().is_null());
     for action in ["steer", "take-over"] {
         let refused = signed(
@@ -342,6 +355,10 @@ fn direct_queue_controls_record_the_signed_agent_and_keep_owner_work_held_on_sto
         assert_eq!(refused.status, 409, "{}", refused.text());
         assert!(refused.text().contains("stale_turn"));
         assert_eq!(host.get(&format!("/turn-queue?session={target}")), queue);
+        assert_eq!(host.state(&target), "interrupted");
+        assert!(live().is_null());
+        assert_eq!(host.turns(&target), conversation);
+        assert_eq!(attempts(), before_attempts);
     }
     assert_eq!(
         signed("DELETE", "/turn-queue/withdraw", json!({})).status,

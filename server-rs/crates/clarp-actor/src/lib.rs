@@ -3193,6 +3193,14 @@ impl Actor {
         Ok(self.recorder.experience_window(since, now)?)
     }
 
+    /// Origin of a message still present in the visible queue, from its admission record.
+    pub fn waiting_origin(&self, turn: TurnId) -> Option<&Origin> {
+        self.recorder
+            .unshown_waiting()
+            .find(|queued| queued.id == turn)
+            .map(|queued| &queued.origin)
+    }
+
     /// The item a user can edit or withdraw while it is waiting.
     pub fn queue_item(&self, turn: TurnId) -> Result<Option<Waiting>, ActorError> {
         self.recorder

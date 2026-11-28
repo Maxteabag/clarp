@@ -3751,27 +3751,34 @@ impl Worker {
     /// Check before releasing a selected takeover or reading a steering fence, and again
     /// after those operations, which can advance the journal to another turn.
     fn check_queue_turn(&self, ask: Ask) -> Option<Ask> {
-        let expected = match &ask {
-            Ask::Steer { expected, .. } | Ask::TakeOver { expected, .. } => expected,
+        let (turn, expected) = match &ask {
+            Ask::Steer { turn, expected, .. } | Ask::TakeOver { turn, expected, .. } => {
+                (turn, expected)
+            }
             _ => return Some(ask),
         };
-        let stale = match expected {
-            ExpectedTurn::Omitted => false,
-            ExpectedTurn::OtherScope => true,
-            ExpectedTurn::Here(id) => self
-                .actor
-                .as_ref()
-                .is_some_and(|actor| actor.live_turn() != Some(*id) || actor.fork_runs()),
-        };
-        if !stale {
+        let Some(actor) = self.actor.as_ref() else {
             return Some(ask);
-        }
+        };
+        let (steer, take_over) = match actor.waiting_origin(*turn) {
+            None => (Steered::NotWaiting, TakenOver::NotWaiting),
+            Some(origin) if !origin.is_user_send() => {
+                (Steered::NotTheOwners, TakenOver::NotTheOwners)
+            }
+            Some(_) => match expected {
+                ExpectedTurn::Omitted => return Some(ask),
+                ExpectedTurn::Here(id) if actor.live_turn() == Some(*id) && !actor.fork_runs() => {
+                    return Some(ask);
+                }
+                _ => (Steered::StaleTurn, TakenOver::StaleTurn),
+            },
+        };
         match ask {
             Ask::Steer { answer, .. } => {
-                let _ = answer.send(Ok(Steered::StaleTurn));
+                let _ = answer.send(Ok(steer));
             }
             Ask::TakeOver { answer, .. } => {
-                let _ = answer.send(Ok(TakenOver::StaleTurn));
+                let _ = answer.send(Ok(take_over));
             }
             _ => unreachable!(),
         }

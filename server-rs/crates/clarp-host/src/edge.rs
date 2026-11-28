@@ -5179,6 +5179,10 @@ fn expected_queue_turn(
         d.deserialize_map(Object).map(Some)
     }
 
+    // Origin belongs to the immutable journal entry addressed by waiting.turn.
+    if !waiting.origin.is_user_send() {
+        return Err(not_the_owners());
+    }
     if body.is_empty() {
         return Ok(ExpectedTurn::Omitted);
     }
@@ -5192,10 +5196,6 @@ fn expected_queue_turn(
     };
     if binding.agent_id.trim().is_empty() || binding.server_id.trim().is_empty() {
         return Err(invalid());
-    }
-    // Origin belongs to the immutable journal entry addressed by waiting.turn.
-    if !waiting.origin.is_user_send() {
-        return Err(not_the_owners());
     }
     Ok(
         if binding.server_id == app.server_id && binding.agent_id == member.record.agent_id {

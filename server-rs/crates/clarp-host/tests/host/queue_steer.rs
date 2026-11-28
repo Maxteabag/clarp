@@ -149,9 +149,14 @@ fn only_the_owners_waiting_message_takes_over() {
     );
     let guard = json!({"expected_turn":{"server_id":"foreign","agent_id":"foreign","turn_id":1}});
     for action in ["take-over", "steer"] {
-        let (status, refused) =
-            host.ask("POST", &format!("/turn-queue/sched/{action}"), Some(&guard));
-        assert_eq!((status, &refused["code"]), (409, &json!("not_the_owners")));
+        for supplied in [&guard, &json!({"expected_turn": null})] {
+            let (status, refused) = host.ask(
+                "POST",
+                &format!("/turn-queue/sched/{action}"),
+                Some(supplied),
+            );
+            assert_eq!((status, &refused["code"]), (409, &json!("not_the_owners")));
+        }
     }
     let (status, refused) = host.ask("POST", "/turn-queue/sched/take-over", None);
     assert_eq!(
