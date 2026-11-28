@@ -643,15 +643,15 @@ export component BlockIcon inherits Rectangle {
 // Copy: the icon turns into a checkmark for a moment (no toast).
 export component CopyIcon inherits Rectangle {
     in property <string> text;
-    in property <string> label: "Copy code";
+    in property <string> label: @tr("Copy code");
     in property <length> size: 14px * ChatText.scale;
     out property <bool> copied;
-    width: icon.width;
-    height: icon.height;
-    icon := BlockIcon {
+    width: button.width;
+    height: button.height;
+    button := BlockIcon {
         size: root.size;
         icon: root.copied ? @image-url("icons/check.svg") : @image-url("icons/copy.svg");
-        label: root.copied ? "Copied" : root.label;
+        label: root.copied ? @tr("Copied") : root.label;
         clicked => {
             BlockBridge.copy(root.text);
             root.copied = true;
@@ -712,9 +712,12 @@ export component Block inherits VerticalLayout {
         min-width: code-text.min-width + 20px;
         preferred-width: code-text.preferred-width + 20px;
         height: self.line + code-text.preferred-height + 20px;
+        accessible-role: groupbox;
+        accessible-id: root.measuring ? "" : "code-block";
+        accessible-label: root.block.language;
         open-touch := TouchArea {
             enabled: !root.measuring;
-            mouse-cursor: root.viewer ? pointer : default;
+            mouse-cursor: root.viewer ? MouseCursor.pointer : MouseCursor.default;
             clicked => {
                 if (root.viewer && Math.abs(self.mouse-x - self.pressed-x) < 5px && Math.abs(self.mouse-y - self.pressed-y) < 5px) {
                     BlockBridge.open(root.block);
@@ -804,7 +807,7 @@ export component Block inherits VerticalLayout {
                     x: parent.width - self.width - 2px;
                     accessible-id: root.measuring ? "" : "table-expand";
                     icon: @image-url("icons/fullscreen.svg");
-                    label: "Full screen";
+                    label: @tr("Full screen");
                     clicked => { BlockBridge.open(root.block); }
                 }
             }

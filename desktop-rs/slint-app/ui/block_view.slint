@@ -42,7 +42,7 @@ export component BlockView inherits Rectangle {
     changed block => { root.wrap = true; }
     background: Palette.window;
     accessible-role: groupbox;
-    accessible-label: root.code ? "Code" : "Table";
+    accessible-label: root.code ? @tr("Code") : @tr("Table");
     // Nothing under it takes a click.
     TouchArea { }
     keys := FocusScope { }
@@ -65,7 +65,7 @@ export component BlockView inherits Rectangle {
                 accessible-id: "block-view-wrap";
                 size: 18px;
                 icon: @image-url("icons/wrap.svg");
-                label: "Wrap lines";
+                label: @tr("Wrap lines");
                 on: root.wrap;
                 accessible-checkable: true;
                 accessible-checked: root.wrap;
@@ -75,13 +75,13 @@ export component BlockView inherits Rectangle {
                 accessible-id: "block-view-copy";
                 size: 18px;
                 text: root.code ? root.block.text : root.block.source;
-                label: root.code ? "Copy code" : "Copy table";
+                label: root.code ? @tr("Copy code") : @tr("Copy table");
             }
             BlockIcon {
                 accessible-id: "block-view-close";
                 size: 18px;
                 icon: @image-url("icons/close.svg");
-                label: "Close";
+                label: @tr("Close");
                 clicked => { root.done(); }
             }
         }
@@ -95,7 +95,7 @@ export component BlockView inherits Rectangle {
                 text: root.block.text;
                 read-only: true;
                 single-line: false;
-                wrap: root.wrap ? word-wrap : no-wrap;
+                wrap: root.wrap ? TextWrap.word-wrap : TextWrap.no-wrap;
                 font-family: Palette.code-family;
                 font-size: ChatText.body;
                 color: Palette.text;
@@ -113,7 +113,7 @@ export component BlockView inherits Rectangle {
                 ((column < root.block.columns.length ? root.block.columns[column] : 4) * table.char + table.pad) * table.grow
             }
             accessible-role: AccessibleRole.table;
-            accessible-label: self.count + " columns";
+            accessible-label: @tr("{n} column" | "{n} columns" % self.count);
             clip: true;
             head := Rectangle {
                 y: 0;

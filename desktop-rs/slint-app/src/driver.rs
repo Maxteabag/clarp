@@ -75,6 +75,8 @@ mod customize_checks;
 // ---- the chat's own zoom
 #[path = "zoom_checks.rs"]
 mod zoom_checks;
+#[path = "codeblock_checks.rs"]
+mod codeblock_checks;
 // ---- chats from all paired Hosts
 #[path = "all_hosts_checks.rs"]
 mod all_hosts_checks;
@@ -623,6 +625,7 @@ pub fn start_check(name: &str, out: String) {
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "narrow" => narrow_checks::narrow_check(out),
+        "codeblocks" => codeblock_checks::codeblocks_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
         "playback" => playback_checks::playback_check(out, false),
