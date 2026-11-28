@@ -12,7 +12,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 
-use chrono::{Datelike, NaiveDate, NaiveTime, Timelike};
+use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Timelike};
 use icu_datetime::fieldsets;
 use icu_datetime::{DateTimeFormatter, DateTimeFormatterPreferences, NoCalendarFormatter};
 use icu_decimal::DecimalFormatter;
@@ -53,6 +53,7 @@ thread_local! {
     static DATES: RefCell<HashMap<(String, Pattern), DateTimeFormatter<fieldsets::enums::DateFieldSet>>> = RefCell::new(HashMap::new());
     static TIMES: RefCell<HashMap<(String, Clock), NoCalendarFormatter<fieldsets::T>>> = RefCell::new(HashMap::new());
     static NUMBERS: RefCell<HashMap<String, DecimalFormatter>> = RefCell::new(HashMap::new());
+    static MOMENTS: RefCell<HashMap<(String, Moment, Clock), DateTimeFormatter<fieldsets::enums::DateAndTimeFieldSet>>> = RefCell::new(HashMap::new());
 }
 
 fn iso(day: NaiveDate) -> Option<icu_calendar::Date<icu_calendar::Iso>> {
@@ -127,6 +128,61 @@ pub fn time(tag: &str, at: NaiveTime, clock: Clock) -> String {
                     cache.insert(key.clone(), formatter);
                 }
                 Err(_) => return at.format("%H:%M").to_string(),
+            }
+        }
+        cache[&key].format(&value).to_string()
+    })
+}
+
+/// How far a moment is from today, for `moment`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum Moment {
+    /// "Sat 6:27 PM", "lør. 18:27".
+    WeekdayTime,
+    /// "Dec 5, 6:27 PM", "5. des., 18:27".
+    DayMonthTime,
+    /// "Dec 5, 2027, 6:27 PM".
+    DateTime,
+}
+
+/// A moment told against today, as a reset or a scheduled time reads: the
+/// time alone when it is today ("6:27 PM", "18:27"), with the weekday within
+/// a week ("Sat 6:27 PM"), else with the date ("Dec 5, 6:27 PM"; the year
+/// when it is another one).
+pub fn moment(tag: &str, at: NaiveDateTime, today: NaiveDate, clock: Clock) -> String {
+    let days = (at.date() - today).num_days();
+    if days == 0 {
+        return time(tag, at.time(), clock);
+    }
+    let kind = if days.abs() < 7 {
+        Moment::WeekdayTime
+    } else if at.year() == today.year() {
+        Moment::DayMonthTime
+    } else {
+        Moment::DateTime
+    };
+    let (Some(date), Ok(clock_time)) = (iso(at.date()), icu_time::Time::try_new(at.hour() as u8, at.minute() as u8, 0, 0)) else { return String::new() };
+    let value = icu_time::DateTime { date, time: clock_time };
+    MOMENTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        let key = (tag.to_owned(), kind, clock);
+        if !cache.contains_key(&key) {
+            let mut prefs = DateTimeFormatterPreferences::from(&locale(tag));
+            prefs.hour_cycle = match clock {
+                Clock::Locale => None,
+                Clock::H12 => Some(HourCycle::H12),
+                Clock::H24 => Some(HourCycle::H23),
+            };
+            let made = match kind {
+                Moment::WeekdayTime => DateTimeFormatter::try_new(prefs, fieldsets::E::short().with_time_hm()).map(|f| f.cast_into_fset()),
+                Moment::DayMonthTime => DateTimeFormatter::try_new(prefs, fieldsets::MD::medium().with_time_hm()).map(|f| f.cast_into_fset()),
+                Moment::DateTime => DateTimeFormatter::try_new(prefs, fieldsets::YMD::medium().with_time_hm()).map(|f| f.cast_into_fset()),
+            };
+            match made {
+                Ok(formatter) => {
+                    cache.insert(key.clone(), formatter);
+                }
+                Err(_) => return at.format("%Y-%m-%d %H:%M").to_string(),
             }
         }
         cache[&key].format(&value).to_string()

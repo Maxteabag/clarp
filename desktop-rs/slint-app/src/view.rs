@@ -680,8 +680,11 @@ pub(crate) fn message_row(
     // except a turn whose process was ended from outside (`failure_kind`
     // `ended_from_outside`, contract 191): that is no fault of the tool or
     // the agent, so it reads as the Host's quiet line too.
+    // A failure the Host explains (`turn_error_explained`) is its card.
     let author = if row.activity {
         "activity"
+    } else if m.turn_error.is_some() && m.role != "user" && !m.automated {
+        "error"
     } else if m.role == "user" {
         "user"
     } else if m.role == "system" || m.failure_kind == clarp_core::protocol::ENDED_FROM_OUTSIDE {
@@ -708,6 +711,8 @@ pub(crate) fn message_row(
     // Markdown. A resolved decision is its receipt, never the Host's prompt.
     let blocks = match &prompt {
         _ if receipt.is_some() => Vec::new(),
+        // The card draws the sentence; the raw words wait in its Details.
+        _ if author == "error" => Vec::new(),
         Some(_) if !prompt_open => Vec::new(),
         None if author == "user" => vec![clarp_engine::blocks::Block::Prose(text.clone())],
         _ => clarp_engine::blocks::blocks(&text),
@@ -777,6 +782,8 @@ pub(crate) fn message_row(
         work_open: false,
         // The pane puts the rows of opened work in one box (#727).
         work_box: SharedString::new(),
+        // The pane fills in the count, the buttons and their state.
+        error: m.turn_error.as_ref().map(crate::turn_error_view::card).unwrap_or_default(),
     }
 }
 

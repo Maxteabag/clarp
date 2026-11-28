@@ -1,0 +1,446 @@
+{
+ "about": "Sample /log rows and a live turn op carrying the turn error object (feature turn_error_explained, docs/turn-errors.md). Three identical invalid_request rows with user messages between them must collapse to one card with 3x at the newest; the others are one card each.",
+ "log_rows": [
+  {
+   "id": "u1",
+   "role": "user",
+   "origin": "user",
+   "text": "Fix the build",
+   "ts": 1795841000000
+  },
+  {
+   "id": "marker-u1",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "invalid_request",
+   "trace_id": "t1",
+   "ts": 1795841001000,
+   "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+   "error": {
+    "code": "invalid_request",
+    "key": "error.invalid_request",
+    "severity": "error",
+    "text": {
+     "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
+     "nb": "Codex avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen."
+    },
+    "actions": [
+     {
+      "id": "fresh_retry",
+      "label": {
+       "en": "New session, try again",
+       "nb": "Ny økt, prøv igjen"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "detail": "Invalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+    "backend": "codex",
+    "model": "gpt-6.1",
+    "message_id": "u1",
+    "trace_id": "t1",
+    "fingerprint": "invalid_request:codex:3b9d2e10",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t1\nAt: 2026-11-28 14:03 CET\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
+   }
+  },
+  {
+   "id": "u2",
+   "role": "user",
+   "origin": "user",
+   "text": "Try again",
+   "ts": 1795841060000
+  },
+  {
+   "id": "marker-u2",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "invalid_request",
+   "trace_id": "t2",
+   "ts": 1795841061000,
+   "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+   "error": {
+    "code": "invalid_request",
+    "key": "error.invalid_request",
+    "severity": "error",
+    "text": {
+     "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
+     "nb": "Codex avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen."
+    },
+    "actions": [
+     {
+      "id": "fresh_retry",
+      "label": {
+       "en": "New session, try again",
+       "nb": "Ny økt, prøv igjen"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "detail": "Invalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+    "backend": "codex",
+    "model": "gpt-6.1",
+    "message_id": "u2",
+    "trace_id": "t2",
+    "fingerprint": "invalid_request:codex:3b9d2e10",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t2\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
+   }
+  },
+  {
+   "id": "q1",
+   "role": "system",
+   "origin": "system",
+   "kind": "notice",
+   "text": "Expired · Question",
+   "ts": 1795841090000
+  },
+  {
+   "id": "u3",
+   "role": "user",
+   "origin": "user",
+   "text": "Hello?",
+   "ts": 1795841100000
+  },
+  {
+   "id": "marker-u3",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "invalid_request",
+   "trace_id": "t3",
+   "ts": 1795841101000,
+   "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long.",
+   "error": {
+    "code": "invalid_request",
+    "key": "error.invalid_request",
+    "severity": "error",
+    "text": {
+     "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
+     "nb": "Codex avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen."
+    },
+    "actions": [
+     {
+      "id": "fresh_retry",
+      "label": {
+       "en": "New session, try again",
+       "nb": "Ny økt, prøv igjen"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "detail": "Invalid response.create payload: Invalid 'input[29].call_id': string too long.",
+    "backend": "codex",
+    "model": "gpt-6.1",
+    "message_id": "u3",
+    "trace_id": "t3",
+    "fingerprint": "invalid_request:codex:3b9d2e10",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t3",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
+   }
+  },
+  {
+   "id": "u4",
+   "role": "user",
+   "origin": "user",
+   "text": "Summarise the repo",
+   "ts": 1795842000000
+  },
+  {
+   "id": "marker-u4",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "usage_limit",
+   "trace_id": "t4",
+   "ts": 1795842001000,
+   "text": "Usage limit reached · resets 18:27.\n\nYou've hit your usage limit.",
+   "error": {
+    "code": "usage_limit",
+    "key": "error.usage_limit_until",
+    "severity": "warning",
+    "text": {
+     "en": "Your Codex account is out of usage until 18:27. Try again then, or switch model.",
+     "nb": "Codex-kontoen din er tom for kvote til kl. 18:27. Prøv igjen da, eller bytt modell."
+    },
+    "actions": [
+     {
+      "id": "retry_at",
+      "at_ms": 1795850820000,
+      "label": {
+       "en": "Try again at 18:27",
+       "nb": "Prøv igjen kl. 18:27"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "detail": "You've hit your usage limit.",
+    "backend": "codex",
+    "model": "gpt-6.1",
+    "message_id": "u4",
+    "trace_id": "t4",
+    "resets_at_ms": 1795850820000,
+    "fingerprint": "usage_limit:codex:0a11f3c4",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: usage_limit\nBackend: codex\nModel: gpt-6.1\nTrace: t4\n\nProvider said:\nYou've hit your usage limit.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1",
+     "time_ms": 1795850820000
+    }
+   }
+  },
+  {
+   "id": "u5",
+   "role": "user",
+   "origin": "user",
+   "text": "Continue",
+   "ts": 1795843000000
+  },
+  {
+   "id": "marker-u5",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "auth",
+   "trace_id": "t5",
+   "ts": 1795843001000,
+   "text": "Sign-in expired — could not refresh the account.\n\nOAuth session expired. Please run /login",
+   "error": {
+    "code": "auth",
+    "key": "error.auth",
+    "severity": "error",
+    "text": {
+     "en": "Your Claude sign-in has expired. Sign in again, then try again.",
+     "nb": "Innloggingen hos Claude har gått ut. Logg inn på nytt, og prøv igjen."
+    },
+    "actions": [
+     {
+      "id": "sign_in",
+      "backend": "claude",
+      "label": {
+       "en": "Sign in again",
+       "nb": "Logg inn på nytt"
+      }
+     },
+     {
+      "id": "retry",
+      "label": {
+       "en": "Try again",
+       "nb": "Prøv igjen"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "detail": "OAuth session expired. Please run /login",
+    "backend": "claude",
+    "model": "claude-opus-5-5",
+    "message_id": "u5",
+    "trace_id": "t5",
+    "fingerprint": "auth:claude:77c0be12",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: auth\nBackend: claude\nModel: claude-opus-5-5\nTrace: t5\n\nProvider said:\nOAuth session expired. Please run /login",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
+   }
+  },
+  {
+   "id": "u6",
+   "role": "user",
+   "origin": "user",
+   "text": "Read the whole log",
+   "ts": 1795844000000
+  },
+  {
+   "id": "marker-u6",
+   "role": "assistant",
+   "origin": "system",
+   "failure_kind": "prompt_too_long",
+   "trace_id": "t6",
+   "ts": 1795844001000,
+   "text": "This conversation is too long for the model. Compact it or start a new one.\n\nPrompt is too long · the request is ~1050000 tokens (limit 1000000)",
+   "error": {
+    "code": "prompt_too_long",
+    "key": "error.prompt_too_long",
+    "severity": "warning",
+    "text": {
+     "en": "This conversation has grown too long for the model. Compact it and continue.",
+     "nb": "Samtalen har blitt for lang for modellen. Komprimer den og fortsett."
+    },
+    "actions": [
+     {
+      "id": "compact_retry",
+      "label": {
+       "en": "Compact and continue",
+       "nb": "Komprimer og fortsett"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     }
+    ],
+    "detail": "Prompt is too long · the request is ~1050000 tokens (limit 1000000)",
+    "backend": "claude",
+    "model": "claude-opus-5-5",
+    "message_id": "u6",
+    "trace_id": "t6",
+    "fingerprint": "prompt_too_long:claude:1c2d3e4f",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: prompt_too_long\nBackend: claude\nModel: claude-opus-5-5\nTrace: t6",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
+   }
+  }
+ ],
+ "live_turn_op": {
+  "op": "turn",
+  "conv": "c1",
+  "turn": {
+   "turn_id": "7",
+   "status": "failed",
+   "started_at_ms": 1795845000000,
+   "ended_at_ms": 1795845014000,
+   "worked_ms": 14000,
+   "tool_count": 2,
+   "error": {
+    "reason": "provider_busy",
+    "message": "API unavailable (overloaded / rate limited)",
+    "detail": "529 Overloaded",
+    "code": "provider_busy",
+    "key": "error.provider_busy",
+    "severity": "warning",
+    "text": {
+     "en": "Claude is overloaded right now and the Host's retries did not get through. Try again in a minute, or switch model.",
+     "nb": "Claude er overbelastet akkurat nå, og Hostens nye forsøk kom ikke gjennom. Prøv igjen om et minutt, eller bytt modell."
+    },
+    "actions": [
+     {
+      "id": "retry",
+      "label": {
+       "en": "Try again",
+       "nb": "Prøv igjen"
+      }
+     },
+     {
+      "id": "switch_model",
+      "label": {
+       "en": "Switch backend or model",
+       "nb": "Bytt backend eller modell"
+      }
+     },
+     {
+      "id": "copy_details",
+      "label": {
+       "en": "Copy diagnostics",
+       "nb": "Kopier diagnose"
+      }
+     }
+    ],
+    "backend": "claude",
+    "model": "claude-opus-5-5",
+    "message_id": "u7",
+    "trace_id": "t7",
+    "fingerprint": "provider_busy:claude:9e8d7c6b",
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: provider_busy\nBackend: claude\nModel: claude-opus-5-5\nTrace: t7\n\nProvider said:\n529 Overloaded",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
+   }
+  }
+ },
+ "turn_retry": {
+  "request": {
+   "session": "tt-codex",
+   "message_id": "u3"
+  },
+  "request_at": {
+   "session": "tt-codex",
+   "message_id": "u4",
+   "at_ms": 1795850820000
+  },
+  "request_compact": {
+   "session": "tt-claude",
+   "message_id": "u6",
+   "compact": true
+  },
+  "response": {
+   "ok": true,
+   "status": "queued"
+  },
+  "request_fresh": {
+   "session": "tt-codex",
+   "message_id": "u3",
+   "fresh": true
+  }
+ }
+}
