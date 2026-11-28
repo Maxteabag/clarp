@@ -737,10 +737,9 @@ impl Drop for Host {
 const TOOLS: [&str; 7] = [
     "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
 ];
-/// The tools an app's picker lists: those, and Antigravity over ACP beside Antigravity, which
-/// shares its program and its sign-in and so has no row of its own among the sign-ins.
-const PICKED: [&str; 8] = [
-    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
+/// Execution backends offered in the app. The Antigravity credential is shared under agy.
+const PICKED: [&str; 7] = [
+    "claude", "codex", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 
 fn wait_for(what: &str, ready: impl FnMut() -> bool) {
@@ -1764,29 +1763,8 @@ fn enable_test_keeper(host: &Host, owner: &str) {
 #[test]
 fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
     let place = Place::new("ledger-doors");
-    let (keeper, _) = keeping_model(&place, "agy");
-    let agy = place.root.join("agy");
-    let store = place.root.join(".gemini/antigravity-cli/conversations");
-    std::fs::create_dir_all(&store).unwrap();
+    let (agy, _) = keeping_model(&place, "agy");
     let tokens = place.root.join("tokens");
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, os, pathlib, sys, uuid
-args = sys.argv[1:]
-if "--json-schema" in args:
-    os.execv({keeper}, [{keeper}, *args])
-sid = args[args.index("--conversation")+1] if "--conversation" in args else str(uuid.uuid4())
-pathlib.Path({store}, sid+".db").touch()
-with open({tokens}, "a") as out:
-    out.write(json.dumps([sid,os.environ["CLARP_PROVIDER_TURN"]])+"\n")
-print(json.dumps({{"event":"init","conversation_id":sid,"init":{{"model":"fixture"}}}}))
-print(json.dumps({{"event":"result","result":{{"conversation_id":sid,"status":"SUCCESS","response":"done"}}}}))
-"#,
-        keeper = json!(keeper),
-        store = json!(store),
-        tokens = json!(tokens)
-    );
-    program(&agy, &script);
     let running = place.root.join("janitor-working");
     let janitor = janitors_tool(
         &place,
@@ -14966,37 +14944,14 @@ else:
 #[test]
 fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
     let place = Place::new("router-tools");
-    let (agy, asked) = (place.root.join("agy-routes"), place.root.join("asked"));
-    let quoted = |path: &PathBuf| serde_json::to_string(path.to_str().unwrap()).unwrap();
-    // A stand-in for Antigravity asked one question: it reads the question where agy takes it (the value of
-    // `--print=`), writes down how it was started and in which home, and answers as one JSON object that says
-    // how it ended. Asked of the notes, the message is for Anna; asked of something broken, it ends in error.
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-question = next(arg[len("--print="):] for arg in args if arg.startswith("--print="))
-packet = json.loads(question.split("INPUT:\n", 1)[1])
-home = os.environ.get("HOME", "")
-login = os.path.join(home, ".gemini", "oauth_creds.json")
-shown = {{"args": [arg for arg in args if not arg.startswith("--print=")], "utterance": packet["utterance"],
-         "home": home, "login_linked": os.path.islink(login), "stdin": sys.stdin.read()}}
-with open({asked}, "a") as out:
-    out.write(json.dumps(shown) + "\n")
-print("Warming up...")
-if "broken" in packet["utterance"]:
-    print(json.dumps({{"status": "ERROR", "error": "out of quota"}}))
-else:
-    said = {{"kind": "agent_message", "target_session": "anna", "confidence": 0.95, "addressing": True}}
-    print(json.dumps({{"conversation_id": "c-routes", "status": "SUCCESS", "response": json.dumps(said)}}))
-"#,
-        asked = quoted(&asked),
-    );
-    program(&agy, &script);
+    let profile = place.root.join("agent-profile");
+    let agy = host_acp_peer(&place, "router");
+    let asked = place.root.join("asked");
     let gemini = place.root.join(".gemini");
     std::fs::create_dir_all(&gemini).unwrap();
     std::fs::write(gemini.join("oauth_creds.json"), "{}").unwrap();
     let world = [
+        ("CLARP_AGY_ACP_PROFILE", profile.to_str().unwrap()),
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
@@ -15097,23 +15052,13 @@ else:
     let askings = questions();
     assert_eq!(askings.len(), 2, "{askings:?}");
     for first in &askings {
-        // Started as the Python Host starts it for one question, but asked for one JSON object that says how
-        // it ended, and with the model alone (a model's name carries its effort); the question is its
-        // `--print=` and nothing is on its standard input.
         assert_eq!(
             first["args"],
-            json!([
-                "--dangerously-skip-permissions",
-                "--output-format",
-                "json",
-                "--model",
-                "gemini-3-flash"
-            ])
+            json!(["acp", "--dangerously-skip-permissions"])
         );
-        assert_eq!(
-            (&first["utterance"], &first["stdin"]),
-            (&json!("the notes, please"), &json!(""))
-        );
+        assert_eq!(first["utterance"], "the notes, please");
+        assert_eq!(first["model"], "gemini-3-flash");
+        assert_eq!(first["effort"], "high");
         // In a home of its own, where its login is linked, taken away afterwards.
         let home = PathBuf::from(first["home"].as_str().unwrap());
         assert_ne!(home, place.root);
@@ -15912,7 +15857,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     );
     // Antigravity: the models it lists, each by its name and what it is called, and none
     // of those it is only known to have: a model's name carries its effort.
-    let of_agy = &told["providers"]["agy"];
+    let of_agy = &told["providers"]["agy-acp"];
     assert_eq!(
         (
             &of_agy["label"],
@@ -15922,7 +15867,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
             &of_agy["models"],
         ),
         (
-            &json!("Antigravity"),
+            &json!("Antigravity (ACP)"),
             &json!("1.9.9"),
             &json!("available"),
             &json!("cli_probe"),
@@ -15937,7 +15882,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     // What this Host cannot do with a tool yet, it does not say it can.
     for (tool, cannot, can) in [
         (
-            "agy",
+            "agy-acp",
             vec!["supports_compact"],
             vec!["supports_routing", "supports_resume", "resumable"],
         ),
@@ -17803,10 +17748,14 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
         &claude,
         &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
     );
+    let agy_program = host_acp_peer(&place, "turn");
     let host = place.start_in(
         token,
         &[],
-        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_AGY_PROGRAM", agy_program.to_str().unwrap()),
+        ],
     );
     let maker = host.new_agent("Maker");
 
@@ -18013,7 +17962,7 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
         json!({"name":"Agy Helper","backend":"agy","role":"helper","parent":maker}),
     );
     let agy = made["session"].as_str().expect("make the AGY helper");
-    assert_eq!(lineage(agy)["backend"], "agy");
+    assert_eq!(lineage(agy)["backend"], "agy-acp");
     let marked = host.post(
         "/agent-helper-state",
         json!({"session":agy,"state":"failed"}),
@@ -18031,12 +17980,17 @@ fn the_program_an_agent_starts_helpers_with_works_against_this_host() {
         "--effort",
         "high",
     ]);
-    assert_eq!(code, 1, "{out}{err}");
-    assert_eq!(
-        err.trim(),
-        "--effort is part of the model id on agy: pass e.g. --model claude-opus-5-5-high"
+    assert_eq!(code, 0, "{out}{err}");
+    wait_for("the reused helper to answer over ACP", || {
+        host.state(agy) == "done"
+    });
+    assert_eq!(lineage(agy)["helper_state"], "running");
+    assert!(
+        agy_acp::asked(&place, "session/set_config_option")
+            .iter()
+            .any(|msg| msg["params"]["configId"] == "thought_level"
+                && msg["params"]["value"] == "high")
     );
-    assert_eq!(lineage(agy)["helper_state"], "failed");
 }
 
 /// One answer as it came: its status, its headers under their names in small letters, its
@@ -27156,7 +27110,7 @@ fn a_prompts_copy_in_its_tools_stream_is_never_a_row_of_its_own() {
     // the message is taken, and no reader makes a row of the user's. Held here with tools that
     // print the prompt back into their streams, the same words sent again and again.
     let place = Place::new("prompt-copy");
-    let (claude, agy) = (place.root.join("claude"), place.root.join("agy"));
+    let claude = place.root.join("claude");
     let (hold, counted) = (place.root.join("hold"), place.root.join("counted"));
     let holding = place.root.join("holding");
     let quoted = |path: &std::path::Path| serde_json::to_string(path.to_str().unwrap()).unwrap();
@@ -27195,30 +27149,7 @@ say(type="result", subtype="success", is_error=False, session_id="stand-in", res
         holding = quoted(&holding),
     );
     program(&claude, &script);
-    // Antigravity, as it prints a turn: a step of the user's input first, here with its words.
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-conversation = "11111111-2222-3333-4444-555555555555"
-counted = {counted}
-number = (int(open(counted).read()) if os.path.exists(counted) else 0) + 1
-open(counted, "w").write(str(number))
-def say(event, **body):
-    print(json.dumps({{"event": event, **body}}), flush=True)
-def step(index, state, kind, **more):
-    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
-    say("step_update", step_update=update)
-say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []}})
-step(0, "DONE", "user_input", text_delta=prompt)
-answer = "agy answer %d" % number
-step(1, "DONE", "agent_response", text_delta=answer)
-say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": answer}})
-"#,
-        counted = quoted(&place.root.join("agy-counted")),
-    );
-    program(&agy, &script);
+    let agy = host_acp_peer(&place, "counted");
     let world = [
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
@@ -27312,7 +27243,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
         &[("s1", "answer 1"), ("s3", "answer 3"), ("s4", "answer 4")],
     );
 
-    // Antigravity, whose stream names a step of the user's input: the same.
+    // The ACP peer echoes the user's input too.
     host.send(&gaia, WORDS, "g1");
     answered(&gaia, "agy answer 1");
     host.send(&gaia, WORDS, "g2");
@@ -27915,28 +27846,7 @@ say(type="turn.completed", usage={{"input_tokens": 5, "cached_input_tokens": 0, 
 #[test]
 fn a_new_agent_begins_with_a_conversation_antigravity_kept() {
     let place = Place::new("agy-kept");
-    let (agy, started) = (place.root.join("agy-goes-on"), place.root.join("started"));
-    // A stand-in for Antigravity that goes on in the conversation it is given, and writes
-    // down how it was started.
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, sys
-args = sys.argv[1:]
-conversation = args[args.index("--conversation") + 1] if "--conversation" in args else "a-new-one"
-with open({started}, "a") as out:
-    out.write(json.dumps({{"given": conversation if "--conversation" in args else None}}) + "\n")
-def say(event, **body):
-    print(json.dumps({{"event": event, **body}}), flush=True)
-usage = {{"input_tokens": 10, "output_tokens": 2, "thinking_tokens": 0}}
-say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": ".", "tools": []}})
-update = {{"conversation_id": conversation, "step_index": 1, "state": "DONE", "step_type": "agent_response",
-          "text_delta": "Picked up.", "usage": usage}}
-say("step_update", step_update=update)
-say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": "Picked up.", "usage": usage}})
-"#,
-        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
-    );
-    program(&agy, &script);
+    let agy = host_acp_peer(&place, "turn");
     let work = place.root.join("work").to_str().unwrap().to_string();
     std::fs::create_dir_all(&work).unwrap();
 
@@ -28017,13 +27927,14 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     );
     let nowhere = host.get("/past-sessions?cwd=/nowhere&backend=agy");
     assert_eq!(nowhere["sessions"], json!([]));
-    let everywhere = host.get("/past-sessions?scope=all&backend=agy");
+    let everywhere = host.get("/past-sessions?scope=all&backend=agy-acp");
     assert_eq!(everywhere["sessions"].as_array().unwrap().len(), 2);
 
     // An agent begins with it: its conversation shows what was said and done in it, the
     // command as a card and as a cell, and what the model thought.
-    let (status, gemma) =
-        made(json!({ "name": "Gemma", "backend": "agy", "cwd": cwd, "resume_session_id": kept }));
+    let (status, gemma) = made(
+        json!({ "name": "Gemma", "backend": "agy-acp", "cwd": cwd, "resume_session_id": kept }),
+    );
     assert_eq!(status, 200, "{gemma}");
     let session = gemma["session"].as_str().unwrap().to_string();
     let turns = host.turns(&session);
@@ -28078,16 +27989,15 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     // Its next turn continues Antigravity's own conversation, by its name.
     host.send(&session, "and now?", "u-1");
     wait_for("the turn to be over", || host.state(&session) == "done");
-    let starts = std::fs::read_to_string(&started).unwrap();
-    assert_eq!(starts.lines().count(), 1, "{starts}");
-    assert!(
-        starts.contains(kept),
-        "the conversation is continued: {starts}"
+    assert_eq!(
+        agy_acp::asked(&place, "session/resume")[0]["params"]["sessionId"],
+        kept
     );
+    assert!(agy_acp::asked(&place, "session/new").is_empty());
     let said = host.conversation(&session);
     assert_eq!(
         said.last().unwrap(),
-        &("assistant".to_string(), "Picked up.".to_string())
+        &("assistant".to_string(), "Hello".to_string())
     );
 
     // The conversation is that agent's now: it is opened, or it is in use. No copy of one
@@ -28770,6 +28680,15 @@ fn a_tools_row_carries_its_explanation_while_its_turn_is_shown() {
     assert_eq!(questions().len(), 1);
 }
 
+/// Install the isolated ACP peer and the responses for this Host scenario beside it.
+fn host_acp_peer(place: &Place, scenario: &str) -> PathBuf {
+    std::fs::write(place.root.join("fake_acp.py"), agy_acp::FAKE).unwrap();
+    std::fs::write(place.root.join("scenario"), scenario).unwrap();
+    let executable = place.root.join("agy");
+    program(&executable, include_str!("fixtures/agy-host.py"));
+    executable
+}
+
 /// A stand-in for the model that keeps a goal's books, as Antigravity (`agy`: the tool the
 /// keeper's job recommends) or as Codex. It writes down how it was started, where, and what
 /// it was given to read, and answers in the shape it was given: the step `probe` done with
@@ -28782,35 +28701,16 @@ fn keeping_model(place: &Place, tool: &str) -> (PathBuf, PathBuf) {
         place.root.join("kept"),
     );
     let quoted = |path: PathBuf| serde_json::to_string(path.to_str().unwrap()).unwrap();
-    // How each tool is given what it reads, and how it prints its answer.
-    let (given, printed) = match tool {
-        "agy" => (
-            r#"args = sys.argv[1:]
-read = next(arg[len("--print="):] for arg in args if arg.startswith("--print="))
-schema = json.load(open(args[args.index("--json-schema") + 1]))
-here, home = os.getcwd(), os.environ.get("HOME", "")
-place = os.path.dirname(here)
-login = os.path.join(home, ".gemini", "oauth_creds.json")
-settings = os.path.join(home, ".gemini", "antigravity-cli", "settings.json")
-shown = {"args": [arg for arg in args if not arg.startswith("--print=")], "read": read, "schema": schema,
-         "works_in": os.path.basename(here), "in_work": os.listdir(here), "beside": sorted(os.listdir(place)),
-         "home": os.path.relpath(home, place), "login_linked": os.path.islink(login),
-         "login": open(login).read() if os.path.exists(login) else None,
-         "settings_copied": os.path.isfile(settings) and not os.path.islink(settings),
-         "env": sorted(name for name in os.environ if name.startswith("CLARP_") or name in ("HOME", "PATH"))}"#,
-            r#"print("Warming up...")
-print(json.dumps({"conversation_id": "c-keeps", "status": "SUCCESS", "response": json.dumps(said)}))"#,
-        ),
-        _ => (
-            r#"read = sys.stdin.read()
+    if tool == "agy" {
+        return (host_acp_peer(place, "keeper"), asked);
+    }
+    let given = r#"read = sys.stdin.read()
 here = os.getcwd()
 schema = json.load(open(os.path.join(here, "schema.json")))
 shown = {"args": sys.argv[1:], "files": sorted(os.listdir(here)), "schema": schema,
-         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read}"#,
-            r#"answer = {"type": "agent_message", "text": json.dumps(said)}
-print(json.dumps({"type": "item.completed", "item": answer}))"#,
-        ),
-    };
+         "instructions": open(os.path.join(here, "instructions.txt")).read(), "read": read}"#;
+    let printed = r#"answer = {"type": "agent_message", "text": json.dumps(said)}
+print(json.dumps({"type": "item.completed", "item": answer}))"#;
     let script = format!(
         r#"#!/usr/bin/env python3
 import json, os, sys
@@ -29102,22 +29002,11 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         first["schema"]["properties"]["steps"]["required"],
         json!(["probe", "build", "ship"])
     );
-    // Antigravity was asked in its sandbox, with its commands off, as the model the keeper's
-    // job names, and held to the shape by a file.
-    let args: Vec<&str> = first["args"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|arg| arg.as_str().unwrap())
-        .collect();
-    for word in [
-        "--sandbox",
-        "--disable-slash-commands",
-        "--json-schema",
-        "gemini-4-hydrogen-low",
-    ] {
-        assert!(args.contains(&word), "{word}: {args:?}");
-    }
+    assert_eq!(first["model"], "gemini-4-hydrogen-low");
+    assert_eq!(
+        first["args"],
+        json!(["acp", "--sandbox", "--include-default-customizations=false"])
+    );
     // Where it ran: in an empty directory, beside a home of its own that has its user's
     // login, linked, and its settings, copied, and nothing of the Host's own environment.
     assert_eq!(
@@ -29130,7 +29019,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         (
             &json!("work"),
             &json!([]),
-            &json!(["home", "schema.json", "work"]),
+            &json!(["home", "work"]),
             &json!("home")
         ),
         "{first}"
@@ -29269,7 +29158,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
         questions().len() == 3
     });
     wait_for("the goal to say that its update failed", || {
-        get()["updater"]["goal_error"] == "agy_exit_3"
+        get()["updater"]["goal_error"] == format!("{}_exit_1", keeper["backend"].as_str().unwrap())
     });
     let plan = get();
     assert_eq!(plan["goal"]["updater"], before);
@@ -29280,7 +29169,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
             &told["last_receipt"]["outcome"],
             &told["last_receipt"]["error"]
         ),
-        (&json!("failed"), &json!("agy_exit_3")),
+        (&json!("failed"), &told["goal_error"]),
         "{told}"
     );
     // Nothing of what it was asked is where a failure is told: the goal's errors, and each
@@ -29330,7 +29219,7 @@ fn the_goal_keeper_keeps_a_goal_current_beside_its_owner() {
     host.kill();
     let host = place.start_in("", &["--goals-kept-every-ms", "100"], &world);
     let after = goal(&host, &dir, &["get", &plan_id]);
-    assert_eq!(after["updater"]["goal_error"], "agy_exit_3");
+    assert_eq!(after["updater"]["goal_error"], told["goal_error"]);
     assert_eq!(after["updater"]["retry_at"], told["retry_at"]);
     assert_eq!(after["updater"]["last_receipt"], told["last_receipt"]);
     assert_eq!(
@@ -29544,49 +29433,7 @@ fn the_audio_bookkeeper_writes_down_what_becomes_of_a_clip() {
 #[test]
 fn an_agent_on_antigravity_runs_its_turns_and_continues_its_conversation() {
     let place = Place::new("agy-turns");
-    let (agy, started) = (place.root.join("agy-works"), place.root.join("started"));
-    // A stand-in for Antigravity at work. It writes down how it was started, and prints a
-    // turn as agy prints one: its conversation and its model, a command where it is asked to
-    // list, its answer in two pieces, and what the turn took. Asked to fail, it says its
-    // provider refused, and ends badly.
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-kept = "11111111-2222-3333-4444-555555555555"
-conversation = args[args.index("--conversation") + 1] if "--conversation" in args else kept
-with open({started}, "a") as out:
-    shown = {{"args": [a for a in args if not a.startswith("--print=")], "prompt": prompt,
-             "managed": os.environ.get("CLARP_AGY_MANAGED_TURN")}}
-    out.write(json.dumps(shown) + "\n")
-def say(event, **body):
-    print(json.dumps({{"event": event, **body}}), flush=True)
-def step(index, state, kind, **more):
-    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
-    say("step_update", step_update=update)
-say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": ["run_command"]}})
-step(0, "DONE", "user_input")
-if "fail" in prompt:
-    say("result", result={{"conversation_id": conversation, "status": "ERROR", "error": "quota exhausted", "response": ""}})
-    sys.exit(1)
-at = 1
-if "list" in prompt:
-    step(1, "DONE", "agent_response", usage={{"input_tokens": 100, "output_tokens": 5, "thinking_tokens": 0}})
-    info = {{"name": "run_command", "parameters": {{"CommandLine": "ls -la"}}}}
-    step(2, "ACTIVE", "tool", tool_name="run_command", tool_info=info)
-    step(2, "DONE", "tool", tool_name="run_command", tool_info={{**info, "output": "a.txt\n"}})
-    at = 3
-step(at, "ACTIVE", "agent_response", text_delta="Seen: ")
-step(at, "DONE", "agent_response", text_delta="one file.", usage={{"input_tokens": 40, "output_tokens": 4, "thinking_tokens": 3}})
-usage = {{"input_tokens": 140, "output_tokens": 9, "thinking_tokens": 3}}
-say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": "Seen: one file.", "usage": usage}})
-"#,
-        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
-    );
-    program(&agy, &script);
-    // The Host's user has a home of their own, in which Antigravity keeps no conversations:
-    // nothing is known of what it has let go of.
+    let agy = host_acp_peer(&place, "tool-turn");
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
@@ -29599,13 +29446,6 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
         let asked = turns.iter().position(|row| row["id"] == id);
         asked.is_some_and(|at| turns[at..].iter().any(|row| row["turn"].is_object()))
     };
-    let starts = || -> Vec<Value> {
-        let written = std::fs::read_to_string(&started).unwrap_or_default();
-        let lines = written.lines();
-        lines
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect()
-    };
     let row_of = |host: &Host| {
         let snapshot = host.get("/agents/snapshot");
         let rows = snapshot["agents"].as_array().unwrap();
@@ -29615,31 +29455,16 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
             .clone()
     };
 
-    // A first turn. Antigravity is started with the message bound to its flag and names its
-    // conversation itself; what it did and said is in the agent's conversation: the command
-    // under the name the conversation knows such a tool by, and its answer as one message.
+    // The first ACP prompt returns a tool call and one answer written in two chunks.
     host.send(&agent, "list what is here", "u-1");
     wait_for("the first turn to be over", || over("u-1"));
-    let first = starts().remove(0);
+    let launch = &agy_acp::written(&place, "argv")[0];
     assert_eq!(
-        first["args"],
-        json!([
-            "--dangerously-skip-permissions",
-            "--output-format",
-            "stream-json",
-            "--print-timeout",
-            "24h"
-        ]),
-        "{first}"
+        launch["argv"],
+        json!(["acp", "--dangerously-skip-permissions"])
     );
-    assert_eq!(first["managed"], "1");
-    assert!(
-        first["prompt"]
-            .as_str()
-            .unwrap()
-            .contains("list what is here"),
-        "{first}"
-    );
+    assert_eq!(launch["env"]["CLARP_AGY_MANAGED_TURN"], "1");
+    assert!(agy_acp::prompt_text(&place, 0).contains("list what is here"));
     let rows = host.turns(&agent);
     let call = rows.iter().find(|row| row["kind"] == "tool").unwrap();
     assert_eq!(
@@ -29677,11 +29502,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
             &row["backend_session_id"],
             &row["latest_state"]
         ),
-        (
-            &json!("agy"),
-            &json!("11111111-2222-3333-4444-555555555555"),
-            &json!("done")
-        ),
+        (&json!("agy-acp"), &json!("conv-new"), &json!("done")),
         "{row}"
     );
     // What the turn took is the result's own count; what the model thought counts as what
@@ -29689,7 +29510,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     let counted = || -> Value {
         let told = host.get("/backend-usage");
         let rows = told["backends"].as_array().unwrap();
-        let row = rows.iter().find(|row| row["backend"] == "agy").unwrap();
+        let row = rows.iter().find(|row| row["backend"] == "agy-acp").unwrap();
         row["totals"]["five_hour"].clone()
     };
     wait_for("the first turn to be counted", || counted()["turns"] == 1);
@@ -29701,19 +29522,25 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     // The next turn continues that conversation, by its name.
     host.send(&agent, "and again", "u-2");
     wait_for("the second turn to be over", || over("u-2"));
-    let second = starts().remove(1);
     assert_eq!(
-        second["args"].as_array().unwrap()[5..],
-        [
-            json!("--conversation"),
-            json!("11111111-2222-3333-4444-555555555555")
-        ],
-        "{second}"
+        agy_acp::asked(&place, "session/resume")[0]["params"]["sessionId"],
+        "conv-new"
     );
     assert_eq!(
         row_of(&host)["backend_session_id"],
         row["backend_session_id"]
     );
+
+    let long = "x".repeat(150 * 1024);
+    host.send(&agent, &long, "u-long");
+    wait_for("the large ACP prompt to finish", || over("u-long"));
+    assert!(agy_acp::prompt_text(&place, 2).contains(&long));
+    assert!(
+        agy_acp::written(&place, "argv")
+            .iter()
+            .all(|row| !row.to_string().contains(&long))
+    );
+    assert_eq!(host.state(&agent), "done");
 
     // A turn its provider refuses fails, and the agent's conversation says why in the
     // tool's own word.
@@ -29724,36 +29551,9 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     let rows = host.turns(&agent);
     let why = rows
         .iter()
-        .any(|row| row.to_string().contains("status=ERROR: quota exhausted"));
+        .any(|row| row.to_string().contains("quota exhausted"));
     let state = host.get("/agents/snapshot").to_string();
-    assert!(
-        why || state.contains("status=ERROR: quota exhausted"),
-        "{rows:?}"
-    );
-
-    // A message longer than a command line takes is refused before anything is kept, in
-    // the Python Host's words, and nothing is started.
-    let begun = starts().len();
-    let long = "x".repeat(61 * 1024);
-    let body = json!({ "session": agent, "text": long, "client_msg_id": "u-4" }).to_string();
-    let refused = fetch(
-        &host,
-        "",
-        "POST",
-        "/send",
-        &[("Content-Type", "application/json")],
-        body.as_bytes(),
-    );
-    assert_eq!(
-        (refused.status, refused.text().as_str()),
-        (
-            413,
-            "This message is 61 KiB, more than the 60 KiB this agent can take in one message. \
-             Shorten it or split it into several messages."
-        )
-    );
-    assert_eq!(starts().len(), begun);
-    assert!(!host.turns(&agent).iter().any(|row| row["id"] == "u-4"));
+    assert!(why || state.contains("quota exhausted"), "{rows:?}");
 }
 
 #[test]
@@ -30169,47 +29969,9 @@ fn opencode_and_deepseek_run_resume_abort_and_report_their_native_sessions() {
 #[test]
 fn a_conversation_antigravity_let_go_of_is_continued_in_a_new_one() {
     let place = Place::new("agy-lost");
-    let (agy, started) = (place.root.join("agy-forgets"), place.root.join("started"));
-    let begun = place.root.join("begun");
+    let agy = host_acp_peer(&place, "lost");
+    let started = place.root.join("started");
     let store = place.root.join(".gemini/antigravity-cli/conversations");
-    std::fs::create_dir_all(&store).unwrap();
-    // A stand-in for Antigravity that keeps its conversations as the tool does: each in a
-    // file of its name under its user's home. One it is not given, it begins, under the
-    // next name of its own. It writes down how it was started, and answers by the count.
-    let script = format!(
-        r#"#!/usr/bin/env python3
-import json, os, sys
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-store = os.path.join(os.environ["HOME"], ".gemini", "antigravity-cli", "conversations")
-given = args[args.index("--conversation") + 1] if "--conversation" in args else None
-if given is None:
-    with open({begun}, "a") as out:
-        out.write("x")
-    conversation = "conv-%d" % os.path.getsize({begun})
-else:
-    conversation = given
-open(os.path.join(store, conversation + ".db"), "a").close()
-with open({started}, "a") as out:
-    out.write(json.dumps({{"given": given, "prompt": prompt}}) + "\n")
-with open({started}) as seen:
-    count = len(seen.readlines())
-def say(event, **body):
-    print(json.dumps({{"event": event, **body}}), flush=True)
-def step(index, state, kind, **more):
-    update = {{"conversation_id": conversation, "step_index": index, "state": state, "step_type": kind, **more}}
-    say("step_update", step_update=update)
-usage = {{"input_tokens": 10, "output_tokens": 2, "thinking_tokens": 0}}
-say("init", conversation_id=conversation, init={{"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []}})
-step(0, "DONE", "user_input")
-answer = "Answer %d." % count
-step(1, "DONE", "agent_response", text_delta=answer, usage=usage)
-say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "response": answer, "usage": usage}})
-"#,
-        started = serde_json::to_string(started.to_str().unwrap()).unwrap(),
-        begun = serde_json::to_string(begun.to_str().unwrap()).unwrap(),
-    );
-    program(&agy, &script);
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
@@ -30240,7 +30002,8 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     // A first turn begins a conversation, which Antigravity keeps.
     host.send(&agent, "The word is heron.", "u-1");
     wait_for("the first turn to be over", || over(&host, "u-1"));
-    assert_eq!(starts()[0]["given"], Value::Null);
+    assert_eq!(starts()[0]["session"], "conv-1");
+    assert!(agy_acp::asked(&place, "session/resume").is_empty());
     assert_eq!(bound(&host), "conv-1");
     assert!(store.join("conv-1.db").exists());
     // A goal of the agent is bound to that conversation.
@@ -30270,7 +30033,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     host.send(&agent, "And the bird is grey.", "u-2");
     wait_for("the second turn to be over", || over(&host, "u-2"));
     let second = starts().remove(1);
-    assert_eq!(second["given"], "conv-1", "{second}");
+    assert_eq!(second["session"], "conv-1", "{second}");
     assert!(!second["prompt"].as_str().unwrap().contains(MARK));
     assert_eq!(goal(&host, &dir, &["get", &plan_id])["revision"], revision);
 
@@ -30281,8 +30044,8 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     host.send(&agent, "What was the word?", "u-3");
     wait_for("the third turn to be over", || over(&host, "u-3"));
     let third = starts().remove(2);
-    assert_eq!(third["given"], Value::Null, "{third}");
-    let record = "--- Clarp restored conversation ---\n[Antigravity no longer has this \
+    assert_eq!(third["session"], "conv-2", "{third}");
+    let record = "--- Clarp restored conversation ---\n[Antigravity (ACP) no longer has this \
                   conversation (it prunes old ones), so it continues in a new one. Below is \
                   Clarp's record of it, most recent last; carry on from it. The new message \
                   follows the record.]\n\nUser: The word is heron.\n\nAssistant: Answer 1.\n\n\
@@ -30352,7 +30115,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     host.send(&agent, "Thank you.", "u-4");
     wait_for("the fourth turn to be over", || over(&host, "u-4"));
     let fourth = starts().remove(3);
-    assert_eq!(fourth["given"], "conv-2", "{fourth}");
+    assert_eq!(fourth["session"], "conv-2", "{fourth}");
     assert!(!fourth["prompt"].as_str().unwrap().contains(MARK));
     assert_eq!(
         goal(&host, &dir, &["get", &plan_id])["revision"],
@@ -30367,7 +30130,7 @@ say("result", result={{"conversation_id": conversation, "status": "SUCCESS", "re
     assert_eq!(plan["goal"]["native_session_id"], "conv-2");
     host.send(&agent, "Once more.", "u-5");
     wait_for("the fifth turn to be over", || over(&host, "u-5"));
-    assert_eq!(starts()[4]["given"], "conv-2");
+    assert_eq!(starts()[4]["session"], "conv-2");
 }
 
 #[test]
@@ -40281,10 +40044,7 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
 fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
     const ADMIN: &str = "the-administrators-token";
     let place = Place::new("oracle-delegations");
-    // A stand-in for Antigravity, which takes no message longer than a command line. It is
-    // never run here.
-    let agy = place.root.join("agy");
-    program(&agy, "#!/bin/sh\n");
+    let agy = host_acp_peer(&place, "turn");
     let world = [("CLARP_AGY_PROGRAM", agy.to_str().unwrap())];
     let start = || place.start_in(ADMIN, &[], &world);
     let host = start();
@@ -40731,21 +40491,19 @@ fn the_oracle_hands_an_agent_work_and_is_told_what_came_of_it() {
         )
     );
 
-    // A turn that cannot be admitted: the delegation failed, in the words it was refused
-    // with, and those are the answer.
+    // The ACP transport takes a delegation larger than the retired command-line limit.
     let made = host.post("/agents", json!({ "name": "Gemma", "backend": "agy" }));
-    let long = json!({
-        "delegation_id": "d-long", "session": made["session"], "request": "x".repeat(61 * 1024),
-    });
-    let too_long = "This message is 61 KiB, more than the 60 KiB this agent can take in one \
-                    message. Shorten it or split it into several messages.";
-    let (status, said) = hand(&host, long);
-    assert_eq!((status, said["error"].as_str()), (413, Some(too_long)));
-    let kept = of(&host, "d-long");
-    assert_eq!(
-        (&kept["status"], &kept["error"]),
-        (&json!("failed"), &json!(too_long))
+    let request = "x".repeat(150 * 1024);
+    let (status, reply) = hand(
+        &host,
+        json!({"delegation_id":"d-long","session":made["session"],"request":request}),
     );
+    assert_eq!(status, 200, "{reply}");
+    wait_for("the long delegation's answer", || {
+        let row = of(&host, "d-long");
+        row["status"] == "completed" && row["result_text"] == "Hello"
+    });
+    assert!(agy_acp::prompt_text(&place, 0).contains(&request));
 
     // Two results that came while nobody read the book are told in the order they came,
     // each at the moment its turn ended.

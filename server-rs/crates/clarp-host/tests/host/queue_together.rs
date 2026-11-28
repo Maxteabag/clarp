@@ -4,52 +4,20 @@
 
 use super::*;
 
-/// Antigravity, as it prints a turn. Every prompt it is given is kept, one JSON string a line,
-/// in `prompts` beside it. A prompt that ends with `hold` waits for the file `release`.
-const AGY: &str = r#"#!/usr/bin/env python3
-import json, os, pathlib, sys, time
-root = pathlib.Path(__file__).resolve().parent
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-with (root / "prompts").open("a") as kept:
-    kept.write(json.dumps(prompt) + "\n")
-number = sum(1 for _ in (root / "prompts").open())
-conversation = "11111111-2222-3333-4444-555555555555"
-def say(event, **body):
-    print(json.dumps({"event": event, **body}), flush=True)
-def step(index, state, kind, **more):
-    update = {"conversation_id": conversation, "step_index": index, "state": state,
-              "step_type": kind, **more}
-    say("step_update", step_update=update)
-say("init", conversation_id=conversation,
-    init={"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []})
-step(0, "DONE", "user_input", text_delta=prompt)
-if prompt.endswith("hold"):
-    (root / "holding").touch()
-    end = time.monotonic() + 60
-    while not (root / "release").exists():
-        if time.monotonic() >= end:
-            raise SystemExit("stand-in release expired")
-        time.sleep(0.05)
-answer = "agy answer %d" % number
-step(1, "DONE", "agent_response", text_delta=answer)
-say("result", result={"conversation_id": conversation, "status": "SUCCESS", "response": answer})
-"#;
-
 #[test]
 fn three_messages_that_wait_behind_a_turn_go_to_the_tool_in_one_prompt_and_are_answered_once() {
     let place = Place::new("queue-together");
-    let agy = place.root.join("agy");
-    program(&agy, AGY);
+    let grok = place.root.join("grok");
+    program(&grok, include_str!("../fixtures/grok-queued.py"));
     let nowhere = place.root.join("absent");
     let world = [
-        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+        ("CLARP_GROK_PROGRAM", grok.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
     let heard = host.listen();
-    let made = host.post("/agents", json!({ "name": "Gatherer", "backend": "agy" }));
+    let made = host.post("/agents", json!({ "name": "Gatherer", "backend": "grok" }));
     let session = made["session"].as_str().unwrap().to_string();
 
     host.send(&session, "hold", "m1");
@@ -65,7 +33,7 @@ fn three_messages_that_wait_behind_a_turn_go_to_the_tool_in_one_prompt_and_are_a
         let sent = host.send(&session, text, id);
         assert_eq!(sent["queued"], true, "{sent}");
     }
-    // Antigravity cannot be steered: each waits, to be read with the others.
+    // Grok cannot be steered: each waits, to be read with the others.
     let queue = host.get(&format!("/turn-queue?session={session}"));
     let items: Vec<(Value, Value)> = queue["items"]
         .as_array()
@@ -141,11 +109,11 @@ fn three_messages_that_wait_behind_a_turn_go_to_the_tool_in_one_prompt_and_are_a
         texts,
         vec![
             ("user", "hold"),
-            ("assistant", "agy answer 1"),
+            ("assistant", "grok answer 1"),
             ("user", "first words"),
             ("user", "second words"),
             ("user", "third words"),
-            ("assistant", "agy answer 2"),
+            ("assistant", "grok answer 2"),
         ],
         "{rows:?}"
     );
@@ -160,10 +128,10 @@ fn three_messages_that_wait_behind_a_turn_go_to_the_tool_in_one_prompt_and_are_a
 #[test]
 fn queued_utterances_share_one_answer_only_within_their_call() {
     let place = Place::new("call-utterances-together");
-    let agy = place.root.join("agy");
-    program(&agy, AGY);
-    let host = place.start_in("", &[], &[("CLARP_AGY_PROGRAM", agy.to_str().unwrap())]);
-    let agent = host.post("/agents", json!({"name":"Caller","backend":"agy"}));
+    let grok = place.root.join("grok");
+    program(&grok, include_str!("../fixtures/grok-queued.py"));
+    let host = place.start_in("", &[], &[("CLARP_GROK_PROGRAM", grok.to_str().unwrap())]);
+    let agent = host.post("/agents", json!({"name":"Caller","backend":"grok"}));
     let session = agent["session"].as_str().unwrap();
     let heard = host.listen();
     host.send(session, "hold", "occupied");
@@ -223,7 +191,7 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
     wait_for("every message to be answered", || {
         let rows = host.turns(session);
         rows.iter()
-            .any(|row| row["role"] == "assistant" && row["text"] == "agy answer 4")
+            .any(|row| row["role"] == "assistant" && row["text"] == "grok answer 4")
             && host.state(session) == "done"
     });
     let prompts: Vec<String> = std::fs::read_to_string(place.root.join("prompts"))
@@ -246,7 +214,7 @@ fn queued_utterances_share_one_answer_only_within_their_call() {
     }
     let reply = rows
         .iter()
-        .find(|row| row["text"] == "agy answer 2")
+        .find(|row| row["text"] == "grok answer 2")
         .unwrap();
     assert_eq!(reply["trace_id"], "call-second", "{reply}");
 }
