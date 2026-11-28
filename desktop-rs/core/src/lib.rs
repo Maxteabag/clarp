@@ -34,6 +34,7 @@ pub mod live_present;
 pub mod markdown_style;
 pub mod media;
 pub mod mention;
+pub mod notify_events;
 pub mod message_search;
 pub mod narrator;
 pub mod outage;
