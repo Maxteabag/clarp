@@ -567,8 +567,8 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
             "heartbeat" => Some(on(info.heartbeat)),
             "dreaming" => Some(on(info.dreaming)),
             "push-alerts" => Some(on(info.push_alerts)),
-            // i18n: agent profile, shortcut bar label: shortens the agent's context (imperative verb)
             "notify-customize" => Some(clarp_core::notify_events::text("notify.settings.customize")),
+            // i18n: agent profile, shortcut bar label: shortens the agent's context (imperative verb)
             "compact" if !info.compacting => Some(tr!("verb" => "Compact")),
             // i18n: agent profile, shortcut bar label: opens the waiting messages (imperative)
             "queue" => Some(tr!("Manage queue")),

@@ -51,10 +51,6 @@ msgstr "12-timers (6:10 PM)"
 msgid "24-hour (18:10)"
 msgstr "24-timers (18:10)"
 
-#. Settings page and Ctrl+K, the line under the preference “Reply notifications” saying what it does.
-msgid "A desktop notification when an agent answers in a chat that is not open"
-msgstr "Et skrivebordsvarsel når en agent svarer i en chat som ikke er åpen"
-
 #. Key-binding editor and keymap import, error: a double press must be the same key twice (e.g. Right Right); {} is what was typed
 msgid "A double press is one key twice: {}"
 msgstr "Et dobbelttrykk er samme tast to ganger: {}"
@@ -454,10 +450,6 @@ msgid ""
 "Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"
 msgstr ""
 "Spør før Stopp agent (Ctrl+.) avbryter en agent eller Avslutt agent slipper den"
-
-#. Settings page and Ctrl+K, the line under the preference “Notification sound” saying what it does.
-msgid "Ask the desktop to play its message sound with each notification"
-msgstr "Be skrivebordet spille meldingslyden sin ved hvert varsel"
 
 #. processes panel note after asking a helper agent to stop; {} is its name
 msgid "Asked {} to stop."
@@ -947,6 +939,11 @@ msgstr "Lukker advarselen om at et annet vindu har lagret et nyere oppsett."
 msgid "Closes this workspace tab; its chats stay in the explorer."
 msgstr "Lukker denne arbeidsområdefanen; chattene blir værende i utforskeren."
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+#. chat, code block header, left label when the code names no language (noun: a block of program code)
+msgid "Code"
+msgstr "Kode"
+
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Font family for code blocks, commands and tool output
 msgid "Code font"
 msgstr "Kodeskrift"
@@ -1200,6 +1197,10 @@ msgstr "Samtale / Økt"
 msgid "Conversation or Session view"
 msgstr "Samtale- eller Økt-visning"
 
+#. chat and code/table viewer, accessibility label the copy icon takes for a moment after copying (a state: the text was copied)
+msgid "Copied"
+msgstr "Kopiert"
+
 #. vim mode, message line after copying; {} is the start of what was copied
 msgid "Copied: {}"
 msgstr "Kopiert: {}"
@@ -1208,9 +1209,18 @@ msgstr "Kopiert: {}"
 msgid "Copy all"
 msgstr "Kopier alt"
 
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+#. chat, code block header, accessibility label of the copy icon button (an action: copy the code)
+msgid "Copy code"
+msgstr "Kopier kode"
+
 #. chat, accessibility label of a message's copy icon (an action: copies the message text)
 msgid "Copy message"
 msgstr "Kopier melding"
+
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+msgid "Copy table"
+msgstr "Kopier tabell"
 
 #. Settings > Opening links, an option (an action, verb phrase): what clicking a link does
 msgid "Copy the address"
@@ -1404,10 +1414,6 @@ msgstr "Kommando for å lagre legitimasjon"
 #. Select text page, key help under the title; Ctrl+A, Ctrl+C and Esc are key names left as is; "all" = select all, copy and close are verbs
 msgid "Ctrl+A all · Ctrl+C copy · Esc close"
 msgstr "Ctrl+A alt · Ctrl+C kopier · Esc lukk"
-
-#. Ctrl+K, a note under the search: message text is searched with Ctrl+F, not here
-msgid "Ctrl+F searches the messages of every chat."
-msgstr "Ctrl+F søker i meldingene i alle chatter."
 
 #. quick switcher, value pill on a row: this is the one in use now (adjective)
 #. quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
@@ -2686,31 +2692,15 @@ msgstr "Aktive prosesser"
 msgid "Live status line"
 msgstr "Live-statuslinje"
 
-#. search, row that asks the Hosts for older matches (imperative)
-msgid "Load more messages"
-msgstr "Last inn flere meldinger"
-
 #. agent profile, Prompt history section, button under the list that loads earlier prompts (verb)
 #. publications panel, key hint beside End at the end of the list (verb phrase): load older publications
 #. agent profile, shortcut bar label: loads older prompts (imperative)
 msgid "Load older"
 msgstr "Last inn eldre"
 
-#. search, row that loads the open chat's older messages to search them too; {} is the chat's name
-msgid "Load older messages of {}"
-msgstr "Last inn eldre meldinger i {}"
-
 #. three pulsing dots shown while something loads, accessibility label (a state: something is loading)
 msgid "Loading"
 msgstr "Laster inn"
-
-#. search, row while older matches load
-msgid "Loading more messages…"
-msgstr "Laster inn flere meldinger …"
-
-#. search, row while the open chat's older messages load; {} is the chat's name
-msgid "Loading older messages of {}…"
-msgstr "Laster inn eldre meldinger i {} …"
 
 #. agent profile, Current plan section, shown in place of the plan's title while it loads
 msgid "Loading plan…"
@@ -3245,10 +3235,6 @@ msgstr "Ingen lenker på skjermen"
 msgid "No log available ({})."
 msgstr "Ingen logg tilgjengelig ({})."
 
-#. search, empty state: nothing matched in the messages this computer holds
-msgid "No match in the messages loaded on this computer"
-msgstr "Ingen treff i meldingene som er lastet inn på denne datamaskinen"
-
 #. quick switcher, empty state when nothing matches the typed text
 #. Ctrl+K command palette, shown when nothing matches the search
 msgid "No matching agent or contact"
@@ -3261,10 +3247,6 @@ msgstr "Ingen valg passer"
 #. New Session dialog, folder list: nothing matches what was typed
 msgid "No matching directories"
 msgstr "Ingen mapper passer"
-
-#. search, empty state: no message anywhere has the typed words
-msgid "No message in any chat has these words"
-msgstr "Ingen melding i noen chat har disse ordene"
 
 #. dictation error: this computer has no microphone
 msgid "No microphone is available"
@@ -3407,10 +3389,6 @@ msgstr "Svarer ikke"
 msgid "Not saved on {}. Kept locally."
 msgstr "Ikke lagret på {}. Beholdt lokalt."
 
-#. search note: a Host could not be searched; {} is the Host and its reason ("laptop: could not be reached")
-msgid "Not searched: {}."
-msgstr "Ikke søkt i: {}."
-
 #. chat, status under the user's own message: it was not sent because the user stopped it
 msgid "Not sent (stopped)"
 msgstr "Ikke sendt (stoppet)"
@@ -3480,10 +3458,6 @@ msgstr "Ingenting pågår"
 msgid "Nothing waiting"
 msgstr "Ingenting venter"
 
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask the desktop to play its message sound with each notification
-msgid "Notification sound"
-msgstr "Varsellyd"
-
 #. Settings > Appearance, description of the "Studio" reading theme (font and product names stay as they are)
 msgid ""
 "Noto Sans 15px on neutral light grey: compact, for the explorer and dense chrome on a big monitor."
@@ -3511,16 +3485,6 @@ msgstr "Av"
 #. artifacts gallery, shortcut bar label: End loads older items (adjective as a short hint)
 msgid "Older"
 msgstr "Eldre"
-
-#. search note: a Host still indexes old messages; {} names the Host or Hosts
-msgid ""
-"Older history is still being indexed on {}: some older messages are not found yet."
-msgstr ""
-"Eldre historikk indekseres fortsatt på {}: noen eldre meldinger blir ikke funnet ennå."
-
-#. search, detail under the load-more row
-msgid "Older matches, from every chat"
-msgstr "Eldre treff, fra alle chatter"
 
 #. quick switcher, value pill on a setting row: the setting is switched on (adjective)
 #. Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb; the same word as the quick switcher's "On" pill)
@@ -4095,10 +4059,6 @@ msgstr "Les inn i denne runden"
 msgid "Read {}"
 msgstr "Leste {}"
 
-#. search note, before the rest while the cached chats are read
-msgid "Reading cached chats…"
-msgstr "Leser hurtigbufrede chatter …"
-
 #. chat list and Running box, the kind of step running now
 msgid "Reading files"
 msgstr "Leser filer"
@@ -4264,10 +4224,6 @@ msgstr "Gi nytt navn · Enter"
 #. Rename contact dialog, primary button text while the rename is being saved (in progress)
 msgid "Renaming…"
 msgstr "Endrer navn …"
-
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: A desktop notification when an agent answers in a chat that is not open
-msgid "Reply notifications"
-msgstr "Svarvarsler"
 
 #. report viewer, title when the report has none (noun: a written report an agent published)
 msgid "Report"
@@ -4501,14 +4457,6 @@ msgstr "Søk i kontakter"
 msgid "Search messages"
 msgstr "Søk i meldinger"
 
-#. navigation rail, tooltip of the search button (verb phrase); Ctrl+F is its shortcut, key names left as is
-msgid "Search messages (Ctrl+F)"
-msgstr "Søk i meldinger (Ctrl+F)"
-
-#. Ctrl+F message search, placeholder of the search field
-msgid "Search messages in every chat"
-msgstr "Søk i meldinger i alle chatter"
-
 #. Settings page, accessibility label of the search field (verb phrase: search the settings)
 msgid "Search settings"
 msgstr "Søk i innstillinger"
@@ -4522,39 +4470,9 @@ msgstr "Søk i innstillinger (/): skjul, tema, stemme …"
 msgid "Search the chat"
 msgstr "Søk i chatten"
 
-#. search, detail under the load-older row
-msgid "Search them too: this chat has more than is loaded here"
-msgstr "Søk i dem også: denne chatten har mer enn det som er lastet inn her"
-
-#. search note under the results
-msgid "Searched every chat on the Host."
-msgstr "Søkte i alle chatter på Hosten."
-
-#. search note under the results; {} is how many Hosts were searched
-msgid "Searched every chat on {} Hosts."
-msgstr "Søkte i alle chatter på {} Hoster."
-
-#. search note under the results when the Host cannot search: {0} loaded chats ("3 chats"), {1} cached chats
-msgid ""
-"Searched {0} loaded and {1} cached on this computer. Messages never loaded here are not searched: the Host has no message search yet."
-msgstr ""
-"Søkte i {0} lastet inn og {1} hurtigbufret på denne datamaskinen. Meldinger som aldri er lastet inn her, blir ikke søkt i: Hosten har ikke meldingssøk ennå."
-
 #. chat, tool row title: what the agent searched for (past tense)
 msgid "Searched {}"
 msgstr "Søkte etter {}"
-
-#. search note while the Host is asked
-msgid "Searching every chat on the Host…"
-msgstr "Søker i alle chatter på Hosten …"
-
-#. search note while several Hosts are asked; {} is how many Hosts
-msgid "Searching every chat on {} Hosts…"
-msgstr "Søker i alle chatter på {} Hoster …"
-
-#. search, shown in the list while the Hosts are asked
-msgid "Searching every chat…"
-msgstr "Søker i alle chatter …"
 
 #. chat list and Running box, the kind of step running now
 msgid "Searching the web"
@@ -5312,6 +5230,10 @@ msgstr "TTS-kø"
 msgid "TYPOGRAPHY"
 msgstr "TYPOGRAFI"
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+msgid "Table"
+msgstr "Tabell"
+
 #. Vim mode, the which-key panel: the group of keys after Space w, for workspace tabs and panes
 msgid "Tabs and panes"
 msgstr "Faner og ruter"
@@ -5495,10 +5417,6 @@ msgid ""
 "The bar along the bottom with the keys that work where the keyboard is, and the connection"
 msgstr "Linjen nederst med tastene som virker der tastaturet er, og tilkoblingen"
 
-#. search note: this computer's chat cache could not be read; {} is the reason
-msgid "The cache could not be read: {}"
-msgstr "Hurtigbufferen kunne ikke leses: {}"
-
 #. Settings page and Ctrl+K, the line under the setting “Font” saying what it does
 msgid "The chat's typeface and size for this reading theme; opens the font picker."
 msgstr "Chattens skrifttype og størrelse for dette lesetemaet; åpner skriftvelgeren."
@@ -5616,12 +5534,6 @@ msgstr "Tenker: {}"
 #. agent profile, error moving an agent: the Host is too old to move agents
 msgid "This Host cannot move agents"
 msgstr "Denne Hosten kan ikke flytte agenter"
-
-#. search note: the Host cannot search, so its chats are searched as this computer holds them
-msgid ""
-"This Host cannot search messages: its chats are searched as loaded on this computer."
-msgstr ""
-"Denne Hosten kan ikke søke i meldinger: chattene søkes slik de er lastet inn på denne datamaskinen."
 
 #. form card, note: the Host is too old for this app's answers
 msgid "This Host does not take form answers from the desktop yet."
@@ -5802,10 +5714,6 @@ msgstr "Runder"
 #. font picker, placeholder of the search field at the top
 msgid "Type to find a font"
 msgstr "Skriv for å finne en skrift"
-
-#. search, before anything is typed: what the search does
-msgid "Type words to search every chat"
-msgstr "Skriv ord for å søke i alle chatter"
 
 #. Updates page, title at the top (noun, plural; written in capitals where the script has them)
 msgid "UPDATES"
@@ -6193,6 +6101,10 @@ msgstr "Oppsettet for arbeidsområdet kunne ikke lagres. Sjekk ledig lagringspla
 msgid "Workspace {}"
 msgstr "Arbeidsområde {}"
 
+#. code viewer, accessibility label of the toggle icon button that wraps long lines (an action)
+msgid "Wrap lines"
+msgstr "Bryt linjer"
+
 #. decision card in the chat, placeholder of the last option's text field, where the user types an answer of their own instead of picking one
 #. decision card in the chat, accessibility label of the text field for an answer of the user's own
 #. answered decision card in the chat, the last option (not chosen): an answer of the user's own
@@ -6280,10 +6192,6 @@ msgstr "tilbake om ~{} s"
 #. process output hint: c opens the job's chat
 msgid "c chat"
 msgstr "c chat"
-
-#. search result line: the hit came from this computer's cache (lowercase, after " · ")
-msgid "cached"
-msgstr "hurtigbufret"
 
 #. settings import error: the file could not be read; {0} is its path, {1} the reason
 msgid "cannot read {0}: {1}"
@@ -6844,12 +6752,6 @@ msgid_plural "{n} background processes running"
 msgstr[0] "{n} bakgrunnsprosess kjører"
 msgstr[1] "{n} bakgrunnsprosesser kjører"
 
-#. search note: a number of chats; {n} is the count
-msgid "{n} chat"
-msgid_plural "{n} chats"
-msgstr[0] "{n} chat"
-msgstr[1] "{n} chatter"
-
 #. chat, table in a message, accessibility label of the table; {n} is how many columns it has
 #. table viewer summary: rows, then how many columns; {n} is the column count
 msgid "{n} column"
@@ -7123,10 +7025,6 @@ msgstr "for {} siden"
 msgid "{} busy"
 msgstr "{} opptatt"
 
-#. search note: these Hosts cannot search messages; {} names the Host or Hosts
-msgid "{} cannot search messages: its chats are not searched."
-msgstr "{} kan ikke søke i meldinger: chattene der blir ikke søkt i."
-
 #. Settings > Line length, a length in characters; {} is the number, "ch" is characters
 msgid "{} ch"
 msgstr "{} tegn"
@@ -7347,10 +7245,6 @@ msgstr "↑↓ flytt · Enter velger · Esc tilbake til alt"
 msgid "↑↓ move · Enter open · Esc close"
 msgstr "↑↓ flytt · Enter åpne · Esc lukk"
 
-#. Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
-msgid "↑↓ move · Enter opens the chat at the message · Esc close"
-msgstr "↑↓ flytt · Enter åpner chatten ved meldingen · Esc lukk"
-
 #. quick switcher, key help under the list; ↑↓, Enter and Esc are key names left as is; move/run/switch/close are verbs
 msgid "↑↓ move · Enter run or switch · Esc close"
 msgstr "↑↓ flytt · Enter kjør eller bytt · Esc lukk"
@@ -7524,6 +7418,258 @@ msgstr "{0} min {1} s"
 msgctxt "duration"
 msgid "{0}s"
 msgstr "{0} s"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the plan lacks the model); {backend} is a backend name (Claude, Codex, ...), not translated; {model} is a model name, not translated
+#. context: error.account_plan
+msgctxt "error.account_plan"
+msgid "Your {backend} plan does not include {model}. Switch model or account."
+msgstr ""
+"Abonnementet ditt hos {backend} inkluderer ikke {model}. Bytt modell eller konto."
+
+#. chat, failed-turn card, button (an action, imperative): compacts the conversation, then sends the message again
+#. context: error.action.compact_retry
+msgctxt "error.action.compact_retry"
+msgid "Compact and continue"
+msgstr "Komprimer og fortsett"
+
+#. chat, failed-turn card, button (an action, imperative): copies a diagnostic text for an agent; Norwegian per owner: "Kopier diagnose"
+#. context: error.action.copy_details
+msgctxt "error.action.copy_details"
+msgid "Copy diagnostics"
+msgstr "Kopier diagnose"
+
+#. chat, failed-turn card, button (an action, imperative): starts a new session with the same conversation and sends the message again
+#. context: error.action.fresh_retry
+msgctxt "error.action.fresh_retry"
+msgid "New session, try again"
+msgstr "Ny økt, prøv igjen"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.retry
+msgctxt "error.action.retry"
+msgid "Try again"
+msgstr "Prøv igjen"
+
+#. chat, failed-turn card, button (an action, imperative); {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.action.retry_at
+msgctxt "error.action.retry_at"
+msgid "Try again at {time}"
+msgstr "Prøv igjen {time}"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.sign_in
+msgctxt "error.action.sign_in"
+msgid "Sign in again"
+msgstr "Logg på igjen"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.switch_model
+msgctxt "error.action.switch_model"
+msgid "Switch backend or model"
+msgstr "Bytt backend eller modell"
+
+#. chat, failed-turn card, note under the buttons when a button's request was refused
+#. context: error.action_failed
+msgctxt "error.action_failed"
+msgid "That didn't work. Try again."
+msgstr "Det fungerte ikke. Prøv igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the sign-in ran out); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.auth
+msgctxt "error.auth"
+msgid "Your {backend} sign-in has expired. Sign in again, then try again."
+msgstr "Påloggingen din hos {backend} har utløpt. Logg på igjen, og prøv på nytt."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (credits, payment, a hard or monthly limit: no reset clears it); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.billing
+msgctxt "error.billing"
+msgid "Your {backend} account is out of credits. Top it up, or switch model."
+msgstr "Kontoen din hos {backend} er tom for kreditt. Fyll på, eller bytt modell."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the link to the provider broke, retries used up); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.connection
+msgctxt "error.connection"
+msgid ""
+"Lost the connection to {backend}, and the Host's retries did not get through. Try again."
+msgstr ""
+"Mistet forbindelsen til {backend}, og Hostens nye forsøk kom ikke gjennom. Prøv igjen."
+
+#. chat, failed-turn card, short confirmation after Copy diagnostics; must match the Host-down screen's "copied"
+#. context: error.copied
+msgctxt "error.copied"
+msgid "Diagnostics copied"
+msgstr "Diagnose kopiert"
+
+#. chat, failed-turn card, accessibility label of the disclosure (noun): opens the provider's raw error text
+#. chat, failed-turn card, disclosure label (noun): opens the provider's raw error text
+#. context: error.details
+msgctxt "error.details"
+msgid "Details"
+msgstr "Detaljer"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (a signal from outside the Host ended the turn)
+#. context: error.ended_from_outside
+msgctxt "error.ended_from_outside"
+msgid "Something outside Clarp ended the turn. Send the message again."
+msgstr "Noe utenfor Clarp avsluttet runden. Send meldingen på nytt."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone); {folder} is a folder path
+#. context: error.folder_missing
+msgctxt "error.folder_missing"
+msgid ""
+"This agent's folder {folder} no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"Mappen til denne agenten, {folder}, finnes ikke lenger. Opprett den på nytt, eller lag en ny agent i en annen mappe."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone)
+#. context: error.folder_missing_no_path
+msgctxt "error.folder_missing_no_path"
+msgid ""
+"This agent's folder no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"Mappen til denne agenten finnes ikke lenger. Opprett den på nytt, eller lag en ny agent i en annen mappe."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (an OpenCode free model refused outside OpenCode)
+#. context: error.free_model_restricted
+msgctxt "error.free_model_restricted"
+msgid ""
+"This free OpenCode model only runs in OpenCode's own apps. Choose another model."
+msgstr ""
+"Denne gratismodellen fra OpenCode kjører bare i appene til OpenCode. Velg en annen modell."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the turn was cut off before it finished (a restart, a process that went without a word))
+#. context: error.interrupted
+msgctxt "error.interrupted"
+msgid "The turn was cut off before it finished. Send the message again."
+msgstr "Runden ble avbrutt før den var ferdig. Send meldingen på nytt."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the provider rejected the request as malformed (bad tool or call ids, an empty tool result, invalid payload, 400). Trying the same session again replays the same history, so the first action starts a fresh one); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.invalid_request
+msgctxt "error.invalid_request"
+msgid ""
+"{backend} rejected the conversation history. Start a fresh session with the same conversation and try again."
+msgstr ""
+"{backend} avviste samtalehistorikken. Start en ny økt med samme samtale, og prøv igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent moved to another Host)
+#. context: error.moved
+msgctxt "error.moved"
+msgid "This agent moved to another Host. Continue the conversation there."
+msgstr "Denne agenten er flyttet til en annen Host. Fortsett samtalen der."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the computer had no network for 15 minutes)
+#. context: error.network_gone
+msgctxt "error.network_gone"
+msgid ""
+"This computer had no network for 15 minutes, so the turn stopped. Try again once it is online."
+msgstr ""
+"Denne datamaskinen var uten nett i 15 minutter, så runden stoppet. Prøv igjen når den er på nett."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the Host could not start the turn)
+#. context: error.not_started
+msgctxt "error.not_started"
+msgid "The Host could not start the turn. Try again."
+msgstr "Hosten kunne ikke starte runden. Prøv igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the conversation no longer fits the model)
+#. context: error.prompt_too_long
+msgctxt "error.prompt_too_long"
+msgid "This conversation has grown too long for the model. Compact it and continue."
+msgstr "Denne samtalen har blitt for lang for modellen. Komprimer den, og fortsett."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (overloaded, rate limited, 429/5xx after the Host's own retries); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.provider_busy
+msgctxt "error.provider_busy"
+msgid ""
+"{backend} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model."
+msgstr ""
+"{backend} er overbelastet akkurat nå, og Hostens nye forsøk kom ikke gjennom. Prøv igjen om et minutt, eller bytt modell."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model's provider is unavailable); {model} is a model name, not translated
+#. context: error.provider_down
+msgctxt "error.provider_down"
+msgid ""
+"The provider of {model} is unavailable right now. Try again later, or switch model."
+msgstr ""
+"Leverandøren av {model} er ikke tilgjengelig akkurat nå. Prøv igjen senere, eller bytt modell."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent ran on another provider than it is bound to)
+#. context: error.provider_mismatch
+msgctxt "error.provider_mismatch"
+msgid ""
+"This agent ran on another model provider than the one it is bound to. Check its Codex home and provider."
+msgstr ""
+"Denne agenten er knyttet til én modelleverandør, men kjørte hos en annen. Sjekk Codex-hjemmemappen og leverandøren til agenten."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model refused (a safety filter blocked the answer))
+#. context: error.refused
+msgctxt "error.refused"
+msgid ""
+"The model refused to answer (a safety filter blocked it). Rephrase, or switch model."
+msgstr ""
+"Modellen nektet å svare (et sikkerhetsfilter stoppet svaret). Skriv meldingen om, eller bytt modell."
+
+#. chat, failed-turn card, badge for how many times the same failure repeated in a row; keep it short
+#. context: error.repeat_count
+msgctxt "error.repeat_count"
+msgid "{n}×"
+msgid_plural "{n}×"
+msgstr[0] "{n}×"
+msgstr[1] "{n}×"
+
+#. chat, failed-turn card, note under the buttons after a scheduled retry was accepted; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.retry_scheduled
+msgctxt "error.retry_scheduled"
+msgid "Will try again at {time}"
+msgstr "Prøver igjen {time}"
+
+#. chat, failed-turn card, note under the buttons after the message was sent again
+#. context: error.retry_sent
+msgctxt "error.retry_sent"
+msgid "Sent again"
+msgstr "Sendt på nytt"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's process ended unexpectedly); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.runner_exit
+msgctxt "error.runner_exit"
+msgid "{backend} stopped unexpectedly. Try again."
+msgstr "{backend} stoppet uventet. Prøv igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's session is held by another process (a Codex thread with another active writer, a locked Grok session)); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.session_locked
+msgctxt "error.session_locked"
+msgid "The {backend} session is busy in another process. Try again in a moment."
+msgstr ""
+"Økten hos {backend} er opptatt i en annen prosess. Prøv igjen om et øyeblikk."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend stopped responding); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.timeout
+msgctxt "error.timeout"
+msgid "{backend} stopped responding. Try again."
+msgstr "{backend} sluttet å svare. Prøv igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (anything else); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.unknown
+msgctxt "error.unknown"
+msgid ""
+"The turn failed at {backend}. Try again, or switch model if it happens again."
+msgstr ""
+"Runden mislyktes hos {backend}. Prøv igjen, eller bytt modell hvis det skjer igjen."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.usage_limit
+msgctxt "error.usage_limit"
+msgid "Your {backend} account is out of usage. Try again later, or switch model."
+msgstr ""
+"Kontoen din hos {backend} har nådd bruksgrensen. Prøv igjen senere, eller bytt modell."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.usage_limit_until
+msgctxt "error.usage_limit_until"
+msgid ""
+"Your {backend} account is out of usage until {time}. Try again then, or switch model."
+msgstr ""
+"Kontoen din hos {backend} har nådd bruksgrensen, som nullstilles {time}. Prøv igjen da, eller bytt modell."
 
 #. Settings > Experiments, tool explanations status: switched off (adjective)
 #. context: explanations
@@ -7929,18 +8075,6 @@ msgstr "Av"
 msgctxt "scheduled task"
 msgid "On"
 msgstr "På"
-
-#. search result line: an agent wrote this message (lowercase noun)
-#. context: search hit
-msgctxt "search hit"
-msgid "agent"
-msgstr "agent"
-
-#. search result line: the user wrote this message (lowercase pronoun)
-#. context: search hit
-msgctxt "search hit"
-msgid "you"
-msgstr "du"
 
 #. select-text page, before each of the user's own messages (pronoun, a colon follows)
 #. context: select text

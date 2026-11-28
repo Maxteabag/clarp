@@ -51,10 +51,6 @@ msgstr "12-घंटे (6:10 PM)"
 msgid "24-hour (18:10)"
 msgstr "24-घंटे (18:10)"
 
-#. Settings page and Ctrl+K, the line under the preference “Reply notifications” saying what it does.
-msgid "A desktop notification when an agent answers in a chat that is not open"
-msgstr "जब कोई एजेंट ऐसी चैट में जवाब दे जो खुली नहीं है, तो डेस्कटॉप सूचना"
-
 #. Key-binding editor and keymap import, error: a double press must be the same key twice (e.g. Right Right); {} is what was typed
 msgid "A double press is one key twice: {}"
 msgstr "डबल प्रेस का मतलब एक ही की दो बार: {}"
@@ -455,10 +451,6 @@ msgid ""
 "Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"
 msgstr ""
 "एजेंट रोकें (Ctrl+.) या एजेंट को खत्म करें से किसी एजेंट को बीच में रोकने या छोड़ने से पहले पूछें"
-
-#. Settings page and Ctrl+K, the line under the preference “Notification sound” saying what it does.
-msgid "Ask the desktop to play its message sound with each notification"
-msgstr "हर सूचना के साथ डेस्कटॉप से उसकी मैसेज वाली आवाज़ चलवाएं"
 
 #. processes panel note after asking a helper agent to stop; {} is its name
 msgid "Asked {} to stop."
@@ -948,6 +940,11 @@ msgstr "वह चेतावनी बंद करता है कि कि
 msgid "Closes this workspace tab; its chats stay in the explorer."
 msgstr "यह वर्कस्पेस टैब बंद करता है; इसकी चैट एक्सप्लोरर में बनी रहती हैं।"
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+#. chat, code block header, left label when the code names no language (noun: a block of program code)
+msgid "Code"
+msgstr "कोड"
+
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Font family for code blocks, commands and tool output
 msgid "Code font"
 msgstr "कोड फ़ॉन्ट"
@@ -1201,6 +1198,10 @@ msgstr "बातचीत / सेशन"
 msgid "Conversation or Session view"
 msgstr "बातचीत या सेशन व्यू"
 
+#. chat and code/table viewer, accessibility label the copy icon takes for a moment after copying (a state: the text was copied)
+msgid "Copied"
+msgstr "कॉपी हो गया"
+
 #. vim mode, message line after copying; {} is the start of what was copied
 msgid "Copied: {}"
 msgstr "कॉपी हो गया: {}"
@@ -1209,9 +1210,18 @@ msgstr "कॉपी हो गया: {}"
 msgid "Copy all"
 msgstr "सब कॉपी करें"
 
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+#. chat, code block header, accessibility label of the copy icon button (an action: copy the code)
+msgid "Copy code"
+msgstr "कोड कॉपी करें"
+
 #. chat, accessibility label of a message's copy icon (an action: copies the message text)
 msgid "Copy message"
 msgstr "मैसेज कॉपी करें"
+
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+msgid "Copy table"
+msgstr "टेबल कॉपी करें"
 
 #. Settings > Opening links, an option (an action, verb phrase): what clicking a link does
 msgid "Copy the address"
@@ -1405,10 +1415,6 @@ msgstr "क्रेडेंशियल सेव करने की कम�
 #. Select text page, key help under the title; Ctrl+A, Ctrl+C and Esc are key names left as is; "all" = select all, copy and close are verbs
 msgid "Ctrl+A all · Ctrl+C copy · Esc close"
 msgstr "Ctrl+A सब चुनें · Ctrl+C कॉपी करें · Esc बंद करें"
-
-#. Ctrl+K, a note under the search: message text is searched with Ctrl+F, not here
-msgid "Ctrl+F searches the messages of every chat."
-msgstr "Ctrl+F हर चैट के मैसेज खोजता है।"
 
 #. quick switcher, value pill on a row: this is the one in use now (adjective)
 #. quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
@@ -2683,31 +2689,15 @@ msgstr "चल रही प्रोसेस"
 msgid "Live status line"
 msgstr "लाइव स्टेटस लाइन"
 
-#. search, row that asks the Hosts for older matches (imperative)
-msgid "Load more messages"
-msgstr "और मैसेज लोड करें"
-
 #. agent profile, Prompt history section, button under the list that loads earlier prompts (verb)
 #. publications panel, key hint beside End at the end of the list (verb phrase): load older publications
 #. agent profile, shortcut bar label: loads older prompts (imperative)
 msgid "Load older"
 msgstr "पुराने लोड करें"
 
-#. search, row that loads the open chat's older messages to search them too; {} is the chat's name
-msgid "Load older messages of {}"
-msgstr "{} के पुराने मैसेज लोड करें"
-
 #. three pulsing dots shown while something loads, accessibility label (a state: something is loading)
 msgid "Loading"
 msgstr "लोड हो रहा है"
-
-#. search, row while older matches load
-msgid "Loading more messages…"
-msgstr "और मैसेज लोड हो रहे हैं…"
-
-#. search, row while the open chat's older messages load; {} is the chat's name
-msgid "Loading older messages of {}…"
-msgstr "{} के पुराने मैसेज लोड हो रहे हैं…"
 
 #. agent profile, Current plan section, shown in place of the plan's title while it loads
 msgid "Loading plan…"
@@ -3243,10 +3233,6 @@ msgstr "स्क्रीन पर कोई लिंक नहीं"
 msgid "No log available ({})."
 msgstr "कोई लॉग उपलब्ध नहीं ({})।"
 
-#. search, empty state: nothing matched in the messages this computer holds
-msgid "No match in the messages loaded on this computer"
-msgstr "इस कंप्यूटर पर लोड हुए मैसेज में कोई नतीजा नहीं मिला"
-
 #. quick switcher, empty state when nothing matches the typed text
 #. Ctrl+K command palette, shown when nothing matches the search
 msgid "No matching agent or contact"
@@ -3259,10 +3245,6 @@ msgstr "कोई मिलता-जुलता विकल्प नही�
 #. New Session dialog, folder list: nothing matches what was typed
 msgid "No matching directories"
 msgstr "कोई मिलती-जुलती डायरेक्टरी नहीं"
-
-#. search, empty state: no message anywhere has the typed words
-msgid "No message in any chat has these words"
-msgstr "किसी भी चैट के किसी मैसेज में ये शब्द नहीं हैं"
 
 #. dictation error: this computer has no microphone
 msgid "No microphone is available"
@@ -3405,10 +3387,6 @@ msgstr "जवाब नहीं दे रहा"
 msgid "Not saved on {}. Kept locally."
 msgstr "{} पर सेव नहीं हुआ। इसी डिवाइस पर रखा गया।"
 
-#. search note: a Host could not be searched; {} is the Host and its reason ("laptop: could not be reached")
-msgid "Not searched: {}."
-msgstr "नहीं खोजा गया: {}।"
-
 #. chat, status under the user's own message: it was not sent because the user stopped it
 msgid "Not sent (stopped)"
 msgstr "नहीं भेजा गया (रोका गया)"
@@ -3478,10 +3456,6 @@ msgstr "अभी कुछ नहीं चल रहा"
 msgid "Nothing waiting"
 msgstr "कुछ भी इंतज़ार में नहीं"
 
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask the desktop to play its message sound with each notification
-msgid "Notification sound"
-msgstr "सूचना की आवाज़"
-
 #. Settings > Appearance, description of the "Studio" reading theme (font and product names stay as they are)
 msgid ""
 "Noto Sans 15px on neutral light grey: compact, for the explorer and dense chrome on a big monitor."
@@ -3510,16 +3484,6 @@ msgstr "बंद"
 #. artifacts gallery, shortcut bar label: End loads older items (adjective as a short hint)
 msgid "Older"
 msgstr "पुराने"
-
-#. search note: a Host still indexes old messages; {} names the Host or Hosts
-msgid ""
-"Older history is still being indexed on {}: some older messages are not found yet."
-msgstr ""
-"{} पर पुरानी हिस्ट्री की इंडेक्सिंग अभी चल रही है: कुछ पुराने मैसेज अभी नहीं मिलेंगे।"
-
-#. search, detail under the load-more row
-msgid "Older matches, from every chat"
-msgstr "पुराने नतीजे, हर चैट से"
 
 #. quick switcher, value pill on a setting row: the setting is switched on (adjective)
 #. Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb; the same word as the quick switcher's "On" pill)
@@ -4093,10 +4057,6 @@ msgstr "इसी टर्न में शामिल करें"
 msgid "Read {}"
 msgstr "{} पढ़ा"
 
-#. search note, before the rest while the cached chats are read
-msgid "Reading cached chats…"
-msgstr "कैश की गई चैट पढ़ी जा रही हैं…"
-
 #. chat list and Running box, the kind of step running now
 msgid "Reading files"
 msgstr "फ़ाइलें पढ़ रहा है"
@@ -4262,10 +4222,6 @@ msgstr "नाम बदलें · Enter"
 #. Rename contact dialog, primary button text while the rename is being saved (in progress)
 msgid "Renaming…"
 msgstr "नाम बदला जा रहा है…"
-
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: A desktop notification when an agent answers in a chat that is not open
-msgid "Reply notifications"
-msgstr "जवाब की सूचनाएं"
 
 #. report viewer, title when the report has none (noun: a written report an agent published)
 msgid "Report"
@@ -4499,14 +4455,6 @@ msgstr "संपर्क खोजें"
 msgid "Search messages"
 msgstr "मैसेज खोजें"
 
-#. navigation rail, tooltip of the search button (verb phrase); Ctrl+F is its shortcut, key names left as is
-msgid "Search messages (Ctrl+F)"
-msgstr "मैसेज खोजें (Ctrl+F)"
-
-#. Ctrl+F message search, placeholder of the search field
-msgid "Search messages in every chat"
-msgstr "हर चैट में मैसेज खोजें"
-
 #. Settings page, accessibility label of the search field (verb phrase: search the settings)
 msgid "Search settings"
 msgstr "सेटिंग्स खोजें"
@@ -4520,39 +4468,9 @@ msgstr "सेटिंग्स खोजें (/): छिपाएं, थी
 msgid "Search the chat"
 msgstr "चैट में खोजें"
 
-#. search, detail under the load-older row
-msgid "Search them too: this chat has more than is loaded here"
-msgstr "इन्हें भी खोजें: इस चैट में यहां लोड हुए से ज़्यादा मैसेज हैं"
-
-#. search note under the results
-msgid "Searched every chat on the Host."
-msgstr "Host पर हर चैट में खोजा गया।"
-
-#. search note under the results; {} is how many Hosts were searched
-msgid "Searched every chat on {} Hosts."
-msgstr "{} Host पर हर चैट में खोजा गया।"
-
-#. search note under the results when the Host cannot search: {0} loaded chats ("3 chats"), {1} cached chats
-msgid ""
-"Searched {0} loaded and {1} cached on this computer. Messages never loaded here are not searched: the Host has no message search yet."
-msgstr ""
-"इस कंप्यूटर पर लोड की गई {0} और कैश की गई {1} खोजी गईं। जो मैसेज यहां कभी लोड नहीं हुए, वे खोजे नहीं जाते: Host में अभी मैसेज खोज नहीं है।"
-
 #. chat, tool row title: what the agent searched for (past tense)
 msgid "Searched {}"
 msgstr "{} खोजा"
-
-#. search note while the Host is asked
-msgid "Searching every chat on the Host…"
-msgstr "Host पर हर चैट में खोजा जा रहा है…"
-
-#. search note while several Hosts are asked; {} is how many Hosts
-msgid "Searching every chat on {} Hosts…"
-msgstr "{} Host पर हर चैट में खोजा जा रहा है…"
-
-#. search, shown in the list while the Hosts are asked
-msgid "Searching every chat…"
-msgstr "हर चैट में खोजा जा रहा है…"
 
 #. chat list and Running box, the kind of step running now
 msgid "Searching the web"
@@ -5308,6 +5226,10 @@ msgstr "TTS कतार"
 msgid "TYPOGRAPHY"
 msgstr "टाइपोग्राफ़ी"
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+msgid "Table"
+msgstr "टेबल"
+
 #. Vim mode, the which-key panel: the group of keys after Space w, for workspace tabs and panes
 msgid "Tabs and panes"
 msgstr "टैब और पेन"
@@ -5490,10 +5412,6 @@ msgid ""
 msgstr ""
 "सबसे नीचे की पट्टी, जिसमें कीबोर्ड जहां है वहां काम करने वाली कीज़ और कनेक्शन दिखते हैं"
 
-#. search note: this computer's chat cache could not be read; {} is the reason
-msgid "The cache could not be read: {}"
-msgstr "कैश पढ़ा नहीं जा सका: {}"
-
 #. Settings page and Ctrl+K, the line under the setting “Font” saying what it does
 msgid "The chat's typeface and size for this reading theme; opens the font picker."
 msgstr "इस रीडिंग थीम के लिए चैट का टाइपफ़ेस और साइज़; फ़ॉन्ट पिकर खोलता है।"
@@ -5612,12 +5530,6 @@ msgstr "सोच रहा है: {}"
 #. agent profile, error moving an agent: the Host is too old to move agents
 msgid "This Host cannot move agents"
 msgstr "यह Host एजेंटों को दूसरी जगह नहीं ले जा सकता"
-
-#. search note: the Host cannot search, so its chats are searched as this computer holds them
-msgid ""
-"This Host cannot search messages: its chats are searched as loaded on this computer."
-msgstr ""
-"यह Host मैसेज नहीं खोज सकता: इसकी चैट वैसे खोजी जाती हैं जैसे वे इस कंप्यूटर पर लोड हैं।"
 
 #. form card, note: the Host is too old for this app's answers
 msgid "This Host does not take form answers from the desktop yet."
@@ -5798,10 +5710,6 @@ msgstr "टर्न"
 #. font picker, placeholder of the search field at the top
 msgid "Type to find a font"
 msgstr "फ़ॉन्ट खोजने के लिए टाइप करें"
-
-#. search, before anything is typed: what the search does
-msgid "Type words to search every chat"
-msgstr "हर चैट में खोजने के लिए शब्द टाइप करें"
 
 #. Updates page, title at the top (noun, plural; written in capitals where the script has them)
 msgid "UPDATES"
@@ -6190,6 +6098,10 @@ msgstr "वर्कस्पेस लेआउट सेव नहीं क�
 msgid "Workspace {}"
 msgstr "वर्कस्पेस {}"
 
+#. code viewer, accessibility label of the toggle icon button that wraps long lines (an action)
+msgid "Wrap lines"
+msgstr "लाइनें रैप करें"
+
 #. decision card in the chat, placeholder of the last option's text field, where the user types an answer of their own instead of picking one
 #. decision card in the chat, accessibility label of the text field for an answer of the user's own
 #. answered decision card in the chat, the last option (not chosen): an answer of the user's own
@@ -6277,10 +6189,6 @@ msgstr "~{} सेकंड में वापस"
 #. process output hint: c opens the job's chat
 msgid "c chat"
 msgstr "c चैट"
-
-#. search result line: the hit came from this computer's cache (lowercase, after " · ")
-msgid "cached"
-msgstr "कैश से"
 
 #. settings import error: the file could not be read; {0} is its path, {1} the reason
 msgid "cannot read {0}: {1}"
@@ -6841,12 +6749,6 @@ msgid_plural "{n} background processes running"
 msgstr[0] "{n} बैकग्राउंड प्रोसेस चल रही है"
 msgstr[1] "{n} बैकग्राउंड प्रोसेस चल रही हैं"
 
-#. search note: a number of chats; {n} is the count
-msgid "{n} chat"
-msgid_plural "{n} chats"
-msgstr[0] "{n} चैट"
-msgstr[1] "{n} चैट"
-
 #. chat, table in a message, accessibility label of the table; {n} is how many columns it has
 #. table viewer summary: rows, then how many columns; {n} is the column count
 msgid "{n} column"
@@ -7120,10 +7022,6 @@ msgstr "{} पहले"
 msgid "{} busy"
 msgstr "{} व्यस्त"
 
-#. search note: these Hosts cannot search messages; {} names the Host or Hosts
-msgid "{} cannot search messages: its chats are not searched."
-msgstr "{} मैसेज नहीं खोज सकता: इसकी चैट नहीं खोजी गईं।"
-
 #. Settings > Line length, a length in characters; {} is the number, "ch" is characters
 msgid "{} ch"
 msgstr "{} अक्षर"
@@ -7344,10 +7242,6 @@ msgstr "↑↓ ऊपर-नीचे · Enter चुनता है · Esc स
 msgid "↑↓ move · Enter open · Esc close"
 msgstr "↑↓ ऊपर-नीचे · Enter खोलें · Esc बंद करें"
 
-#. Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
-msgid "↑↓ move · Enter opens the chat at the message · Esc close"
-msgstr "↑↓ ऊपर-नीचे · Enter उस मैसेज पर चैट खोलता है · Esc बंद करें"
-
 #. quick switcher, key help under the list; ↑↓, Enter and Esc are key names left as is; move/run/switch/close are verbs
 msgid "↑↓ move · Enter run or switch · Esc close"
 msgstr "↑↓ ऊपर-नीचे · Enter चलाएं या स्विच करें · Esc बंद करें"
@@ -7521,6 +7415,259 @@ msgstr "{0} मिनट {1} सेकंड"
 msgctxt "duration"
 msgid "{0}s"
 msgstr "{0} सेकंड"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the plan lacks the model); {backend} is a backend name (Claude, Codex, ...), not translated; {model} is a model name, not translated
+#. context: error.account_plan
+msgctxt "error.account_plan"
+msgid "Your {backend} plan does not include {model}. Switch model or account."
+msgstr "आपके {backend} प्लान में {model} शामिल नहीं है। मॉडल या खाता बदलें।"
+
+#. chat, failed-turn card, button (an action, imperative): compacts the conversation, then sends the message again
+#. context: error.action.compact_retry
+msgctxt "error.action.compact_retry"
+msgid "Compact and continue"
+msgstr "कॉम्पैक्ट करें और जारी रखें"
+
+#. chat, failed-turn card, button (an action, imperative): copies a diagnostic text for an agent; Norwegian per owner: "Kopier diagnose"
+#. context: error.action.copy_details
+msgctxt "error.action.copy_details"
+msgid "Copy diagnostics"
+msgstr "डायग्नोस्टिक्स कॉपी करें"
+
+#. chat, failed-turn card, button (an action, imperative): starts a new session with the same conversation and sends the message again
+#. context: error.action.fresh_retry
+msgctxt "error.action.fresh_retry"
+msgid "New session, try again"
+msgstr "नए सेशन में फिर से कोशिश करें"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.retry
+msgctxt "error.action.retry"
+msgid "Try again"
+msgstr "फिर से कोशिश करें"
+
+#. chat, failed-turn card, button (an action, imperative); {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.action.retry_at
+msgctxt "error.action.retry_at"
+msgid "Try again at {time}"
+msgstr "{time} पर फिर से कोशिश करें"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.sign_in
+msgctxt "error.action.sign_in"
+msgid "Sign in again"
+msgstr "फिर से साइन इन करें"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.switch_model
+msgctxt "error.action.switch_model"
+msgid "Switch backend or model"
+msgstr "बैकएंड या मॉडल बदलें"
+
+#. chat, failed-turn card, note under the buttons when a button's request was refused
+#. context: error.action_failed
+msgctxt "error.action_failed"
+msgid "That didn't work. Try again."
+msgstr "ऐसा नहीं हो सका। फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the sign-in ran out); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.auth
+msgctxt "error.auth"
+msgid "Your {backend} sign-in has expired. Sign in again, then try again."
+msgstr ""
+"आपके {backend} साइन-इन की अवधि खत्म हो गई है। फिर से साइन इन करें, फिर दोबारा कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (credits, payment, a hard or monthly limit: no reset clears it); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.billing
+msgctxt "error.billing"
+msgid "Your {backend} account is out of credits. Top it up, or switch model."
+msgstr ""
+"आपके {backend} खाते में क्रेडिट खत्म हो गए हैं। क्रेडिट जोड़ें, या मॉडल बदलें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the link to the provider broke, retries used up); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.connection
+msgctxt "error.connection"
+msgid ""
+"Lost the connection to {backend}, and the Host's retries did not get through. Try again."
+msgstr ""
+"{backend} से कनेक्शन टूट गया, और Host की दोबारा कोशिशें भी सफल नहीं हुईं। फिर से कोशिश करें।"
+
+#. chat, failed-turn card, short confirmation after Copy diagnostics; must match the Host-down screen's "copied"
+#. context: error.copied
+msgctxt "error.copied"
+msgid "Diagnostics copied"
+msgstr "डायग्नोस्टिक्स कॉपी हो गया"
+
+#. chat, failed-turn card, accessibility label of the disclosure (noun): opens the provider's raw error text
+#. chat, failed-turn card, disclosure label (noun): opens the provider's raw error text
+#. context: error.details
+msgctxt "error.details"
+msgid "Details"
+msgstr "जानकारी"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (a signal from outside the Host ended the turn)
+#. context: error.ended_from_outside
+msgctxt "error.ended_from_outside"
+msgid "Something outside Clarp ended the turn. Send the message again."
+msgstr "Clarp के बाहर से किसी चीज़ ने टर्न खत्म कर दिया। मैसेज फिर से भेजें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone); {folder} is a folder path
+#. context: error.folder_missing
+msgctxt "error.folder_missing"
+msgid ""
+"This agent's folder {folder} no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"इस एजेंट का फ़ोल्डर {folder} अब मौजूद नहीं है। उसे फिर से बनाएं, या किसी दूसरे फ़ोल्डर में नया एजेंट बनाएं।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone)
+#. context: error.folder_missing_no_path
+msgctxt "error.folder_missing_no_path"
+msgid ""
+"This agent's folder no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"इस एजेंट का फ़ोल्डर अब मौजूद नहीं है। उसे फिर से बनाएं, या किसी दूसरे फ़ोल्डर में नया एजेंट बनाएं।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (an OpenCode free model refused outside OpenCode)
+#. context: error.free_model_restricted
+msgctxt "error.free_model_restricted"
+msgid ""
+"This free OpenCode model only runs in OpenCode's own apps. Choose another model."
+msgstr ""
+"यह मुफ़्त OpenCode मॉडल सिर्फ़ OpenCode के अपने ऐप्स में चलता है। कोई दूसरा मॉडल चुनें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the turn was cut off before it finished (a restart, a process that went without a word))
+#. context: error.interrupted
+msgctxt "error.interrupted"
+msgid "The turn was cut off before it finished. Send the message again."
+msgstr "टर्न पूरा होने से पहले ही रुक गया। मैसेज फिर से भेजें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the provider rejected the request as malformed (bad tool or call ids, an empty tool result, invalid payload, 400). Trying the same session again replays the same history, so the first action starts a fresh one); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.invalid_request
+msgctxt "error.invalid_request"
+msgid ""
+"{backend} rejected the conversation history. Start a fresh session with the same conversation and try again."
+msgstr ""
+"{backend} ने बातचीत का इतिहास अस्वीकार कर दिया। उसी बातचीत के साथ नया सेशन शुरू करें और फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent moved to another Host)
+#. context: error.moved
+msgctxt "error.moved"
+msgid "This agent moved to another Host. Continue the conversation there."
+msgstr "यह एजेंट दूसरे Host पर चला गया है। बातचीत वहीं जारी रखें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the computer had no network for 15 minutes)
+#. context: error.network_gone
+msgctxt "error.network_gone"
+msgid ""
+"This computer had no network for 15 minutes, so the turn stopped. Try again once it is online."
+msgstr ""
+"इस कंप्यूटर पर 15 मिनट तक नेटवर्क नहीं था, इसलिए टर्न रुक गया। ऑनलाइन होने पर फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the Host could not start the turn)
+#. context: error.not_started
+msgctxt "error.not_started"
+msgid "The Host could not start the turn. Try again."
+msgstr "Host टर्न शुरू नहीं कर सका। फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the conversation no longer fits the model)
+#. context: error.prompt_too_long
+msgctxt "error.prompt_too_long"
+msgid "This conversation has grown too long for the model. Compact it and continue."
+msgstr "यह बातचीत मॉडल के लिए बहुत लंबी हो गई है। इसे कॉम्पैक्ट करें और जारी रखें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (overloaded, rate limited, 429/5xx after the Host's own retries); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.provider_busy
+msgctxt "error.provider_busy"
+msgid ""
+"{backend} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model."
+msgstr ""
+"{backend} पर अभी बहुत ज़्यादा लोड है, और Host की दोबारा कोशिशें भी सफल नहीं हुईं। एक मिनट बाद फिर से कोशिश करें, या मॉडल बदलें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model's provider is unavailable); {model} is a model name, not translated
+#. context: error.provider_down
+msgctxt "error.provider_down"
+msgid ""
+"The provider of {model} is unavailable right now. Try again later, or switch model."
+msgstr ""
+"{model} का प्रोवाइडर अभी उपलब्ध नहीं है। बाद में फिर से कोशिश करें, या मॉडल बदलें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent ran on another provider than it is bound to)
+#. context: error.provider_mismatch
+msgctxt "error.provider_mismatch"
+msgid ""
+"This agent ran on another model provider than the one it is bound to. Check its Codex home and provider."
+msgstr ""
+"यह एजेंट जिस मॉडल प्रोवाइडर से जुड़ा है, उसके बजाय किसी दूसरे प्रोवाइडर पर चला। इसका Codex home और प्रोवाइडर जांचें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model refused (a safety filter blocked the answer))
+#. context: error.refused
+msgctxt "error.refused"
+msgid ""
+"The model refused to answer (a safety filter blocked it). Rephrase, or switch model."
+msgstr ""
+"मॉडल ने जवाब देने से मना कर दिया (सेफ़्टी फ़िल्टर ने इसे रोक दिया)। बात को दूसरे शब्दों में लिखें, या मॉडल बदलें।"
+
+#. chat, failed-turn card, badge for how many times the same failure repeated in a row; keep it short
+#. context: error.repeat_count
+msgctxt "error.repeat_count"
+msgid "{n}×"
+msgid_plural "{n}×"
+msgstr[0] "{n}×"
+msgstr[1] "{n}×"
+
+#. chat, failed-turn card, note under the buttons after a scheduled retry was accepted; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.retry_scheduled
+msgctxt "error.retry_scheduled"
+msgid "Will try again at {time}"
+msgstr "{time} पर फिर से कोशिश की जाएगी"
+
+#. chat, failed-turn card, note under the buttons after the message was sent again
+#. context: error.retry_sent
+msgctxt "error.retry_sent"
+msgid "Sent again"
+msgstr "फिर से भेजा गया"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's process ended unexpectedly); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.runner_exit
+msgctxt "error.runner_exit"
+msgid "{backend} stopped unexpectedly. Try again."
+msgstr "{backend} अचानक बंद हो गया। फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's session is held by another process (a Codex thread with another active writer, a locked Grok session)); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.session_locked
+msgctxt "error.session_locked"
+msgid "The {backend} session is busy in another process. Try again in a moment."
+msgstr ""
+"{backend} सेशन किसी दूसरी प्रोसेस में व्यस्त है। थोड़ी देर में फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend stopped responding); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.timeout
+msgctxt "error.timeout"
+msgid "{backend} stopped responding. Try again."
+msgstr "{backend} ने जवाब देना बंद कर दिया। फिर से कोशिश करें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (anything else); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.unknown
+msgctxt "error.unknown"
+msgid ""
+"The turn failed at {backend}. Try again, or switch model if it happens again."
+msgstr ""
+"{backend} पर टर्न पूरा नहीं हो सका। फिर से कोशिश करें, या दोबारा ऐसा हो तो मॉडल बदलें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.usage_limit
+msgctxt "error.usage_limit"
+msgid "Your {backend} account is out of usage. Try again later, or switch model."
+msgstr ""
+"आपके {backend} खाते की इस्तेमाल की सीमा पूरी हो गई है। बाद में फिर से कोशिश करें, या मॉडल बदलें।"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.usage_limit_until
+msgctxt "error.usage_limit_until"
+msgid ""
+"Your {backend} account is out of usage until {time}. Try again then, or switch model."
+msgstr ""
+"आपके {backend} खाते की इस्तेमाल की सीमा पूरी हो गई है और {time} पर रीसेट होगी। तब फिर से कोशिश करें, या मॉडल बदलें।"
 
 #. Settings > Experiments, tool explanations status: switched off (adjective)
 #. context: explanations
@@ -7926,18 +8073,6 @@ msgstr "बंद"
 msgctxt "scheduled task"
 msgid "On"
 msgstr "चालू"
-
-#. search result line: an agent wrote this message (lowercase noun)
-#. context: search hit
-msgctxt "search hit"
-msgid "agent"
-msgstr "एजेंट"
-
-#. search result line: the user wrote this message (lowercase pronoun)
-#. context: search hit
-msgctxt "search hit"
-msgid "you"
-msgstr "आप"
 
 #. select-text page, before each of the user's own messages (pronoun, a colon follows)
 #. context: select text

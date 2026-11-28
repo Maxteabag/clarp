@@ -7,6 +7,11 @@ cd "$(dirname "$0")/../.."
 [ "$1" = pair ] && exec slint-app/tests/pair-check.sh "${2:-slint-app/docs/checks/pair}"
 # screens-LANG: the main screens in one language, for translation review.
 case $1 in screens-*) exec slint-app/tests/screens.sh "${1#screens-}" "${2:-slint-app/docs/checks/$1}" ;; esac
+# Use the same viewer driver and assertions in each shipped language.
+case $1 in codeblocks-en|codeblocks-nb|codeblocks-zh-Hans|codeblocks-hi|codeblocks-es|codeblocks-fr)
+    export CLARP_LANGUAGE="${1#codeblocks-}"
+    set -- codeblocks "${2:-slint-app/docs/checks/$1}"
+esac
 name=$1; out=$(realpath -m "${2:-slint-app/docs/checks}"); mkdir -p "$out"
 # Every artifact type and its interactions run in one long check.
 case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget) limit=300 ;; artifact-keys|scrollbar) limit=600 ;; *) limit=120 ;; esac

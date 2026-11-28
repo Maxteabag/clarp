@@ -95,7 +95,7 @@ pub(super) fn codeblocks_check(out: String) {
             shot(&o1, "codeblocks-01-header");
             check(press("code-copy"), "the code's copy icon is pressed");
             check(clipboard() == CODE, &format!("its copy puts the code on the clipboard: {:?}", clipboard()));
-            check(label("code-copy") == "Copied", &format!("the icon says Copied: {:?}", label("code-copy")));
+            check(label("code-copy") == clarp_core::i18n::translate("", "Copied", "", None, &[]), &format!("the icon says Copied: {:?}", label("code-copy")));
             shot(&o1, "codeblocks-01-copied");
             true
         })),
@@ -103,7 +103,7 @@ pub(super) fn codeblocks_check(out: String) {
             if !settled(&s2, 1800) {
                 return false;
             }
-            check(label("code-copy") == "Copy code", &format!("after a moment it says Copy code again: {:?}", label("code-copy")));
+            check(label("code-copy") == clarp_core::i18n::translate("", "Copy code", "", None, &[]), &format!("after a moment it says Copy code again: {:?}", label("code-copy")));
             check(press("code-expand"), "the code's Expand icon is pressed");
             true
         })),

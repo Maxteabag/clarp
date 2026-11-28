@@ -52,11 +52,6 @@ msgstr "12 heures (6:10 PM)"
 msgid "24-hour (18:10)"
 msgstr "24 heures (18:10)"
 
-#. Settings page and Ctrl+K, the line under the preference “Reply notifications” saying what it does.
-msgid "A desktop notification when an agent answers in a chat that is not open"
-msgstr ""
-"Une notification du bureau quand un agent répond dans une discussion qui n’est pas ouverte"
-
 #. Key-binding editor and keymap import, error: a double press must be the same key twice (e.g. Right Right); {} is what was typed
 msgid "A double press is one key twice: {}"
 msgstr "Un double appui est la même touche deux fois : {}"
@@ -458,10 +453,6 @@ msgid ""
 "Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"
 msgstr ""
 "Demander confirmation avant que Arrêter l’agent (Ctrl+.) ou Libérer l’agent n’interrompe ou ne libère un agent"
-
-#. Settings page and Ctrl+K, the line under the preference “Notification sound” saying what it does.
-msgid "Ask the desktop to play its message sound with each notification"
-msgstr "Demander au bureau de jouer son son de message à chaque notification"
 
 #. processes panel note after asking a helper agent to stop; {} is its name
 msgid "Asked {} to stop."
@@ -953,6 +944,11 @@ msgid "Closes this workspace tab; its chats stay in the explorer."
 msgstr ""
 "Ferme cet onglet d’espace de travail ; ses discussions restent dans l’explorateur."
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+#. chat, code block header, left label when the code names no language (noun: a block of program code)
+msgid "Code"
+msgstr "Code"
+
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Font family for code blocks, commands and tool output
 msgid "Code font"
 msgstr "Police du code"
@@ -1207,6 +1203,10 @@ msgstr "Conversation / Session"
 msgid "Conversation or Session view"
 msgstr "Vue Conversation ou Session"
 
+#. chat and code/table viewer, accessibility label the copy icon takes for a moment after copying (a state: the text was copied)
+msgid "Copied"
+msgstr "Copié"
+
 #. vim mode, message line after copying; {} is the start of what was copied
 msgid "Copied: {}"
 msgstr "Copié : {}"
@@ -1215,9 +1215,18 @@ msgstr "Copié : {}"
 msgid "Copy all"
 msgstr "Tout copier"
 
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+#. chat, code block header, accessibility label of the copy icon button (an action: copy the code)
+msgid "Copy code"
+msgstr "Copier le code"
+
 #. chat, accessibility label of a message's copy icon (an action: copies the message text)
 msgid "Copy message"
 msgstr "Copier le message"
+
+#. full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
+msgid "Copy table"
+msgstr "Copier le tableau"
 
 #. Settings > Opening links, an option (an action, verb phrase): what clicking a link does
 msgid "Copy the address"
@@ -1412,10 +1421,6 @@ msgstr "Commande d’enregistrement des identifiants"
 #. Select text page, key help under the title; Ctrl+A, Ctrl+C and Esc are key names left as is; "all" = select all, copy and close are verbs
 msgid "Ctrl+A all · Ctrl+C copy · Esc close"
 msgstr "Ctrl+A tout · Ctrl+C copier · Esc fermer"
-
-#. Ctrl+K, a note under the search: message text is searched with Ctrl+F, not here
-msgid "Ctrl+F searches the messages of every chat."
-msgstr "Ctrl+F recherche dans les messages de toutes les discussions."
 
 #. quick switcher, value pill on a row: this is the one in use now (adjective)
 #. quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
@@ -2707,31 +2712,15 @@ msgstr "Processus actifs"
 msgid "Live status line"
 msgstr "Ligne d’état en direct"
 
-#. search, row that asks the Hosts for older matches (imperative)
-msgid "Load more messages"
-msgstr "Charger plus de messages"
-
 #. agent profile, Prompt history section, button under the list that loads earlier prompts (verb)
 #. publications panel, key hint beside End at the end of the list (verb phrase): load older publications
 #. agent profile, shortcut bar label: loads older prompts (imperative)
 msgid "Load older"
 msgstr "Charger les précédents"
 
-#. search, row that loads the open chat's older messages to search them too; {} is the chat's name
-msgid "Load older messages of {}"
-msgstr "Charger les messages plus anciens de {}"
-
 #. three pulsing dots shown while something loads, accessibility label (a state: something is loading)
 msgid "Loading"
 msgstr "Chargement"
-
-#. search, row while older matches load
-msgid "Loading more messages…"
-msgstr "Chargement d’autres messages…"
-
-#. search, row while the open chat's older messages load; {} is the chat's name
-msgid "Loading older messages of {}…"
-msgstr "Chargement des messages plus anciens de {}…"
 
 #. agent profile, Current plan section, shown in place of the plan's title while it loads
 msgid "Loading plan…"
@@ -3267,10 +3256,6 @@ msgstr "Aucun lien à l’écran"
 msgid "No log available ({})."
 msgstr "Aucun journal disponible ({})."
 
-#. search, empty state: nothing matched in the messages this computer holds
-msgid "No match in the messages loaded on this computer"
-msgstr "Aucun résultat dans les messages chargés sur cet ordinateur"
-
 #. quick switcher, empty state when nothing matches the typed text
 #. Ctrl+K command palette, shown when nothing matches the search
 msgid "No matching agent or contact"
@@ -3283,10 +3268,6 @@ msgstr "Aucun choix correspondant"
 #. New Session dialog, folder list: nothing matches what was typed
 msgid "No matching directories"
 msgstr "Aucun répertoire correspondant"
-
-#. search, empty state: no message anywhere has the typed words
-msgid "No message in any chat has these words"
-msgstr "Aucun message ne contient ces mots"
 
 #. dictation error: this computer has no microphone
 msgid "No microphone is available"
@@ -3429,10 +3410,6 @@ msgstr "Ne répond pas"
 msgid "Not saved on {}. Kept locally."
 msgstr "Non enregistré sur {}. Conservé localement."
 
-#. search note: a Host could not be searched; {} is the Host and its reason ("laptop: could not be reached")
-msgid "Not searched: {}."
-msgstr "Non inclus dans la recherche : {}."
-
 #. chat, status under the user's own message: it was not sent because the user stopped it
 msgid "Not sent (stopped)"
 msgstr "Non envoyé (arrêté)"
@@ -3502,10 +3479,6 @@ msgstr "Rien en cours"
 msgid "Nothing waiting"
 msgstr "Rien en attente"
 
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask the desktop to play its message sound with each notification
-msgid "Notification sound"
-msgstr "Son de notification"
-
 #. Settings > Appearance, description of the "Studio" reading theme (font and product names stay as they are)
 msgid ""
 "Noto Sans 15px on neutral light grey: compact, for the explorer and dense chrome on a big monitor."
@@ -3533,16 +3506,6 @@ msgstr "Désactivé"
 #. artifacts gallery, shortcut bar label: End loads older items (adjective as a short hint)
 msgid "Older"
 msgstr "Plus anciens"
-
-#. search note: a Host still indexes old messages; {} names the Host or Hosts
-msgid ""
-"Older history is still being indexed on {}: some older messages are not found yet."
-msgstr ""
-"L’historique ancien est encore en cours d’indexation sur {} : certains anciens messages ne sont pas encore trouvés."
-
-#. search, detail under the load-more row
-msgid "Older matches, from every chat"
-msgstr "Résultats plus anciens, de toutes les discussions"
 
 #. quick switcher, value pill on a setting row: the setting is switched on (adjective)
 #. Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb; the same word as the quick switcher's "On" pill)
@@ -4119,10 +4082,6 @@ msgstr "Intégrer au tour en cours"
 msgid "Read {}"
 msgstr "A lu {}"
 
-#. search note, before the rest while the cached chats are read
-msgid "Reading cached chats…"
-msgstr "Lecture des discussions en cache…"
-
 #. chat list and Running box, the kind of step running now
 msgid "Reading files"
 msgstr "Lecture de fichiers"
@@ -4289,10 +4248,6 @@ msgstr "Renommer · Enter"
 #. Rename contact dialog, primary button text while the rename is being saved (in progress)
 msgid "Renaming…"
 msgstr "Renommage…"
-
-#. Settings page and Ctrl+K, a preference's name, the row label. What it does: A desktop notification when an agent answers in a chat that is not open
-msgid "Reply notifications"
-msgstr "Notifications de réponse"
 
 #. report viewer, title when the report has none (noun: a written report an agent published)
 msgid "Report"
@@ -4528,14 +4483,6 @@ msgstr "Rechercher des contacts"
 msgid "Search messages"
 msgstr "Rechercher dans les messages"
 
-#. navigation rail, tooltip of the search button (verb phrase); Ctrl+F is its shortcut, key names left as is
-msgid "Search messages (Ctrl+F)"
-msgstr "Rechercher dans les messages (Ctrl+F)"
-
-#. Ctrl+F message search, placeholder of the search field
-msgid "Search messages in every chat"
-msgstr "Rechercher dans les messages de toutes les discussions"
-
 #. Settings page, accessibility label of the search field (verb phrase: search the settings)
 msgid "Search settings"
 msgstr "Rechercher dans les paramètres"
@@ -4549,40 +4496,9 @@ msgstr "Rechercher (/) : masquer, thème, voix…"
 msgid "Search the chat"
 msgstr "Rechercher dans la discussion"
 
-#. search, detail under the load-older row
-msgid "Search them too: this chat has more than is loaded here"
-msgstr ""
-"Les inclure dans la recherche : cette discussion contient plus que ce qui est chargé ici"
-
-#. search note under the results
-msgid "Searched every chat on the Host."
-msgstr "Recherche effectuée dans toutes les discussions du Host."
-
-#. search note under the results; {} is how many Hosts were searched
-msgid "Searched every chat on {} Hosts."
-msgstr "Recherche effectuée dans toutes les discussions de {} Hosts."
-
-#. search note under the results when the Host cannot search: {0} loaded chats ("3 chats"), {1} cached chats
-msgid ""
-"Searched {0} loaded and {1} cached on this computer. Messages never loaded here are not searched: the Host has no message search yet."
-msgstr ""
-"Recherche effectuée dans {0} chargées et {1} en cache sur cet ordinateur. Les messages jamais chargés ici ne sont pas inclus : le Host ne permet pas encore de rechercher dans les messages."
-
 #. chat, tool row title: what the agent searched for (past tense)
 msgid "Searched {}"
 msgstr "A recherché {}"
-
-#. search note while the Host is asked
-msgid "Searching every chat on the Host…"
-msgstr "Recherche dans toutes les discussions du Host…"
-
-#. search note while several Hosts are asked; {} is how many Hosts
-msgid "Searching every chat on {} Hosts…"
-msgstr "Recherche dans toutes les discussions de {} Hosts…"
-
-#. search, shown in the list while the Hosts are asked
-msgid "Searching every chat…"
-msgstr "Recherche dans toutes les discussions…"
 
 #. chat list and Running box, the kind of step running now
 msgid "Searching the web"
@@ -5351,6 +5267,10 @@ msgstr "File d’attente TTS"
 msgid "TYPOGRAPHY"
 msgstr "TYPOGRAPHIE"
 
+#. full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
+msgid "Table"
+msgstr "Tableau"
+
 #. Vim mode, the which-key panel: the group of keys after Space w, for workspace tabs and panes
 msgid "Tabs and panes"
 msgstr "Onglets et volets"
@@ -5539,10 +5459,6 @@ msgid ""
 msgstr ""
 "La barre du bas avec les touches qui fonctionnent là où se trouve le clavier, et la connexion"
 
-#. search note: this computer's chat cache could not be read; {} is the reason
-msgid "The cache could not be read: {}"
-msgstr "Impossible de lire le cache : {}"
-
 #. Settings page and Ctrl+K, the line under the setting “Font” saying what it does
 msgid "The chat's typeface and size for this reading theme; opens the font picker."
 msgstr ""
@@ -5666,12 +5582,6 @@ msgstr "Réflexion : {}"
 #. agent profile, error moving an agent: the Host is too old to move agents
 msgid "This Host cannot move agents"
 msgstr "Ce Host ne peut pas déplacer d’agents"
-
-#. search note: the Host cannot search, so its chats are searched as this computer holds them
-msgid ""
-"This Host cannot search messages: its chats are searched as loaded on this computer."
-msgstr ""
-"Ce Host ne permet pas de rechercher dans les messages : ses discussions sont recherchées telles que chargées sur cet ordinateur."
 
 #. form card, note: the Host is too old for this app's answers
 msgid "This Host does not take form answers from the desktop yet."
@@ -5853,10 +5763,6 @@ msgstr "Tours"
 #. font picker, placeholder of the search field at the top
 msgid "Type to find a font"
 msgstr "Tapez pour trouver une police"
-
-#. search, before anything is typed: what the search does
-msgid "Type words to search every chat"
-msgstr "Tapez des mots pour rechercher dans toutes les discussions"
 
 #. Updates page, title at the top (noun, plural; written in capitals where the script has them)
 msgid "UPDATES"
@@ -6247,6 +6153,10 @@ msgstr ""
 msgid "Workspace {}"
 msgstr "Espace de travail {}"
 
+#. code viewer, accessibility label of the toggle icon button that wraps long lines (an action)
+msgid "Wrap lines"
+msgstr "Retour à la ligne"
+
 #. decision card in the chat, placeholder of the last option's text field, where the user types an answer of their own instead of picking one
 #. decision card in the chat, accessibility label of the text field for an answer of the user's own
 #. answered decision card in the chat, the last option (not chosen): an answer of the user's own
@@ -6335,10 +6245,6 @@ msgstr "retour dans ~{} s"
 #. process output hint: c opens the job's chat
 msgid "c chat"
 msgstr "c discussion"
-
-#. search result line: the hit came from this computer's cache (lowercase, after " · ")
-msgid "cached"
-msgstr "en cache"
 
 #. settings import error: the file could not be read; {0} is its path, {1} the reason
 msgid "cannot read {0}: {1}"
@@ -6899,12 +6805,6 @@ msgid_plural "{n} background processes running"
 msgstr[0] "{n} processus en arrière-plan en cours"
 msgstr[1] "{n} processus en arrière-plan en cours"
 
-#. search note: a number of chats; {n} is the count
-msgid "{n} chat"
-msgid_plural "{n} chats"
-msgstr[0] "{n} discussion"
-msgstr[1] "{n} discussions"
-
 #. chat, table in a message, accessibility label of the table; {n} is how many columns it has
 #. table viewer summary: rows, then how many columns; {n} is the column count
 msgid "{n} column"
@@ -7178,11 +7078,6 @@ msgstr "il y a {}"
 msgid "{} busy"
 msgstr "{} occupés"
 
-#. search note: these Hosts cannot search messages; {} names the Host or Hosts
-msgid "{} cannot search messages: its chats are not searched."
-msgstr ""
-"{} ne permet pas de rechercher dans les messages : ses discussions ne sont pas incluses."
-
 #. Settings > Line length, a length in characters; {} is the number, "ch" is characters
 msgid "{} ch"
 msgstr "{} car."
@@ -7403,10 +7298,6 @@ msgstr "↑↓ naviguer · Enter choisit · Esc retour à tout"
 msgid "↑↓ move · Enter open · Esc close"
 msgstr "↑↓ naviguer · Enter ouvrir · Esc fermer"
 
-#. Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
-msgid "↑↓ move · Enter opens the chat at the message · Esc close"
-msgstr "↑↓ naviguer · Enter ouvre la discussion à ce message · Esc fermer"
-
 #. quick switcher, key help under the list; ↑↓, Enter and Esc are key names left as is; move/run/switch/close are verbs
 msgid "↑↓ move · Enter run or switch · Esc close"
 msgstr "↑↓ naviguer · Enter exécuter ou ouvrir · Esc fermer"
@@ -7580,6 +7471,261 @@ msgstr "{0} min {1} s"
 msgctxt "duration"
 msgid "{0}s"
 msgstr "{0} s"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the plan lacks the model); {backend} is a backend name (Claude, Codex, ...), not translated; {model} is a model name, not translated
+#. context: error.account_plan
+msgctxt "error.account_plan"
+msgid "Your {backend} plan does not include {model}. Switch model or account."
+msgstr ""
+"Votre forfait {backend} n’inclut pas {model}. Changez de modèle ou de compte."
+
+#. chat, failed-turn card, button (an action, imperative): compacts the conversation, then sends the message again
+#. context: error.action.compact_retry
+msgctxt "error.action.compact_retry"
+msgid "Compact and continue"
+msgstr "Compacter et continuer"
+
+#. chat, failed-turn card, button (an action, imperative): copies a diagnostic text for an agent; Norwegian per owner: "Kopier diagnose"
+#. context: error.action.copy_details
+msgctxt "error.action.copy_details"
+msgid "Copy diagnostics"
+msgstr "Copier les diagnostics"
+
+#. chat, failed-turn card, button (an action, imperative): starts a new session with the same conversation and sends the message again
+#. context: error.action.fresh_retry
+msgctxt "error.action.fresh_retry"
+msgid "New session, try again"
+msgstr "Réessayer dans une nouvelle session"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.retry
+msgctxt "error.action.retry"
+msgid "Try again"
+msgstr "Réessayer"
+
+#. chat, failed-turn card, button (an action, imperative); {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.action.retry_at
+msgctxt "error.action.retry_at"
+msgid "Try again at {time}"
+msgstr "Réessayer ({time})"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.sign_in
+msgctxt "error.action.sign_in"
+msgid "Sign in again"
+msgstr "Se reconnecter"
+
+#. chat, failed-turn card, button (an action, imperative)
+#. context: error.action.switch_model
+msgctxt "error.action.switch_model"
+msgid "Switch backend or model"
+msgstr "Changer de backend ou de modèle"
+
+#. chat, failed-turn card, note under the buttons when a button's request was refused
+#. context: error.action_failed
+msgctxt "error.action_failed"
+msgid "That didn't work. Try again."
+msgstr "Cela n’a pas fonctionné. Réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the sign-in ran out); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.auth
+msgctxt "error.auth"
+msgid "Your {backend} sign-in has expired. Sign in again, then try again."
+msgstr "Votre connexion à {backend} a expiré. Reconnectez-vous, puis réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (credits, payment, a hard or monthly limit: no reset clears it); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.billing
+msgctxt "error.billing"
+msgid "Your {backend} account is out of credits. Top it up, or switch model."
+msgstr ""
+"Votre compte {backend} n’a plus de crédits. Rechargez-le ou changez de modèle."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the link to the provider broke, retries used up); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.connection
+msgctxt "error.connection"
+msgid ""
+"Lost the connection to {backend}, and the Host's retries did not get through. Try again."
+msgstr ""
+"La connexion à {backend} a été perdue et les nouvelles tentatives du Host ont échoué. Réessayez."
+
+#. chat, failed-turn card, short confirmation after Copy diagnostics; must match the Host-down screen's "copied"
+#. context: error.copied
+msgctxt "error.copied"
+msgid "Diagnostics copied"
+msgstr "Diagnostics copiés"
+
+#. chat, failed-turn card, accessibility label of the disclosure (noun): opens the provider's raw error text
+#. chat, failed-turn card, disclosure label (noun): opens the provider's raw error text
+#. context: error.details
+msgctxt "error.details"
+msgid "Details"
+msgstr "Détails"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (a signal from outside the Host ended the turn)
+#. context: error.ended_from_outside
+msgctxt "error.ended_from_outside"
+msgid "Something outside Clarp ended the turn. Send the message again."
+msgstr "Un élément extérieur à Clarp a mis fin au tour. Renvoyez le message."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone); {folder} is a folder path
+#. context: error.folder_missing
+msgctxt "error.folder_missing"
+msgid ""
+"This agent's folder {folder} no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"Le dossier de cet agent, {folder}, n’existe plus. Recréez-le ou créez un nouvel agent dans un autre dossier."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent's folder is gone)
+#. context: error.folder_missing_no_path
+msgctxt "error.folder_missing_no_path"
+msgid ""
+"This agent's folder no longer exists. Recreate it, or make a new agent in another folder."
+msgstr ""
+"Le dossier de cet agent n’existe plus. Recréez-le ou créez un nouvel agent dans un autre dossier."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (an OpenCode free model refused outside OpenCode)
+#. context: error.free_model_restricted
+msgctxt "error.free_model_restricted"
+msgid ""
+"This free OpenCode model only runs in OpenCode's own apps. Choose another model."
+msgstr ""
+"Ce modèle OpenCode gratuit ne fonctionne que dans les applications OpenCode. Choisissez un autre modèle."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the turn was cut off before it finished (a restart, a process that went without a word))
+#. context: error.interrupted
+msgctxt "error.interrupted"
+msgid "The turn was cut off before it finished. Send the message again."
+msgstr "Le tour a été interrompu avant la fin. Renvoyez le message."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the provider rejected the request as malformed (bad tool or call ids, an empty tool result, invalid payload, 400). Trying the same session again replays the same history, so the first action starts a fresh one); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.invalid_request
+msgctxt "error.invalid_request"
+msgid ""
+"{backend} rejected the conversation history. Start a fresh session with the same conversation and try again."
+msgstr ""
+"{backend} a refusé l’historique de la conversation. Démarrez une nouvelle session avec la même conversation, puis réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent moved to another Host)
+#. context: error.moved
+msgctxt "error.moved"
+msgid "This agent moved to another Host. Continue the conversation there."
+msgstr ""
+"Cet agent a été déplacé vers un autre Host. Poursuivez la conversation là-bas."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the computer had no network for 15 minutes)
+#. context: error.network_gone
+msgctxt "error.network_gone"
+msgid ""
+"This computer had no network for 15 minutes, so the turn stopped. Try again once it is online."
+msgstr ""
+"Cet ordinateur est resté sans réseau pendant 15 minutes, le tour s’est donc arrêté. Réessayez une fois qu’il sera en ligne."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the Host could not start the turn)
+#. context: error.not_started
+msgctxt "error.not_started"
+msgid "The Host could not start the turn. Try again."
+msgstr "Le Host n’a pas pu démarrer le tour. Réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the conversation no longer fits the model)
+#. context: error.prompt_too_long
+msgctxt "error.prompt_too_long"
+msgid "This conversation has grown too long for the model. Compact it and continue."
+msgstr ""
+"Cette conversation est devenue trop longue pour le modèle. Compactez-la, puis continuez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (overloaded, rate limited, 429/5xx after the Host's own retries); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.provider_busy
+msgctxt "error.provider_busy"
+msgid ""
+"{backend} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model."
+msgstr ""
+"{backend} est surchargé pour le moment et les nouvelles tentatives du Host ont échoué. Réessayez dans une minute ou changez de modèle."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model's provider is unavailable); {model} is a model name, not translated
+#. context: error.provider_down
+msgctxt "error.provider_down"
+msgid ""
+"The provider of {model} is unavailable right now. Try again later, or switch model."
+msgstr ""
+"Le fournisseur de {model} est indisponible pour le moment. Réessayez plus tard ou changez de modèle."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the agent ran on another provider than it is bound to)
+#. context: error.provider_mismatch
+msgctxt "error.provider_mismatch"
+msgid ""
+"This agent ran on another model provider than the one it is bound to. Check its Codex home and provider."
+msgstr ""
+"Cet agent a utilisé un autre fournisseur de modèles que celui auquel il est lié. Vérifiez son répertoire Codex home et son fournisseur."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the model refused (a safety filter blocked the answer))
+#. context: error.refused
+msgctxt "error.refused"
+msgid ""
+"The model refused to answer (a safety filter blocked it). Rephrase, or switch model."
+msgstr ""
+"Le modèle a refusé de répondre (bloqué par un filtre de sécurité). Reformulez ou changez de modèle."
+
+#. chat, failed-turn card, badge for how many times the same failure repeated in a row; keep it short
+#. context: error.repeat_count
+msgctxt "error.repeat_count"
+msgid "{n}×"
+msgid_plural "{n}×"
+msgstr[0] "{n}×"
+msgstr[1] "{n}×"
+
+#. chat, failed-turn card, note under the buttons after a scheduled retry was accepted; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.retry_scheduled
+msgctxt "error.retry_scheduled"
+msgid "Will try again at {time}"
+msgstr "Nouvelle tentative prévue : {time}"
+
+#. chat, failed-turn card, note under the buttons after the message was sent again
+#. context: error.retry_sent
+msgctxt "error.retry_sent"
+msgid "Sent again"
+msgstr "Renvoyé"
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's process ended unexpectedly); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.runner_exit
+msgctxt "error.runner_exit"
+msgid "{backend} stopped unexpectedly. Try again."
+msgstr "{backend} s’est arrêté de manière inattendue. Réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend's session is held by another process (a Codex thread with another active writer, a locked Grok session)); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.session_locked
+msgctxt "error.session_locked"
+msgid "The {backend} session is busy in another process. Try again in a moment."
+msgstr ""
+"La session {backend} est occupée par un autre processus. Réessayez dans un instant."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the backend stopped responding); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.timeout
+msgctxt "error.timeout"
+msgid "{backend} stopped responding. Try again."
+msgstr "{backend} ne répond plus. Réessayez."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (anything else); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.unknown
+msgctxt "error.unknown"
+msgid ""
+"The turn failed at {backend}. Try again, or switch model if it happens again."
+msgstr ""
+"Le tour a échoué chez {backend}. Réessayez, ou changez de modèle si le problème se reproduit."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated
+#. context: error.usage_limit
+msgctxt "error.usage_limit"
+msgid "Your {backend} account is out of usage. Try again later, or switch model."
+msgstr ""
+"Votre compte {backend} a atteint sa limite d’utilisation. Réessayez plus tard ou changez de modèle."
+
+#. chat, failed-turn card, the sentence saying why the agent's turn failed (the account's usage window is spent); {backend} is a backend name (Claude, Codex, ...), not translated; {time} is a time already written in the language ("18:27", "Sat 18:27")
+#. context: error.usage_limit_until
+msgctxt "error.usage_limit_until"
+msgid ""
+"Your {backend} account is out of usage until {time}. Try again then, or switch model."
+msgstr ""
+"Votre compte {backend} est bloqué par sa limite d’utilisation jusqu’à {time}. Réessayez à ce moment-là ou changez de modèle."
 
 #. Settings > Experiments, tool explanations status: switched off (adjective)
 #. context: explanations
@@ -7985,18 +8131,6 @@ msgstr "Désactivée"
 msgctxt "scheduled task"
 msgid "On"
 msgstr "Activée"
-
-#. search result line: an agent wrote this message (lowercase noun)
-#. context: search hit
-msgctxt "search hit"
-msgid "agent"
-msgstr "agent"
-
-#. search result line: the user wrote this message (lowercase pronoun)
-#. context: search hit
-msgctxt "search hit"
-msgid "you"
-msgstr "vous"
 
 #. select-text page, before each of the user's own messages (pronoun, a colon follows)
 #. context: select text
