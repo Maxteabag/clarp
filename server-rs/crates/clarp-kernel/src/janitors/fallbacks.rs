@@ -1,6 +1,6 @@
 //! The Host's policy for isolated Janitor model calls.
 use super::book::{Agent, Config, World};
-use super::{Refused, template};
+use super::{Refused, execution_provider, template};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -101,18 +101,22 @@ impl Policy {
                 return Err(bad("Deterministic Janitors do not inherit models"));
             }
             let role = template(&config.template_id)?;
+            let backend = execution_provider(&agent.backend);
             let supports = |m: &Model| {
+                let provider = execution_provider(&m.provider);
                 role["supported_providers"]
                     .as_array()
-                    .map_or(m.provider == agent.backend, |list| {
-                        list.iter().any(|p| p == m.provider.as_str())
+                    .map_or(provider == backend, |list| {
+                        list.iter()
+                            .filter_map(Value::as_str)
+                            .any(|p| execution_provider(p) == provider)
                     })
             };
             if !next.model_chain.iter().all(supports) {
                 return Err(bad(&format!("Model provider incompatible with {session}")));
             }
             if super::turn_templates().contains(&config.template_id)
-                && next.model_chain[0].provider != agent.backend
+                && execution_provider(&next.model_chain[0].provider) != backend
             {
                 return Err(bad(
                     "Managed primary provider must match the Janitor backend",

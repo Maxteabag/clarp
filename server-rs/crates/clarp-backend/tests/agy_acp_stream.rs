@@ -361,7 +361,7 @@ fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_a
         ("claude", Steers::Stdin),
         ("agy-acp", Steers::Stdin),
         ("codex", Steers::Words),
-        ("agy", Steers::No),
+        ("agy", Steers::Stdin),
         ("grok", Steers::No),
         ("muse", Steers::Words),
         ("opencode", Steers::Words),
@@ -383,6 +383,7 @@ fn a_running_turn_takes_another_message_on_its_input_in_claude_and_agy_acp_and_a
             "{id}: an empty message is no message"
         );
     }
+    assert_eq!(clarp_backend::legacy_agy().steers(), Steers::No);
     // agy-acp gives a steered message as words only: one with a picture waits for its own turn.
     let acp = by_id("agy-acp").unwrap();
     assert!(!acp.steers_message("look at /data/uploads/s/shot.png"));

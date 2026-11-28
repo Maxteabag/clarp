@@ -191,7 +191,7 @@ fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
         ("CLARP_GROK_PROGRAM", grok.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
-        ("CLARP_GROK_PROGRAM", nowhere.to_str().unwrap()),
+        ("CLARP_AGY_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_MUSE_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_OPENCODE_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
