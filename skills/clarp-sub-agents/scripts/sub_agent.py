@@ -294,8 +294,7 @@ def fork(a: argparse.Namespace) -> int:
         args += ["--task", a.task]
     else:
         sys.exit("fork needs --task or --task-file")
-    # Without --backend the children take the parent's backend, so that is the one to check.
-    _check_effort(a.backend or (_backend_of(parent) if a.effort else ""), a.effort)
+    # The Host validates effort against the backend selected for each child.
     for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
                         ("--backend", a.backend), ("--model", a.model), ("--effort", a.effort)):
         if value:

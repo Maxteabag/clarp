@@ -357,3 +357,260 @@ fn a_turn_uses_owner_model_and_effort_defaults_when_the_agent_has_no_override() 
         }
     }
 }
+
+#[test]
+fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() {
+    let place = Place::new("helper-defaults");
+    let product = place.root.join("product");
+    let unrelated = place.root.join("product-personal");
+    for dir in [&product, &unrelated] {
+        std::fs::create_dir(dir).unwrap();
+    }
+    let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
+    let (owner_id, mixed_id) = {
+        let host = place.start_with_token("helper-test");
+        assert_eq!(host.get("/peers"), json!([]));
+        let lead = host.post(
+            "/agents",
+            json!({"name":"lead","cwd":product,"backend":"scripted"}),
+        );
+        host.post(
+            "/agents",
+            json!({"name":"other","cwd":product,"backend":"scripted"}),
+        );
+        let mixed = host.post(
+            "/agents",
+            json!({"name":"mixed","cwd":product,"backend":"claude"}),
+        );
+        (
+            lead["agent"]["agent_id"].clone(),
+            mixed["agent"]["agent_id"].as_str().unwrap().to_string(),
+        )
+    };
+    std::fs::write(
+        place.root.join("helper-defaults.json"),
+        json!({"parent_ids":[owner_id], "mixed_parents":{(mixed_id):[product]}, "selection":selection}).to_string(),
+    )
+    .unwrap();
+    let claude = place.root.join("claude");
+    program(
+        &claude,
+        &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
+    );
+    let codex = place.root.join("codex");
+    // Capture launch arguments using a sealed stand-in. Real CLI rollout evidence
+    // comes from the separately registered ai-swarm Docker fixture.
+    program(
+        &codex,
+        r#"#!/bin/sh
+[ "$1" = exec ] || exit 0
+if [ "$CLAUDE_PWA_SESSION" = new-reviewer ]; then
+  printf '%s\n' "$@" > reviewer-argv
+fi
+cat >/dev/null
+echo '{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000001"}'
+echo '{"type":"turn.started"}'
+echo '{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"fixture"}}'
+echo '{"type":"turn.completed","usage":{}}'
+"#,
+    );
+    git_in(&product, &["init", "-q"]);
+    let host = place.start_in(
+        "helper-test",
+        &["--config", place.root.to_str().unwrap()],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(host.get("/peers"), json!([]));
+    eprintln!(
+        "Disposable Host listening on {} with data under {} and no peers",
+        host.address,
+        place.root.display()
+    );
+    for (name, parent, cwd, expected) in [
+        ("product-child", "mixed", &product, "codex"),
+        ("film-child", "mixed", &unrelated, "claude"),
+        ("nested-product", "product-child", &unrelated, "codex"),
+        ("nested-film", "film-child", &product, "claude"),
+    ] {
+        let row = host.post(
+            "/agents",
+            json!({"name":name,"session":name,"role":"helper","parent":parent,"cwd":cwd,"backend":"claude","model":"claude-opus-5-5","effort":"high"}),
+        );
+        assert_eq!(row["agent"]["backend"], expected, "{row}");
+        assert_eq!(
+            row["agent"]["model"] == selection["model"],
+            expected == "codex"
+        );
+    }
+    // Exercise the installed launcher's Python entry point and real admin transport.
+    let tools = place.root.join("tools");
+    std::fs::create_dir(&tools).unwrap();
+    program(
+        &tools.join("clarp-admin"),
+        &format!(
+            "#!/bin/sh\nexec '{}' tool clarp-admin \"$@\"\n",
+            env!("CARGO_BIN_EXE_clarp-host")
+        ),
+    );
+    let prompt = place.root.join("brief");
+    std::fs::write(&prompt, "fixture").unwrap();
+    for (name, options) in [
+        (
+            "new-reviewer",
+            vec![
+                "--backend",
+                "claude",
+                "--model",
+                "claude-opus-5-5",
+                "--effort",
+                "high",
+            ],
+        ),
+        ("model-only", vec!["--model", "claude-opus-5-5"]),
+        ("omitted", vec![]),
+    ] {
+        let output = place
+            .command(on_path("python3").unwrap())
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../skills/clarp-sub-agents/scripts/sub_agent.py"
+            ))
+            .args(["start", name])
+            .arg(&product)
+            .arg(&prompt)
+            .arg("--clarp-agent")
+            .args(options)
+            .env("CLARP_SESSION", "product-child")
+            .env("CLARP_HOST_ADDR", &host.address)
+            .env("CLARP_HOST_TOKEN", &host.token)
+            .env("PATH", &tools)
+            .env("CLARP_SUB_AGENT_DIR", place.root.join("helpers"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let kept = host.get("/agents/snapshot");
+        let agent = kept["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == name)
+            .unwrap();
+        for key in ["backend", "model", "effort"] {
+            assert_eq!(agent[key], selection[key], "{agent}");
+        }
+        if name == "new-reviewer" {
+            wait_for("fresh reviewer to run", || host.state(name) == "done");
+            let args = std::fs::read_to_string(product.join("reviewer-argv")).unwrap();
+            let args: Vec<_> = args.lines().collect();
+            assert!(args.windows(2).any(|p| p == ["--model", "gpt-6.2-astra"]));
+            assert!(
+                args.windows(2)
+                    .any(|p| p == ["-c", r#"model_reasoning_effort="medium""#])
+            );
+        }
+    }
+    host.send("mixed", "ready", "ready");
+    wait_for("mixed parent conversation", || {
+        host.state("mixed") == "done"
+    });
+    let forked = host.post(
+        "/agents/mixed/fork",
+        json!({"children":[
+            {"name":"explicit-fork","task":"fixture","cwd":product,"backend":"claude","model":"claude-opus-5-5","effort":"high"},
+            {"name":"default-fork","task":"fixture","cwd":product},
+            {"name":"film-fork","task":"fixture","cwd":unrelated}
+        ]}),
+    );
+    let roster = host.get("/agents/snapshot");
+    for (index, (backend, model)) in [
+        ("codex", Some("gpt-6.2-astra")),
+        ("codex", Some("gpt-6.2-astra")),
+        ("claude", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let child = &forked["children"][index];
+        assert_eq!(child["backend"], backend, "{forked}");
+        let row = roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == child["session"])
+            .unwrap();
+        assert_eq!(row["backend"], backend);
+        if let Some(model) = model {
+            assert_eq!(row["model"], model);
+        }
+        if index < 2 {
+            assert_eq!(row["effort"], "medium");
+        }
+    }
+    let bound_home = bound_privacy::own_home(&place, "private-provider");
+    let bound = host.post("/agents",json!({"name":"bound-helper","role":"helper","parent":"lead","backend":"codex","codex_home":bound_home,"codex_provider":"stand-in","model":"private-deployment","effort":"high"}));
+    assert_eq!(bound["agent"]["model"], "private-deployment");
+    let inherited = host.post("/agents",json!({"name":"bound-child","role":"helper","parent":"bound-helper","backend":"codex","model":"private-deployment","effort":"low"}));
+    assert_eq!(inherited["agent"]["model"], "private-deployment");
+    assert_eq!(inherited["agent"]["effort"], "low");
+    // The restart rig creates a top-level agent for the backend under test.
+    // The soak later starts that same agent again in place using its backend.
+    for (session, backend, model) in [
+        ("restart-23", "claude", Some("sonnet")),
+        ("restart-codex-23", "codex", None),
+    ] {
+        let mut request = json!({"name":session,"session":session,"cwd":product,"backend":backend});
+        if let Some(model) = model {
+            request["model"] = json!(model);
+        }
+        let made = host.post("/agents", request);
+        let again = host.post(
+            "/agents",
+            json!({"name":session,"replace_sid":session,"backend":backend}),
+        );
+        assert_eq!(made["agent"]["backend"], backend);
+        for field in ["agent_id", "backend", "model", "effort"] {
+            assert_eq!(
+                again["agent"][field], made["agent"][field],
+                "{session} {field}"
+            );
+        }
+        assert!(
+            host.get(&format!("/agent-helper-state?session={session}"))["helper_defaults"]
+                .is_null()
+        );
+    }
+    // A disposable test helper under an enrolled lead keeps its backend and cannot
+    // pass that lead's selection on to the subjects of its own tests.
+    let fixture = host.post(
+        "/agents",
+        json!({"name":"rig","role":"helper","parent":"lead","test":true,"backend":"codex"}),
+    );
+    assert_ne!(fixture["agent"]["model"], selection["model"]);
+    assert!(host.get("/agent-helper-state?session=rig")["helper_defaults"].is_null());
+    for (name, parent) in [
+        ("child", "lead"),
+        ("nested", "child"),
+        ("control", "other"),
+        ("rig-child", "rig"),
+    ] {
+        let made = host.post(
+            "/agents",
+            json!({"name":name,"role":"helper","parent":parent,"cwd":unrelated}),
+        );
+        let row = &made["agent"];
+        if name == "control" || name == "rig-child" {
+            assert_eq!(row["backend"], "claude", "{made}");
+        } else {
+            for key in ["backend", "model", "effort"] {
+                assert_eq!(row[key], selection[key], "{made}");
+            }
+        }
+    }
+}
