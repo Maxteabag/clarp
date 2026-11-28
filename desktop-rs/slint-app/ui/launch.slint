@@ -563,7 +563,7 @@ export global StartAgent {
     in property <bool> past-loading;
     // A fresh start, or a past session chosen to resume or fork.
     in property <bool> past-ready: true;
-    out property <bool> can-start: name != "" && workspace != "" && past-ready;
+    out property <bool> can-start: name != "" && workspace != "" && backend-index >= 0 && past-ready;
     in property <string> error;
     in property <int> focus-request;
     callback workspace-edited(string);

@@ -8,6 +8,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use clarp_core::catalog::{ANTIGRAVITY_ACP, antigravity_label};
 use clarp_core::json;
 use clarp_core::protocol::display_name;
 use clarp_engine::{Change, Engine};
@@ -49,8 +50,8 @@ struct Hub {
     query: String,
     name: String,
     selected_key: String,
-    /// A command-line launch waiting for the Host ("anonymous" or "contact").
-    pending_launch: String,
+    /// Whether a command-line launch waiting for the Host is anonymous.
+    pending_launch: Option<bool>,
     directory_query: String,
     directory_index: usize,
     confirm_when_ready: bool,
@@ -143,7 +144,7 @@ fn rows(engine: &Engine, state: &Hub) -> Vec<Row> {
             key: format!("agent:{}", a.session),
             name: display_name(a).to_owned(),
             session: a.session.clone(),
-            subtitle: a.backend.clone(),
+            subtitle: antigravity_label(&a.backend).map_or(a.backend.as_str(), |label| label).to_owned(),
             in_chat: true,
         })
         .collect();
@@ -165,10 +166,15 @@ fn starting(engine: &Engine, state: &Hub) -> bool {
 }
 
 fn can_confirm(engine: &Engine, state: &Hub) -> bool {
-    engine.connected()
-        && !starting(engine, state)
-        && !state.choosing_directory
-        && if state.new_contact { !state.name.trim().is_empty() } else { selected_row(engine, state).is_some() }
+    if !engine.connected() || starting(engine, state) || state.choosing_directory || state.pending_launch.is_some() {
+        return false;
+    }
+    let has_backend = provider_index(engine, state).is_some();
+    if state.new_contact {
+        has_backend && !state.name.trim().is_empty()
+    } else {
+        selected_row(engine, state).is_some_and(|row| row.in_chat || has_backend)
+    }
 }
 
 // ---- the directory picker -------------------------------------------------------
@@ -339,7 +345,11 @@ pub fn open_hub(app: &Rc<App>, window: &AppWindow) {
         let engine = app.engine.borrow();
         (engine.last_working_directory(), engine.last_backend(), providers(&engine))
     };
-    let backend = if offered.iter().any(|(id, _)| *id == saved) { saved } else { offered.first().map(|p| p.0.clone()).unwrap_or_default() };
+    let backend = if antigravity_label(&saved).is_some() || offered.iter().any(|(id, _)| *id == saved) {
+        saved
+    } else {
+        offered.first().map(|p| p.0.clone()).unwrap_or_default()
+    };
     hub(|s| {
         *s = Hub { focus_request: s.focus_request, directory: if directory.is_empty() { "~".into() } else { directory }, backend, ..Hub::default() };
     });
@@ -368,7 +378,7 @@ pub fn open_launch(app: &Rc<App>, window: &AppWindow, backend: &str, model: &str
     }
     let known = providers(&app.engine.borrow()).iter().any(|(id, _)| id == backend);
     hub(|s| {
-        if known {
+        if known || antigravity_label(backend).is_some() {
             s.backend = backend.to_owned();
         }
         s.model = model.to_owned();
@@ -378,13 +388,17 @@ pub fn open_launch(app: &Rc<App>, window: &AppWindow, backend: &str, model: &str
         show(app, window);
         return;
     }
-    if !app.engine.borrow().connected() {
-        hub(|s| s.pending_launch = if anonymous { "anonymous" } else { "contact" }.into());
+    if !ready_to_launch(&app.engine.borrow(), backend) {
+        hub(|s| s.pending_launch = Some(anonymous));
         show(app, window);
         return;
     }
     start_launch(app, anonymous);
     show(app, window);
+}
+
+fn ready_to_launch(engine: &Engine, backend: &str) -> bool {
+    engine.connected() && (backend != ANTIGRAVITY_ACP || !engine.model_catalog_pending())
 }
 
 fn start_launch(app: &Rc<App>, anonymous: bool) {
@@ -402,7 +416,7 @@ fn close_hub(app: &Rc<App>, window: &AppWindow) {
     DIRECTORY_TIMER.with(slint::Timer::stop);
     hub(|s| {
         s.submitting = false;
-        s.pending_launch.clear();
+        s.pending_launch = None;
     });
     window.global::<LaunchHub>().set_open(false);
     if overlay_is(app, HUB) {
@@ -469,6 +483,7 @@ fn step_provider(app: &Rc<App>, window: &AppWindow, index: i64) {
     }
     let next = offered[index.rem_euclid(offered.len() as i64) as usize].0.clone();
     hub(|s| {
+        s.pending_launch = None;
         if s.backend != next {
             s.backend = next;
             s.model.clear();
@@ -478,8 +493,8 @@ fn step_provider(app: &Rc<App>, window: &AppWindow, index: i64) {
     show(app, window);
 }
 
-fn provider_index(engine: &Engine, state: &Hub) -> usize {
-    providers(engine).iter().position(|(id, _)| *id == state.backend).unwrap_or(0)
+fn provider_index(engine: &Engine, state: &Hub) -> Option<usize> {
+    providers(engine).iter().position(|(id, _)| *id == state.backend)
 }
 
 fn move_selection(app: &Rc<App>, window: &AppWindow, delta: i32) {
@@ -511,7 +526,7 @@ fn show(app: &App, window: &AppWindow) {
         globals.set_providers(model(
             offered.iter().map(|(id, label)| ProviderChip { id: id.into(), label: label.into(), initial: initial(label) }).collect(),
         ));
-        globals.set_provider_index(provider_index(&engine, s) as i32);
+        globals.set_provider_index(provider_index(&engine, s).map_or(-1, |index| index as i32));
         let models = choices(&engine.models_for_backend(&s.backend));
         let efforts = choices(&engine.efforts_for_model(&s.backend, &s.model));
         let label = |list: &[(String, String)], id: &str| list.iter().find(|(i, _)| i == id).map(|(_, l)| l.clone()).unwrap_or_else(|| id.to_owned());
@@ -666,7 +681,7 @@ fn show_start(app: &App, window: &AppWindow) {
     let globals = window.global::<StartAgent>();
     start_state(|s| {
         let backends = start_backends(&engine);
-        if !backends.iter().any(|(id, _)| *id == s.backend) {
+        if antigravity_label(&s.backend).is_none() && !backends.iter().any(|(id, _)| *id == s.backend) {
             s.backend = backends.first().map(|b| b.0.clone()).unwrap_or_default();
         }
         let models = start_models(&engine, &s.backend);
@@ -676,7 +691,7 @@ fn show_start(app: &App, window: &AppWindow) {
         globals.set_suggestions(strings(engine.directory_suggestions().iter().map(|p| path_label(p))));
         globals.set_favorites(strings(engine.favorite_paths().iter().map(|p| path_label(p))));
         globals.set_backend_labels(strings(backends.iter().map(|(_, l)| l.clone())));
-        globals.set_backend_index(index(&backends, &s.backend));
+        globals.set_backend_index(backends.iter().position(|(id, _)| *id == s.backend).map_or(-1, |index| index as i32));
         globals.set_model_labels(strings(models.iter().map(|(_, l)| l.clone())));
         globals.set_model_index(index(&models, &s.model));
         globals.set_effort_labels(strings(efforts.iter().map(|(_, l)| l.clone())));
@@ -842,16 +857,22 @@ pub fn refresh(app: &Rc<App>, window: &AppWindow, changes: &[Change]) {
                 s.confirm_when_ready = false;
             }),
             Change::Connection if app.engine.borrow().connected() => {
-                let pending = hub(|s| std::mem::take(&mut s.pending_launch));
-                if !pending.is_empty() {
-                    start_launch(app, pending == "anonymous");
-                }
                 if hub(|s| s.choosing_directory) {
                     reload_directories(app);
                 }
             }
             _ => {}
         }
+    }
+    let pending = hub(|s| {
+        if s.pending_launch.is_some() && ready_to_launch(&app.engine.borrow(), &s.backend) {
+            s.pending_launch.take()
+        } else {
+            None
+        }
+    });
+    if let Some(anonymous) = pending {
+        start_launch(app, anonymous);
     }
     show(app, window);
 }
@@ -861,7 +882,7 @@ pub fn wire(window: &AppWindow) {
     use crate::with_window;
     let globals = window.global::<LaunchHub>();
     globals.on_step_provider(|delta| with_window(|app, window| {
-        let index = hub(|s| provider_index(&app.engine.borrow(), s)) as i64;
+        let index = hub(|s| provider_index(&app.engine.borrow(), s)).map_or(if delta < 0 { 0 } else { -1 }, |index| index as i64);
         step_provider(app, window, index + i64::from(delta));
     }));
     globals.on_choose_provider(|index| with_window(|app, window| step_provider(app, window, i64::from(index))));

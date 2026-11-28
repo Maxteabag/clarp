@@ -25,7 +25,7 @@ fn the_catalog_loads_once_live_and_lists_backends_models_and_efforts() {
     }}));
     let mut d = Driver::new(&host.base);
     assert!(!d.engine.model_catalog_loaded());
-    assert_eq!(d.engine.backend_options().len(), 3, "the built-in backends before a catalog");
+    assert_eq!(d.engine.backend_options().len(), 2, "the built-in backends before a catalog");
     d.connect();
     d.until("catalog", |e| e.model_catalog_loaded());
     assert!(d.changes.contains(&Change::Launch));
@@ -75,6 +75,19 @@ fn an_idle_contact_quick_starts_with_the_launch_values() {
     assert_eq!(d.engine.starting_contact(), "");
     assert_eq!((d.engine.last_backend().as_str(), d.engine.quick_start_backend().as_str()), ("grok", "grok"));
     assert_eq!(d.engine.settings().string("launch/backend", ""), "grok");
+}
+
+#[test]
+fn a_saved_legacy_antigravity_default_needs_an_explicit_launch_choice() {
+    let host = Host::start("legacy-quick-start");
+    let mut settings = Settings::in_memory();
+    settings.set("launch/backend", "agy");
+    let mut d = Driver::with_settings(&host.base, settings);
+    d.connect();
+    assert!(!d.engine.quick_start_contact("Paula", "", "", ""));
+    assert!(d.engine.error().contains("Choose a harness"));
+    assert_eq!(d.engine.last_backend(), "agy");
+    assert!(host.requests("POST", "/agents").is_empty());
 }
 
 #[test]

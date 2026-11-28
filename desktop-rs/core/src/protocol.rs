@@ -461,7 +461,7 @@ fn provider_name(provider: &str) -> &str {
     match provider {
         "codex" => "Codex",
         "claude" => "Claude",
-        "agy" => "Antigravity",
+        crate::catalog::LEGACY_ANTIGRAVITY | crate::catalog::ANTIGRAVITY_ACP => crate::catalog::ANTIGRAVITY_LABEL,
         "" => "This backend",
         other => other,
     }

@@ -58,6 +58,7 @@ pub(super) fn launch_check(out: String) {
     let catalog = json!({"providers": {
         "claude": {"label": "Claude", "sort_index": 1, "models": [{"id": "opus", "label": "Opus", "supported_efforts": ["low", "high"]}]},
         "codex": {"label": "Codex", "sort_index": 2, "supported_efforts": ["medium"], "models": [{"id": "gpt-5", "label": "GPT-5"}]},
+        "agy": {"label": "Antigravity", "sort_index": 3},
     }});
     let personas = json!({"personas": [{"id": "p", "name": "Paula"}, {"id": "q", "name": "Quinn", "description": "Research"}, {"id": "r", "name": "Rosa"}]});
     let (o1, o2, o3, o4, o5, o6, o7, o8) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
@@ -377,6 +378,36 @@ pub(super) fn launch_check(out: String) {
             }
             let body = last_create();
             check(body["name"] == "Zed" && body["cwd"] == "~", &format!("Enter starts the named agent: {body}"));
+            launch_view::open_launch(&app_now(), window, "agy-acp", "acp-model", "high", true, "");
+            true
+        })),
+        ("explicit ACP on a legacy Host", Box::new(|app, window, _| {
+            let hub = window.global::<LaunchHub>();
+            if hub.get_error().is_empty() {
+                return false;
+            }
+            check(hub.get_error().contains("Antigravity is unavailable") && hub.get_provider_index() == -1 && !hub.get_can_confirm(),
+                "an explicit ACP launch explains the old Host's limitation");
+            check(last_create()["name"] == "Zed" && selected(app) == "zed-new",
+                "an unavailable explicit launch sent no replacement request and left the selected chat alone");
+            hub.invoke_cancel();
+            check(control("/__control/catalog", &json!({"providers": {
+                "claude": {"label": "Claude", "sort_index": 1},
+                "agy": {"label": "Antigravity (legacy)", "sort_index": 2},
+                "agy-acp": {"label": "Antigravity ACP", "sort_index": 3, "available": true,
+                    "models": [{"id": "acp-model", "label": "ACP model"}]}
+            }})).is_ok(), "the Host now offers both harnesses");
+            app.engine.borrow_mut().reconnect();
+            launch_view::open_launch(&app_now(), window, "agy-acp", "acp-model", "high", true, "/tmp");
+            true
+        })),
+        ("explicit ACP after the catalog", Box::new(|_, _, _| {
+            let body = last_create();
+            if body["backend"] != "agy-acp" {
+                return false;
+            }
+            check(body["anonymous"] == true && body["model"] == "acp-model" && body["effort"] == "high" && body["cwd"] == "/tmp",
+                &format!("the deferred launch submits the explicit ACP request intact: {body}"));
             true
         })),
     ];

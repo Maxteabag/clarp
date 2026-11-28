@@ -5,6 +5,14 @@ use serde_json::{Value, json};
 
 use crate::json::{self, Object};
 
+pub const LEGACY_ANTIGRAVITY: &str = "agy";
+pub const ANTIGRAVITY_ACP: &str = "agy-acp";
+pub const ANTIGRAVITY_LABEL: &str = "Antigravity";
+
+pub fn antigravity_label(backend: &str) -> Option<&'static str> {
+    matches!(backend, LEGACY_ANTIGRAVITY | ANTIGRAVITY_ACP).then_some(ANTIGRAVITY_LABEL)
+}
+
 fn providers(catalog: &Object) -> Object {
     json::object(catalog, "providers")
 }
@@ -21,10 +29,11 @@ fn option(id: &str, label: &str) -> Value {
     json!({"id": id, "label": label})
 }
 
-/// Installed, visible providers by `sort_index` (then id); the built-in
-/// three when the Host sends none.
+/// Installed, visible launch providers by `sort_index` (then id). Antigravity
+/// requires an ACP row the Host offers. Claude and Codex are the offline defaults.
 pub fn backend_options(catalog: &Object) -> Vec<Value> {
-    let mut sorted: Vec<(i64, Value)> = providers(catalog)
+    let providers = providers(catalog);
+    let mut sorted: Vec<_> = providers
         .iter()
         .filter_map(|(id, provider)| {
             let provider = provider.as_object()?;
@@ -33,16 +42,23 @@ pub fn backend_options(catalog: &Object) -> Vec<Value> {
                 return None;
             }
             let index = provider.get("sort_index").and_then(Value::as_i64).unwrap_or(1000);
-            let label = provider.get("label").and_then(Value::as_str).unwrap_or(id);
-            Some((index, option(id, label)))
+            Some((index, id, provider))
         })
         .collect();
-    sorted.sort_by_key(|(index, _)| *index);
-    let options: Vec<Value> = sorted.into_iter().map(|(_, option)| option).collect();
-    if options.is_empty() {
-        return vec![option("claude", "Claude"), option("codex", "Codex"), option("agy", "Antigravity")];
+    if sorted.is_empty() {
+        return vec![option("claude", "Claude"), option("codex", "Codex")];
     }
-    options
+    sorted.sort_by_key(|(index, _)| *index);
+    sorted
+        .into_iter()
+        .filter_map(|(_, id, provider)| {
+            if id == LEGACY_ANTIGRAVITY || (id == ANTIGRAVITY_ACP && provider.get("available").and_then(Value::as_bool) == Some(false)) {
+                return None;
+            }
+            let label = antigravity_label(id).map_or_else(|| provider.get("label").and_then(Value::as_str).unwrap_or(id), |label| label);
+            Some(option(id, label))
+        })
+        .collect()
 }
 
 pub fn models_for_backend(catalog: &Object, backend: &str) -> Vec<Value> {

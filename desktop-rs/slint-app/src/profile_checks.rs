@@ -554,9 +554,11 @@ pub(super) fn backend_row_check(out: String) {
                 "codex": {"label": "Codex", "sort_index": 2, "available": true, "models": [
                     {"id": "gpt-5.5", "label": "GPT-5.5", "default": true, "supported_efforts": ["low", "medium", "high"]},
                     {"id": "gpt-5.5-mini", "label": "GPT-5.5 mini", "default": false}]},
-                "agy": {"label": "Antigravity", "sort_index": 3, "available": false, "unavailable_reason": "signed_out", "models": []},
+                "agy": {"label": "Antigravity (legacy)", "sort_index": 3, "available": true,
+                    "models": [{"id": "legacy-model", "label": "Legacy model"}]},
+                "agy-acp": {"label": "Antigravity ACP", "sort_index": 3, "available": false, "unavailable_reason": "signed_out", "models": []},
                 "muse": {"label": "Muse", "sort_index": 4, "available": false, "unavailable_reason": "not_supported", "models": []}}});
-            let rachel = json!({"session": "rachel", "set": {"model": "opus"}});
+            let rachel = json!({"session": "rachel", "set": {"backend": "agy", "model": "legacy-model"}});
             check(control("/__control/catalog", &catalog).is_ok() && control("/__control/agent", &rachel).is_ok(), "the Host takes a catalog with availability");
             window.global::<ProfileBridge>().invoke_open_for_pane(app_now().active_id());
             true
@@ -575,7 +577,7 @@ pub(super) fn backend_row_check(out: String) {
         ("feature", Box::new(|app, window, _| {
             let engine = app.engine.borrow();
             let ready = engine.transit_offered("rachel") && engine.model_catalog_loaded() && engine.connection_state() == "live"
-                && engine.roster().find("rachel").is_some_and(|a| a.model == "opus");
+                && engine.roster().find("rachel").is_some_and(|a| a.backend == "agy" && a.model == "legacy-model");
             if !ready || !window.get_overlay().is_empty() {
                 return false;
             }
@@ -588,13 +590,13 @@ pub(super) fn backend_row_check(out: String) {
             if window.get_overlay() != "profile" || !info.backend_shown || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(info.backend_value == "Claude" && info.backend_enabled && info.backend_detail.is_empty() && step.is_empty(),
+            check(info.backend_value == "Antigravity" && info.backend_enabled && info.backend_detail.is_empty() && step.is_empty(),
                 &format!("the Backend row names the tool alone: {:?} {}", info.backend_value, info.backend_enabled));
             // Issue 887: the model, the heartbeat and the context each say
             // what they know once.
             let bridge = window.global::<ProfileBridge>();
             let shown_model = bridge.get_models().row_data(info.model_index as usize).map(|m| m.to_string()).unwrap_or_default();
-            check(shown_model == "Opus" && texts(|t| t.contains(" · Opus")).is_empty(), &format!("the model is said once, on the Model line: {shown_model:?}"));
+            check(shown_model == "Legacy model" && texts(|t| t.contains(" · Legacy model")).is_empty(), &format!("the legacy model is said once, on the Model line: {shown_model:?}"));
             check(info.context_used.is_empty(), &format!("unknown context usage gives no Used words: {:?}", info.context_used));
             shot(&out1, "backend-01-row");
             true
@@ -638,7 +640,7 @@ pub(super) fn backend_row_check(out: String) {
             window.global::<ProfileBridge>().invoke_open_transit();
             true
         })),
-        ("backends", Box::new(move |_, window, elapsed| {
+        ("backends", Box::new(move |app, window, elapsed| {
             let bridge = window.global::<ProfileBridge>();
             let (_, step, choices) = backend_now(window);
             if step != "backends" || bridge.get_transit_loading() || choices.len() != 4 || elapsed < Duration::from_millis(300) {
@@ -648,12 +650,21 @@ pub(super) fn backend_row_check(out: String) {
             check(asked == Some(json!("rachel")), &format!("the picker asks the Host for this agent's options: {asked:?}"));
             let labels: Vec<String> = choices.iter().map(|c| c.label.to_string()).collect();
             check(labels == ["Claude", "Codex", "Antigravity", "Muse"], &format!("in the Host's order: {labels:?}"));
-            check(choices[0].current && choices[1].enabled && !choices[1].current, "Claude is current, Codex can be chosen");
-            check(!choices[2].enabled && choices[2].detail == "Not signed in", &format!("a signed-out tool is dimmed with its reason: {:?}", choices[2].detail));
+            check(choices.iter().all(|c| !c.current) && choices[1].enabled, "an existing legacy agent does not make ACP current");
+            check(choices[2].id == "agy-acp" && !choices[2].enabled && choices[2].detail == "Not signed in",
+                &format!("only ACP represents Antigravity in the picker, with its Host refusal: {:?}", choices[2].detail));
             check(!choices[3].enabled && choices[3].detail == "Can't carry a conversation there yet", &format!("so is one that cannot take a conversation: {:?}", choices[3].detail));
             shot(&out2, "backend-02-picker");
             bridge.invoke_pick_transit("agy".into());
+            check(backend_now(window).1 == "backends", "a legacy backend cannot be chosen even when sent directly");
+            bridge.invoke_pick_transit("agy-acp".into());
             check(backend_now(window).1 == "backends", "a dimmed backend cannot be chosen");
+            {
+                let engine = app.engine.borrow();
+                check(engine.selected_session() == "rachel" && engine.roster().find("rachel").is_some_and(|a| a.backend == "agy")
+                    && engine.conversation("rachel").is_some_and(|c| c.conversation_id() == "c-rachel" && c.rows().iter().any(|r| r.text == "Hello"))
+                    && posts("/agent-transit").is_empty(), "opening and using the picker keeps the old session, backend, and transcript");
+            }
             bridge.invoke_pick_transit("codex".into());
             true
         })),

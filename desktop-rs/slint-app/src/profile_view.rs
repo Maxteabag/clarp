@@ -901,11 +901,9 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
     let flow = engine.transit_flow(session);
     // A backend and a model in words: the picker's labels, else the catalog's.
     let backend_label = |id: &str| -> String {
-        options
-            .backends
-            .iter()
-            .find(|b| b.id == id)
-            .map(|b| b.label.clone())
+        clarp_core::catalog::antigravity_label(id)
+            .map(str::to_owned)
+            .or_else(|| options.backends.iter().find(|b| b.id == id).map(|b| b.label.clone()))
             .or_else(|| engine.backend_options().iter().find(|o| text(o, "id") == id).map(|o| text(o, "label")))
             .filter(|l| !l.is_empty())
             .unwrap_or_else(|| id.to_owned())
@@ -949,8 +947,7 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
             picker.step = "backends";
             picker.title = transit::ROW_TITLE.to_owned();
             picker.choices = options
-                .backends
-                .iter()
+                .choices()
                 .map(|b| TransitChoice {
                     id: b.id.as_str().into(),
                     label: b.label.as_str().into(),

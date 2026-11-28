@@ -13,6 +13,7 @@ fn a_backend_starts_an_agent_on_its_own() {
     assert!(launch && options.auto_start(launch), "an explicit backend auto-starts, whatever Settings say");
     assert_eq!(parse(&args("--backend=grok")).unwrap().backend, "grok");
     assert_eq!(parse(&args("--backend Muse")).unwrap().backend, "muse");
+    assert_eq!(parse(&args("--backend agy-acp")).unwrap().backend, "agy-acp");
 }
 
 #[test]
@@ -31,7 +32,7 @@ fn settings_decide_without_flags_and_restores_never_launch() {
 
 #[test]
 fn conflicting_or_unknown_launch_flags_are_refused() {
-    for line in ["--anonymous --contact", "--no-new-agent --backend claude", "--no-new-agent --cwd /x", "--backend vim"] {
+    for line in ["--anonymous --contact", "--no-new-agent --backend claude", "--no-new-agent --cwd /x", "--backend vim", "--backend agy"] {
         assert!(parse(&args(line)).is_err(), "{line}");
     }
     assert!(parse(&["--backend=".into()]).is_err(), "an empty backend is not a backend");

@@ -146,7 +146,10 @@ where
             if id.is_empty() || json::boolean(row, "hidden") {
                 return None;
             }
-            let label = Some(json::string(row, "label")).filter(|l| !l.is_empty()).unwrap_or_else(|| capitalised(id));
+            let label = crate::catalog::antigravity_label(id)
+                .map(str::to_owned)
+                .or_else(|| Some(json::string(row, "label")).filter(|l| !l.is_empty()))
+                .unwrap_or_else(|| capitalised(id));
             let available = match row.get("available").and_then(Value::as_bool) {
                 Some(explicit) => explicit,
                 // A Host before the field: installed is available.

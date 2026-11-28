@@ -63,7 +63,7 @@ fn terminal_bridge() -> Option<String> {
 
 pub(crate) struct Launch {
     catalog: Object,
-    catalog_loaded: bool,
+    catalog_result: Option<bool>,
     contacts: Vec<Contact>,
     available_mcp_servers: Vec<Value>,
     starting_contact: String,
@@ -93,7 +93,7 @@ impl Launch {
     pub(crate) fn new(settings: &Settings) -> Self {
         Self {
             catalog: Object::new(),
-            catalog_loaded: false,
+            catalog_result: None,
             contacts: Vec::new(),
             available_mcp_servers: Vec::new(),
             starting_contact: String::new(),
@@ -146,16 +146,43 @@ impl Engine {
     // ---- catalog and backends --------------------------------------------
 
     pub fn model_catalog_loaded(&self) -> bool {
-        self.launch.catalog_loaded
+        self.launch.catalog_result == Some(true)
+    }
+
+    pub fn model_catalog_pending(&self) -> bool {
+        self.launch.catalog_result.is_none()
+    }
+
+    pub(crate) fn reset_model_catalog_result(&mut self) {
+        self.launch.catalog_result = None;
     }
 
     fn load_model_catalog(&mut self) {
+        self.reset_model_catalog_result();
         self.api.get("model-catalog", "/agent-model-options", &[]);
     }
 
-    /// Installed providers as `{id, label}`; the built-in three without a catalog.
+    /// Installed providers as `{id, label}`.
     pub fn backend_options(&self) -> Vec<Value> {
-        clarp_core::catalog::backend_options(&self.launch.catalog)
+        let mut options = clarp_core::catalog::backend_options(&self.launch.catalog);
+        if !self.model_catalog_loaded() {
+            options.retain(|option| option["id"] != clarp_core::catalog::ANTIGRAVITY_ACP);
+        }
+        options
+    }
+
+    fn check_launch_backend(&mut self, backend: &str) -> bool {
+        use clarp_core::catalog::{ANTIGRAVITY_ACP, LEGACY_ANTIGRAVITY};
+
+        if backend == LEGACY_ANTIGRAVITY {
+            self.set_error("Choose a harness in New Session to start a new agent");
+            return false;
+        }
+        if backend == ANTIGRAVITY_ACP && !self.backend_options().iter().any(|choice| choice["id"] == backend) {
+            self.set_error("Antigravity is unavailable for new sessions on this Host");
+            return false;
+        }
+        true
     }
     pub fn models_for_backend(&self, backend: &str) -> Vec<Value> {
         clarp_core::catalog::models_for_backend(&self.launch.catalog, backend)
@@ -360,7 +387,7 @@ impl Engine {
         if self.retry_created_agent() {
             return true;
         }
-        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
+        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() || !self.check_launch_backend(backend) {
             return false;
         }
         let body = with_llm(json!({"anonymous": true, "backend": backend}), model, effort);
@@ -374,7 +401,7 @@ impl Engine {
         if self.retry_created_agent() {
             return true;
         }
-        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
+        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() || !self.check_launch_backend(backend) {
             return false;
         }
         let body = with_llm(json!({"auto_contact": true, "backend": backend}), model, effort);
@@ -399,6 +426,9 @@ impl Engine {
         };
         let backend = backend.trim();
         let backend = if backend.is_empty() { self.quick_start_backend() } else { backend.to_owned() };
+        if !self.check_launch_backend(&backend) {
+            return false;
+        }
         let body = with_llm(json!({"name": contact, "backend": backend}), model, effort);
         self.post_contact_create(&contact, &backend, body);
         true
@@ -418,6 +448,9 @@ impl Engine {
         let (name, directory, backend) = (name.trim(), working_directory.trim(), backend.trim());
         if name.is_empty() || directory.is_empty() || backend.is_empty() {
             self.set_error("Name, workspace, and backend are required");
+            return;
+        }
+        if !self.check_launch_backend(backend) {
             return;
         }
         let mut body = with_llm(
@@ -710,7 +743,7 @@ impl Engine {
         }
         if tag == "model-catalog" {
             self.launch.catalog = object.clone();
-            self.launch.catalog_loaded = true;
+            self.launch.catalog_result = Some(true);
             self.changes.push(Change::Launch);
         } else if tag == "contact-create" || tag.starts_with("agent-create:") {
             self.created_agent(tag, object);
@@ -758,6 +791,10 @@ impl Engine {
     /// other launch failures clear their loading state and fall through to
     /// the error.
     pub(crate) fn lifecycle_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
+        if tag == "model-catalog" {
+            self.launch.catalog_result = Some(false);
+            self.changes.push(Change::Launch);
+        }
         if tag == "contact-create" {
             // The Host's own message, without an HTTP suffix: it explains
             // what to change (a forbidden folder, an occupied contact).

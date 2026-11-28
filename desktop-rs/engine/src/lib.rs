@@ -952,6 +952,7 @@ impl Engine {
         self.sse.set_endpoint(endpoint.clone(), &self.token);
         self.reset_transient_state();
         // The features are read again from /server-info.
+        self.reset_model_catalog_result();
         self.reset_live();
         self.reset_lanes();
         self.reset_form_events();

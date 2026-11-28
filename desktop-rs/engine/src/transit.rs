@@ -34,6 +34,13 @@ pub struct Options {
     pub error: String,
 }
 
+impl Options {
+    /// Legacy rows can still label a current agent or an in-flight move.
+    pub fn choices(&self) -> impl Iterator<Item = &Backend> {
+        self.backends.iter().filter(|b| b.id != clarp_core::catalog::LEGACY_ANTIGRAVITY)
+    }
+}
+
 const OPTIONS: &str = "transit-options:";
 const START: &str = "transit-start:";
 const STATUS: &str = "transit-status:";
@@ -95,7 +102,7 @@ impl Engine {
     /// A backend in the picker (an unavailable one does nothing).
     pub fn pick_transit_backend(&mut self, session: &str, backend: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.pick_transit_backend(local, backend));
-        let Some(chosen) = self.transits.options.get(session).and_then(|o| o.backends.iter().find(|b| b.id == backend)).cloned() else { return };
+        let Some(chosen) = self.transits.options.get(session).and_then(|o| o.choices().find(|b| b.id == backend)).cloned() else { return };
         self.flow_mut(session).pick_backend(&chosen);
         self.changes.push(Change::Profile);
     }
