@@ -82,7 +82,7 @@ fn images(window: &crate::AppWindow, id: &str) -> Vec<crate::MessageImage> {
 }
 
 pub fn all_hosts_check(out: String) {
-    let (out_open, out_gone) = (out.clone(), out.clone());
+    let (out_open, out_gone, out_gallery) = (out.clone(), out.clone(), out.clone());
     let primary_posts_before = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let posts_before = primary_posts_before.clone();
     let peer_snapshots = std::rc::Rc::new(std::cell::Cell::new(0usize));
@@ -250,13 +250,18 @@ pub fn all_hosts_check(out: String) {
             crate::pump_now(&app_now());
             true
         })),
-        ("peer images", Box::new(|app, window, _| {
+        ("peer images", Box::new(move |app, window, _| {
             let loaded = images(window, "peer-warms-image");
             if loaded.len() < 3 || !loaded.iter().take(2).all(|image| image.loaded) {
                 return false;
             }
             check(loaded.len() == 3 && loaded[..2].iter().all(|image| image.image.size().width == 420),
                 "the peer's native and same-origin absolute references display its own pixels");
+            let blocks = super::rows(window).into_iter().find(|row| row.id == "peer-warms-image").map(|row| row.blocks);
+            let gallery = blocks.as_ref().into_iter().flat_map(|blocks| blocks.iter())
+                .filter(|block| block.gallery && block.kind == "images").collect::<Vec<_>>();
+            check(gallery.len() == 1 && gallery[0].images.row_count() == 2, "the canonical gallery has exactly two image tiles");
+            shot(&out_gallery, "all-hosts-04-peer-gallery");
             check(loaded[2].foreign && !loaded[2].loaded, "a different Host's absolute media URL stays foreign to this chat");
             check(super::requests("GET", PEER_FIRST).is_empty(), "the primary is not asked for the peer's image");
             let note = json!({"session": "rachel", "turns": [{"id": "primary-reads-peer-path", "role": "assistant",
