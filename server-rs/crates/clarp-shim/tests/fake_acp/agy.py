@@ -28,7 +28,8 @@ EFFORTS = ["low", "medium", "high"]
 
 if sys.argv[1:2] != ["acp"]:
     if sys.argv[1:] == ["models"]:
-        for model, label in MODELS:
+        listed = [MODELS[0]] if os.path.exists(os.path.join(here, "partial-models")) else MODELS
+        for model, label in listed:
             for effort in EFFORTS:
                 print(f"{model}-{effort}\t{label} ({effort.title()})")
     elif sys.argv[1:] != ["--version"]:
