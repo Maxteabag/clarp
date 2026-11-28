@@ -139,7 +139,16 @@ const CODE_SPAN_RE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]+`)/;
 // those in prose only, and never touch a line's indentation (nested lists,
 // indented code).
 function tidySpaces(text) {
-  return text.split(CODE_SPAN_RE).map((part, i) => (i % 2 ? part : part
-    .replace(/([^ \t\n])[ \t]{2,}/g, '$1 ')
-    .replace(/([^ \t\n])[ \t]+([,.;:!?])/g, '$1$2'))).join('');
+  const parts = text.split(CODE_SPAN_RE);
+  return parts.map((part, i) => {
+    if (i % 2) return part;
+    let prose = part
+      .replace(/([^ \t\n])[ \t]{2,}/g, '$1 ')
+      .replace(/([^ \t\n])[ \t]+([,.;:!?])/g, '$1$2');
+    // Right after inline code the run of spaces is mid-line, not indentation.
+    if (i > 0 && !parts[i - 1].endsWith('\n')) {
+      prose = prose.replace(/^[ \t]+([,.;:!?])/, '$1').replace(/^[ \t]{2,}/, ' ');
+    }
+    return prose;
+  }).join('');
 }
