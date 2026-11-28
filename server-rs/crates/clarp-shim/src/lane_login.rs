@@ -131,6 +131,32 @@ mod tests {
         assert!(!login.acquire().unwrap());
         write("shared", "second", 2);
         assert!(!login.acquire().unwrap());
+        let write_access = |token: &str| {
+            let auth = json!({"tokens":{"account_id":"shared","access_token":token}});
+            std::fs::write(&file, auth.to_string()).unwrap();
+        };
+        let access = |user: &str, sub: &str| {
+            let claims = json!({"https://api.openai.com/auth":{"chatgpt_user_id":user},"sub":sub});
+            format!(
+                "header.{}.signature",
+                URL_SAFE_NO_PAD.encode(claims.to_string())
+            )
+        };
+        let read_login = || Login::read(&mut json!({"_clarpLoginFile":file}), account).unwrap();
+        write_access(&access("first", "old-sub"));
+        let mut access_login = read_login();
+        write_access(&access("first", "new-sub"));
+        assert!(access_login.acquire().unwrap());
+        access_login.release();
+        write_access(&access("second", "old-sub"));
+        assert!(!access_login.acquire().unwrap());
+
+        write_access("opaque-one");
+        let mut opaque_login = read_login();
+        assert!(opaque_login.acquire().unwrap());
+        opaque_login.release();
+        write_access("opaque-two");
+        assert!(!opaque_login.acquire().unwrap());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
