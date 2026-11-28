@@ -36,10 +36,9 @@ export component BlockView inherits Rectangle {
     in property <[TableRow]> body;
     callback link-clicked(string);
     callback done();
-    public function focus-keys() { keys.focus(); }
+    public function focus-keys() { root.wrap = true; keys.focus(); }
     property <bool> code: root.block.kind == "code";
     property <bool> wrap: true;
-    changed block => { root.wrap = true; }
     background: Palette.window;
     accessible-role: groupbox;
     // i18n: full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table

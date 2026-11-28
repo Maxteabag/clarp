@@ -41,7 +41,7 @@ export struct MessageBlock {
     table-chars: int,
     // A code block's language, as its fence names it ("" for none).
     language: string,
-    // A table's Markdown (view.rs `table_markdown`): what its copy copies.
+    // A table's Markdown: what its copy copies.
     source: string,
 }
 
@@ -722,7 +722,10 @@ export component Block inherits VerticalLayout {
         border-width: 1px;
         border-color: Palette.border;
         clip: true;
-        min-width: Math.max(code-text.min-width + 24px, copy-code.width + expand-code.width + 16px);
+        min-width: copy-code.width + expand-code.width + 16px;
+        property <length> span: Math.max(0px, code-text.preferred-width + 24px - self.width);
+        property <length> offset;
+        changed span => { self.offset = Math.min(self.offset, self.span); }
         preferred-width: Math.max(code-text.preferred-width + 24px, language.preferred-width + copy-code.width + expand-code.width + 32px);
         height: self.line + code-text.preferred-height + 20px;
         accessible-role: groupbox;
@@ -730,13 +733,28 @@ export component Block inherits VerticalLayout {
         accessible-label: self.name;
         open-touch := TouchArea {
             enabled: !root.measuring;
+            property <length> start;
+            property <bool> dragged;
+            scroll-event(event) => {
+                let dx = event.delta-x != 0px ? event.delta-x : event.modifiers.shift ? event.delta-y : 0px;
+                if (dx == 0px || code-box.span == 0px) { return reject; }
+                code-box.offset = Math.clamp(code-box.offset - dx, 0px, code-box.span);
+                accept
+            }
+            moved => {
+                if (self.pressed && (Math.abs(self.mouse-x - self.pressed-x) >= 5px || Math.abs(self.mouse-y - self.pressed-y) >= 5px)) {
+                    self.dragged = true;
+                    code-box.offset = Math.clamp(self.start + self.pressed-x - self.mouse-x, 0px, code-box.span);
+                }
+            }
             mouse-cursor: root.viewer ? MouseCursor.pointer : MouseCursor.default;
             clicked => {
-                if (root.viewer && Math.abs(self.mouse-x - self.pressed-x) < 5px && Math.abs(self.mouse-y - self.pressed-y) < 5px) {
+                if (root.viewer && !self.dragged && Math.abs(self.mouse-x - self.pressed-x) < 5px && Math.abs(self.mouse-y - self.pressed-y) < 5px) {
                     BlockBridge.open(root.block);
                 }
             }
             pointer-event(event) => {
+                if (event.kind == PointerEventKind.down) { self.start = code-box.offset; self.dragged = false; }
                 if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
                     root.secondary-clicked();
                 }
@@ -774,15 +792,15 @@ export component Block inherits VerticalLayout {
         }
         Rectangle { y: code-box.line; height: 1px; background: Palette.border; }
         code-text := Text {
-            x: 12px;
+            x: 12px - code-box.offset;
             y: code-box.line + 10px;
-            width: parent.width - 24px;
+            width: Math.max(parent.width - 24px, self.preferred-width);
             height: parent.height - code-box.line - 20px;
             text: root.block.text;
             font-family: Palette.code-family;
             font-size: root.body-size * Look.code-scale;
             color: Palette.text;
-            wrap: word-wrap;
+            wrap: no-wrap;
         }
     }
     if root.block.kind == "quote": Rectangle {

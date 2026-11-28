@@ -15,7 +15,7 @@ pub enum Block {
     /// A quote's inner Markdown.
     Quote(String),
     /// Header row first; cells hold inline Markdown.
-    Table(Vec<Vec<String>>),
+    Table { rows: Vec<Vec<String>>, source: String },
     Rule,
 }
 
@@ -132,7 +132,7 @@ pub fn blocks(markdown: &str) -> Vec<Block> {
                         }
                     }
                 }
-                out.push(Block::Table(rows));
+                out.push(Block::Table { rows, source: markdown[range].trim_end_matches(['\r', '\n']).to_owned() });
             }
             Event::Rule if depth == 0 => {
                 flush(&mut out, &mut prose_start, prose_end);
@@ -322,11 +322,11 @@ mod tests {
                 Block::Quote("Keep the **main** checkout untouched.".into()),
                 Block::Prose("- core models".into()),
                 Block::Prose("- **Qt bridges**".into()),
-                Block::Table(vec![
+                Block::Table { source: "| step | state |\n|---|---|\n| port | done |\n| verify | *running* |".into(), rows: vec![
                     vec!["step".into(), "state".into()],
                     vec!["port".into(), "done".into()],
                     vec!["verify".into(), "*running*".into()],
-                ]),
+                ] },
                 Block::Rule,
                 Block::Prose("The end.".into()),
             ]

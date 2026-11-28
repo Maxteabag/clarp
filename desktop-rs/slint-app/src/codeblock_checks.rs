@@ -156,7 +156,7 @@ pub(super) fn codeblocks_check(out: String) {
             shot(&o4, "codeblocks-03-table-viewer");
             check(press("block-view-copy"), "the viewer's copy is pressed");
             let copied = clipboard();
-            check(copied.starts_with("| Column 0 | Column 1 |") && copied.contains("\n| --- |") && copied.ends_with("| value 3.8 here |"),
+            check(copied.starts_with("| Column 0 | Column 1 |") && copied.contains("\n|---|---|") && copied.ends_with("| value 3.8 here |"),
                 &format!("it copies the table's Markdown: {copied:?}"));
             check(press("block-view-close"), "the close icon is pressed");
             true
