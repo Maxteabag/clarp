@@ -5979,20 +5979,6 @@ impl Actor {
                 out.changed.queue |= held.changed.queue;
                 return Ok(());
             }
-            if starting
-                && self.backend.id() == clarp_backend::LEGACY_AGY
-                && self.recorder.transit_held()
-                && matches!(self.recorder.agent().live(), Some(Turn::Starting(state)) if !state.ran_before)
-            {
-                // No shim ever took this attempt. Keep the message and let
-                // the ACP actor take it after the same-store move.
-                out.absorb(self.hold_unsent(
-                    turn,
-                    Command::HoldUnsentForTransit { turn },
-                    now_ms,
-                )?);
-                return Ok(());
-            }
             if starting && self.moved().is_none() && !self.recorder.agent().import_held() {
                 // The attempt was decided and no shim ever took it. Nothing ran: start it now.
                 return self.start(turn, message_seq, attempt, out, now_ms);
