@@ -489,7 +489,7 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
 
     let retry = Said::new("Try again", "Prøv igjen");
     let switch = Said::new("Switch backend or model", "Bytt backend eller modell");
-    let copy = Said::new("Copy for AI", "Kopier for AI");
+    let copy = Said::new("Copy diagnostics", "Kopier diagnose");
     let can_send = !failure.message_id.is_empty();
     let mut actions: Vec<Value> = Vec::new();
     // An action that sends the message again is offered only where there is one.
@@ -636,7 +636,7 @@ pub fn fingerprint(code: &str, backend: &str, detail: &str) -> String {
     format!("{code}:{backend}:{hash:08x}")
 }
 
-/// What "Copy for AI" puts on the clipboard: a short prompt an agent can diagnose from.
+/// What "Copy diagnostics" puts on the clipboard: a short prompt an agent can diagnose from.
 fn copy_text(
     code: &str,
     failure: &Failure<'_>,

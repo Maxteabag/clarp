@@ -40,7 +40,7 @@ An app that does not know the feature keeps showing `text` as today.
     {"id": "retry_at", "at_ms": 1795850820000,
      "label": {"en": "Try again at 18:27", "nb": "Prøv igjen kl. 18:27"}},
     {"id": "switch_model", "label": {"en": "Switch model", "nb": "Bytt modell"}},
-    {"id": "copy_details", "label": {"en": "Copy for AI", "nb": "Kopier for AI"}}
+    {"id": "copy_details", "label": {"en": "Copy diagnostics", "nb": "Kopier diagnose"}}
   ],
   "detail": "You've hit your usage limit. Upgrade to Pro … or try again at 6:27 PM.",
   "backend": "codex",
@@ -111,7 +111,7 @@ weekday within a week, else with the date. Backend and model names are never tra
 | `error.action.compact_retry` | Compact and continue | |
 | `error.action.switch_model` | Switch backend or model | |
 | `error.action.sign_in` | Sign in again | |
-| `error.action.copy_details` | Copy for AI | |
+| `error.action.copy_details` | Copy diagnostics | |
 | `error.details` | Details | |
 | `error.repeat_count` | {count}× (plural) | count |
 | `error.copied` | Copied | |
