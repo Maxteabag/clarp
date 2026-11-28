@@ -140,7 +140,8 @@ Do not substitute a multiple-choice preference for required explicit approval.
   call dismiss on the user's behalf, and never edit the decision database.
   Creation does not authorize the requested action.
 - An accepted approval, rejected approval, selected option, and custom text are
-  different outcomes. Respect the actual response and its scope.
+  different outcomes. Respect the actual response and its scope. Custom text on an
+  approval is never approval.
 - Discard is silent: you are not told. Expiry grants neither approval nor an
   answer and is delivered to you. Neither is permission. Stop the dependent
   action; do not guess permission or immediately recreate the unchanged request.
@@ -152,6 +153,20 @@ Do not substitute a multiple-choice preference for required explicit approval.
 - Question answers and expiry notices queue behind busy work.
   Successful delivery can mean durable admission to that queue, not execution;
   do not stop another active turn merely to process the notification.
+
+## What the user sees, and what it means for you
+
+On a Host with contract 228 or later (features `decision_undo`, `approval_custom_text`,
+`decision_voice_match`), apps that support it send a simple choice on one tap and let the user
+undo it for a few seconds. The answer reaches you only when that window ends, so a result can
+come a few seconds after the tap; `wait` keeps waiting meanwhile. An answer taken back never
+reaches you: the card is open again and answered later as usual. The user may also answer by
+voice; you get the same option, approval or own-words result as from a tap.
+
+Every approval card now also offers the user a field for their own words. Such a reply comes
+back with status `answered` and the text, and the message says it is not approval. Treat it as
+no approval: read what they wrote, adjust, and ask again if you still need a yes. Apps that do
+not support these features show the cards as before.
 
 ## Keep your requests current
 

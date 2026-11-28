@@ -1357,6 +1357,13 @@ pub async fn answered(
     }
 }
 
+/// Whether the Host keeps the question of this card: one of its own, which does what it
+/// asked the moment its owner answers.
+pub async fn asks(app: &App, decision_id: &str) -> bool {
+    let kept = app.fleet.kept_book(ASKED, decision_id.to_string()).await;
+    matches!(kept, Ok(Some(_)))
+}
+
 /// Lets go of the question the Host kept for a card that was withdrawn or dismissed
 /// (`changed`: it was so now). A card it kept none for changes nothing.
 pub async fn let_go(app: &App, decision_id: &str, changed: bool) {

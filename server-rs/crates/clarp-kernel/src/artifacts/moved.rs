@@ -59,6 +59,7 @@ impl Decision {
             created_at: resolved_at.unwrap_or(0),
             delivered_at: None,
             synthesize_audio: false,
+            hold_until: None,
         });
         let options = shown.get("options").and_then(Value::as_array);
         let recommended = shown.get("recommended_option_id").and_then(Value::as_str);
@@ -85,6 +86,7 @@ impl Decision {
             deadline_at: whole(shown, "deadline_at"),
             answer,
             delivery,
+            undone: 0,
         })
     }
 }
@@ -175,6 +177,7 @@ impl ArtifactBook {
             // What users answered where it was is in its conversation; a form that arrives
             // takes answers anew.
             submissions: Vec::new(),
+            taken_back: Vec::new(),
             // Only this Host's own proof of a turn names one: none for what came.
             source_trace_id: String::new(),
         };
