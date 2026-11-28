@@ -176,6 +176,7 @@ impl Drop for Claimed {
 
 /// What a phone asked its call with, as the Host takes it.
 struct Asked {
+    norwegian_transcription: bool,
     strategy: Strategy,
     /// The Oracle's contact for this call, where there is one.
     contact: String,
@@ -308,7 +309,9 @@ impl Asked {
         if !handoff_id.is_empty() && !phone::handoff_id(handoff_id) {
             return Err("Invalid handoff_id".to_string());
         }
+        let norwegian_transcription = named(query, "transcription_language").as_slice() == ["no"];
         Ok(Self {
+            norwegian_transcription,
             strategy,
             contact,
             thread_id: named(query, "thread_id")
@@ -396,7 +399,14 @@ async fn reached(
         Ok(Err(why)) => return Err((StatusCode::BAD_REQUEST, why)),
         Err(_) => return Err(UNAVAILABLE),
     };
-    let voice = Upstream::open(app, key).await.ok_or(UNAVAILABLE)?;
+    let voice = Upstream::open(
+        app,
+        key,
+        asked.strategy == Strategy::DirectContact,
+        asked.norwegian_transcription,
+    )
+    .await
+    .ok_or(UNAVAILABLE)?;
     Ok((thread_id, voice))
 }
 
@@ -821,6 +831,8 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
     if let Some(second) = voice.machine() {
         second.languages = languages.clone();
         machine.use_gemini();
+    } else if voice.eleven_model().is_some() {
+        machine.use_elevenlabs();
     }
     if no_cues {
         machine.without_earcons();
@@ -865,7 +877,7 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
     let prepared = call.asked.vocabulary.as_ref();
     let beginning = Beginning {
         // The model this Host advertises of its calls (`GET /oracle/status`): the same value.
-        model: app.config.live_model,
+        model: voice.eleven_model().unwrap_or(app.config.live_model),
         roster: Some(&roster),
         direct,
         vocabulary: prepared.map(|context| &context["terms"]),
@@ -946,7 +958,7 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
                 let event = match said {
                     Some(Ok(Message::Text(text))) => serde_json::from_str::<Value>(text.as_str()).ok(),
                     // The voice ended the call in its own way: nothing more is said.
-                    Some(Ok(Message::Close(_))) if voice.machine().is_none() => break Ending::VoiceGone,
+                    Some(Ok(Message::Close(_))) if !voice.adapted() => break Ending::VoiceGone,
                     Some(Ok(Message::Close(_))) | Some(Err(_)) | None => {
                         if voice.resume("connection_lost").await == Ok(true) { continue; }
                         if voice.machine().is_some_and(|s| !s.began) {app.oracle.calls.health(false);}
@@ -987,7 +999,7 @@ async fn carried(app: &App, mut line: Line, mut voice: Upstream, call: Call) {
         // The voice is told that the call is over, and given a moment to say that it took it.
         let bye = async {
             let _ = voice.send(json!({"type":"session.close"})).await;
-            if voice.machine().is_some() {
+            if voice.adapted() {
                 return;
             }
             while let Some(Ok(said)) = voice.socket.next().await {

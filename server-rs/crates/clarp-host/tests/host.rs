@@ -163,6 +163,8 @@ mod network_wait;
 mod opencode_chat_lane;
 #[path = "host/opencode_usage.rs"]
 mod opencode_usage;
+#[path = "host/oracle_eleven.rs"]
+mod oracle_eleven;
 #[path = "host/outside_signal.rs"]
 mod outside_signal;
 #[path = "host/owner_preempts.rs"]
@@ -40047,7 +40049,7 @@ fn the_oracles_contact_and_its_voice_are_chosen_kept_and_held_against_the_agents
     );
     assert_eq!(voice(&host), told("openai", "openai", &["openai"], None));
     // What is none of the voices is refused in words, and the choice stays.
-    let one_of = "voice provider must be one of: openai, gemini";
+    let one_of = "voice provider must be one of: openai, gemini, elevenlabs";
     for body in [
         json!({ "provider": "gemini live" }),
         json!({ "provider": 5 }),
