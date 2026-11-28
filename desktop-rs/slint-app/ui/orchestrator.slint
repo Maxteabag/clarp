@@ -19,6 +19,21 @@ export global OrchestratorBridge {
     in property <string> last-decision;
     in property <[string]> providers: ["openai", "claude", "codex", "agy"];
     // The first effort is the provider's own (QML's empty entry).
+    // The wire values below are indexed on save; only the display model is translated.
+    in property <[string]> effort-labels: [
+        // i18n: orchestrator, use the provider's default reasoning effort
+        @tr("Default"),
+        // i18n: orchestrator, minimal reasoning effort
+        @tr("Minimal"),
+        // i18n: orchestrator, low reasoning effort
+        @tr("Low"),
+        // i18n: orchestrator, medium reasoning effort
+        @tr("Medium"),
+        // i18n: orchestrator, high reasoning effort
+        @tr("High"),
+        // i18n: orchestrator, extra-high reasoning effort
+        @tr("Extra high")
+    ];
     in property <[string]> efforts: ["default", "minimal", "low", "medium", "high", "xhigh"];
     in property <bool> reduced-motion;
     callback close();
@@ -45,7 +60,7 @@ export component OrchestratorDialog inherits Modal {
         spacing: 11px;
         HorizontalLayout {
             spacing: 8px;
-            // i18n: Orchestrator dialog (Orchestrator is a feature name, left as is: a model that routes requests to agents), title
+            // i18n: Orchestrator dialog, title (noun, translated as a descriptive word, not kept as a name: a model that routes requests to agents)
             Text { text: @tr("Orchestrator"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
             if OrchestratorBridge.loading: Busy { reduced-motion: OrchestratorBridge.reduced-motion; }
             // i18n: Orchestrator dialog, tooltip of the close button at the top (verb)
@@ -95,7 +110,7 @@ export component OrchestratorDialog inherits Modal {
                 // i18n: Orchestrator dialog, label over the reasoning effort list (noun: how hard the model thinks)
                 Text { text: @tr("Effort"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
                 // i18n: Orchestrator dialog, accessibility label of the reasoning effort list (noun)
-                ComboBox { model: OrchestratorBridge.efforts; current-index <=> OrchestratorBridge.effort-index; accessible-label: @tr("Effort"); }
+                ComboBox { model: OrchestratorBridge.effort-labels; current-index <=> OrchestratorBridge.effort-index; accessible-label: @tr("Effort"); }
             }
         }
         // i18n: Orchestrator dialog, label over the field that names a model to use instead of the provider's default (noun)

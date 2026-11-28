@@ -1413,8 +1413,8 @@ pub fn detail(app: &App, id: &str) -> Option<clarp_core::json::Object> {
                 .collect();
             let mut parts = Vec::new();
             if !facts.is_empty() {
-                // i18n: release viewer, table header over the release's facts (noun)
-                parts.push(markdown_table(&[tr!("Release"), card.title.to_string()], &facts));
+                // i18n: release viewer, table header over the release's facts (noun: a software release, not the verb)
+                parts.push(markdown_table(&[tr!("noun" => "Release"), card.title.to_string()], &facts));
             }
             let notes = text(&artifact, "content");
             if !notes.trim().is_empty() {

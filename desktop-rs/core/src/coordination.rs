@@ -125,14 +125,11 @@ pub fn names(agents: &[String]) -> Option<String> {
     let rest = tr!("{n} other" | "{n} others" % others);
     Some(match (shown.len(), others) {
         (0, _) => rest,
-        (1, 0) => shown[0].to_owned(),
-        // i18n: chat, quiet line about messages between agents: two names joined; {0} and {1} are agent names
-        (_, 0) => tr!("{0} and {1}", shown[0], shown[1]),
+        (_, 0) => crate::i18n::format::and_list(crate::i18n::current(), &shown),
         _ => {
-            // i18n: separator between items of a short inline list ("2 files, 1 search"); keep the trailing space where the language uses one
-            let separator = tr!("list separator" => ", ");
-            // i18n: chat, quiet line about messages between agents: two names joined; {0} and {1} are agent names
-            tr!("{0} and {1}", shown.join(&separator), rest)
+            let mut parts: Vec<&str> = shown;
+            parts.push(&rest);
+            crate::i18n::format::and_list(crate::i18n::current(), &parts)
         }
     })
 }

@@ -409,14 +409,23 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
             rows: empty(),
             ..MessageBlock::default()
         },
-        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
+        Block::Code { language, text } => MessageBlock {
+            kind: "code".into(),
+            styled: slint::StyledText::default(),
+            text: text.clone().into(),
+            language: language_name(language).into(),
+            level: 0,
+            rows: empty(),
+            ..MessageBlock::default()
+        },
         Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
-        Block::Table(rows) => {
+        Block::Table { rows, source } => {
             let columns = table_columns(rows);
             MessageBlock {
                 kind: "table".into(),
                 table_chars: columns.iter().sum(),
                 columns: ModelRc::new(VecModel::from(columns)),
+                source: source.as_str().into(),
                 styled: slint::StyledText::default(),
                 text: SharedString::new(),
                 level: 0,
@@ -434,6 +443,68 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
         }
         Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
     }
+}
+
+/// A code fence's tag as its header names it: "python" is Python, "sh"
+/// Shell, an unknown tag gets a capital letter; "" for none (the header
+/// then says Code).
+pub(crate) fn language_name(tag: &str) -> String {
+    let tag = tag.split(|c: char| c.is_whitespace() || c == ',' || c == '{').next().unwrap_or_default().trim();
+    let known = match tag.to_ascii_lowercase().as_str() {
+        "py" | "python" | "python3" => "Python",
+        "swift" => "Swift",
+        "sh" | "shell" | "console" | "shellsession" => "Shell",
+        "bash" => "Bash",
+        "zsh" => "Zsh",
+        "fish" => "Fish",
+        "ps" | "ps1" | "powershell" | "pwsh" => "PowerShell",
+        "js" | "javascript" | "mjs" | "cjs" => "JavaScript",
+        "jsx" => "JSX",
+        "ts" | "typescript" => "TypeScript",
+        "tsx" => "TSX",
+        "rs" | "rust" => "Rust",
+        "go" | "golang" => "Go",
+        "kt" | "kotlin" | "kts" => "Kotlin",
+        "java" => "Java",
+        "c" | "h" => "C",
+        "cpp" | "c++" | "cc" | "cxx" | "hpp" => "C++",
+        "cs" | "csharp" | "c#" => "C#",
+        "fs" | "fsharp" | "f#" => "F#",
+        "objc" | "objective-c" => "Objective-C",
+        "rb" | "ruby" => "Ruby",
+        "php" => "PHP",
+        "json" | "jsonc" | "json5" => "JSON",
+        "jsonl" | "ndjson" => "JSON Lines",
+        "yaml" | "yml" => "YAML",
+        "toml" => "TOML",
+        "xml" => "XML",
+        "html" | "htm" => "HTML",
+        "css" => "CSS",
+        "scss" => "SCSS",
+        "sql" => "SQL",
+        "md" | "markdown" => "Markdown",
+        "diff" | "patch" => "Diff",
+        "dockerfile" | "docker" => "Dockerfile",
+        "makefile" | "make" => "Makefile",
+        "graphql" | "gql" => "GraphQL",
+        "lua" => "Lua",
+        "r" => "R",
+        "dart" => "Dart",
+        "scala" => "Scala",
+        "svelte" => "Svelte",
+        "vue" => "Vue",
+        "slint" => "Slint",
+        "nix" => "Nix",
+        "ini" => "INI",
+        "csv" => "CSV",
+        "text" | "txt" | "plaintext" | "plain" => "Text",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    let mut chars = tag.chars();
+    chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect())
 }
 
 /// The characters each column of a table needs: its widest cell's longest
@@ -969,6 +1040,18 @@ mod tests {
         assert_eq!(super::table_columns(&[url]), vec![32]);
         assert!(super::table_columns(&[]).is_empty());
     }
+
+    #[test]
+    fn a_code_fence_tag_reads_as_its_language() {
+        assert_eq!(super::language_name("python"), "Python");
+        assert_eq!(super::language_name("sh"), "Shell");
+        assert_eq!(super::language_name("JSON"), "JSON");
+        assert_eq!(super::language_name("rust ignore"), "Rust");
+        assert_eq!(super::language_name("elixir"), "Elixir");
+        assert_eq!(super::language_name(""), "");
+    }
+
+
 
     /// The explorer's preview and activity lines are one line each: a helper
     /// running a multi-line command must not spill over the next chat.

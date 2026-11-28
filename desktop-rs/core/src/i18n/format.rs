@@ -7,7 +7,9 @@
 //! Slint already carries ICU's number and plural data, and the date data adds
 //! about 1.3 MB. Relative times ("5 minutes ago", "Yesterday") are catalog
 //! strings with plurals, because ICU's relative-time formatter is still
-//! experimental and pins an older ICU that would ship twice.
+//! experimental and pins an older ICU that would ship twice. Lists ("A, B
+//! and C") come from ICU's list formatter, whose data is a few kilobytes and
+//! knows each language's own joins (Spanish "y" turns "e" before an i sound).
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -17,6 +19,7 @@ use icu_datetime::fieldsets;
 use icu_datetime::{DateTimeFormatter, DateTimeFormatterPreferences, NoCalendarFormatter};
 use icu_decimal::DecimalFormatter;
 use icu_decimal::input::Decimal;
+use icu_list::ListFormatter;
 use icu_locale_core::Locale;
 use icu_locale_core::preferences::extensions::unicode::keywords::HourCycle;
 
@@ -54,6 +57,7 @@ thread_local! {
     static TIMES: RefCell<HashMap<(String, Clock), NoCalendarFormatter<fieldsets::T>>> = RefCell::new(HashMap::new());
     static NUMBERS: RefCell<HashMap<String, DecimalFormatter>> = RefCell::new(HashMap::new());
     static MOMENTS: RefCell<HashMap<(String, Moment, Clock), DateTimeFormatter<fieldsets::enums::DateAndTimeFieldSet>>> = RefCell::new(HashMap::new());
+    static LISTS: RefCell<HashMap<String, ListFormatter>> = RefCell::new(HashMap::new());
 }
 
 fn iso(day: NaiveDate) -> Option<icu_calendar::Date<icu_calendar::Iso>> {
@@ -217,6 +221,26 @@ pub fn decimal(tag: &str, value: f64, places: u8) -> String {
         Ok(parsed) => with_numbers(tag, |f| f.format(&parsed).to_string(), || text.clone()),
         Err(_) => text,
     }
+}
+
+/// Items joined into one "and" list in the language: "A", "A and B",
+/// "A, B and C", "A, B y C", "A, B e Iris", "A、B和C". English keeps its
+/// list without a comma before "and", as the app always wrote it.
+pub fn and_list<S: AsRef<str>>(tag: &str, items: &[S]) -> String {
+    let parts = || items.iter().map(|item| item.as_ref());
+    LISTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.contains_key(tag) {
+            let list_locale = if tag == "en" { locale("en-GB") } else { locale(tag) };
+            match ListFormatter::try_new_and((&list_locale).into(), Default::default()) {
+                Ok(formatter) => {
+                    cache.insert(tag.to_owned(), formatter);
+                }
+                Err(_) => return parts().collect::<Vec<_>>().join(", "),
+            }
+        }
+        cache[tag].format(parts()).to_string()
+    })
 }
 
 /// "Today", "Yesterday" or "Tomorrow" for a day near `today`, else None.
