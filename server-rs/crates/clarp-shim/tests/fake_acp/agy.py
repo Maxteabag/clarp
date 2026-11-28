@@ -23,9 +23,14 @@ def keep(conversation):
     open(os.path.join(store, conversation + ".db"), "a").close()
 
 
+MODELS = [("gemini-a", "Gemini A"), ("claude-b", "Claude B"), ("gemini-4-neon", "Gemini 4 Neon")]
+EFFORTS = ["low", "medium", "high"]
+
 if sys.argv[1:2] != ["acp"]:
     if sys.argv[1:] == ["models"]:
-        print("gemini-a\tGemini A\nclaude-b\tClaude B")
+        for model, label in MODELS:
+            for effort in EFFORTS:
+                print(f"{model}-{effort}\t{label} ({effort.title()})")
     elif sys.argv[1:] != ["--version"]:
         with open(os.path.join(here, "print.log"), "a") as out:
             print(json.dumps(sys.argv[1:]), file=out)
@@ -43,9 +48,9 @@ with open(os.path.join(here, "argv"), "a") as argv:
 
 OPTIONS = [
     {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": "gemini-a",
-     "options": [{"value": "gemini-a", "name": "Gemini A"}, {"value": "claude-b", "name": "Claude B"}]},
+     "options": [{"value": value, "name": name} for value, name in MODELS]},
     {"id": "thought_level", "name": "Thinking", "category": "thought_level", "type": "select",
-     "currentValue": "low", "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
+     "currentValue": "low", "options": [{"value": level, "name": level.title()} for level in EFFORTS]},
 ]
 
 

@@ -42,6 +42,17 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// level apart from the model.
 const ACP_EFFORTS: [&str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
 
+pub(crate) fn model_is_offered(tool: &str, model: &str, ids: &[&str]) -> bool {
+    let model = model.trim();
+    ids.contains(&model)
+        || (tool == clarp_backend::agy_acp::ID
+            && ids.iter().any(|id| {
+                id.strip_prefix(model)
+                    .and_then(|rest| rest.strip_prefix('-'))
+                    .is_some_and(|effort| ACP_EFFORTS.contains(&effort))
+            }))
+}
+
 /// What is declared of a tool and this Host does not offer from an app, or cannot do with it
 /// yet. Claude Code: steering is not advertised, as the Python Host does not advertise it
 /// either; a message sent to a running turn is still read into it (`clarp-kernel`
@@ -295,16 +306,7 @@ impl Shelf {
             .filter_map(|item| item["id"].as_str())
             .collect();
         let model = model.trim();
-        // A model of the list without the effort its name ends in.
-        let without_effort = |id: &&str| {
-            id.strip_prefix(model)
-                .and_then(|rest| rest.strip_prefix('-'))
-                .is_some_and(|effort| ACP_EFFORTS.contains(&effort))
-        };
-        if ids.contains(&model)
-            || (ids.is_empty() && tool == "codex")
-            || (tool == "agy-acp" && ids.iter().any(without_effort))
-        {
+        if model_is_offered(tool, model, &ids) || (ids.is_empty() && tool == "codex") {
             return None;
         }
         let reason = "Invalid provider model identifier";
