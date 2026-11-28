@@ -815,10 +815,14 @@ impl ArtifactBook {
         if decision.status == "pending" {
             return Ok(Undo::Open(artifact.clone()));
         }
-        let answered = matches!(decision.status.as_str(), "accepted" | "rejected" | "answered");
+        let answered = matches!(
+            decision.status.as_str(),
+            "accepted" | "rejected" | "answered"
+        );
         let delivery = decision.delivery.as_ref();
         let ran_out = decision.expires_at.is_some_and(|at| at <= now);
-        let Some(delivery) = delivery.filter(|_| answered && decision.resolved_by == "user" && !ran_out)
+        let Some(delivery) =
+            delivery.filter(|_| answered && decision.resolved_by == "user" && !ran_out)
         else {
             return refuse(TOO_LATE);
         };

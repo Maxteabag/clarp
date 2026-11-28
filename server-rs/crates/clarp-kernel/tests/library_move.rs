@@ -175,6 +175,7 @@ fn what_an_agent_made_and_asked_arrives_as_it_was() {
         choice: Some(&yes),
         answer: None,
         synthesize_audio: false,
+        hold_ms: 0,
     };
     let (answered, _) = there
         .book

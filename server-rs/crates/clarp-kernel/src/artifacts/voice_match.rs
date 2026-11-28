@@ -78,6 +78,11 @@ const LEAD_INS: &[&str] = &[
     "den",
 ];
 
+/// Words that may end a choice without saying more ("the first one", "B takk").
+const TRAILERS: &[&str] = &[
+    "one", "please", "takk", "thanks", "option", "alternativet", "da",
+];
+
 /// Words that may stand around an option's label without making the answer more than it.
 const CARRIERS: &[&str] = &[
     "please", "thanks", "takk", "the", "one", "den", "det", "jeg", "i", "will", "want", "vil",
@@ -198,6 +203,19 @@ fn without_lead_ins(mut said: Vec<String>) -> Vec<String> {
     said
 }
 
+/// The words of a choice without what leads into it or merely ends it.
+fn plain_choice(said: Vec<String>) -> Vec<String> {
+    let mut said = without_lead_ins(said);
+    while said.len() > 1
+        && said
+            .last()
+            .is_some_and(|word| TRAILERS.contains(&word.as_str()))
+    {
+        said.pop();
+    }
+    said
+}
+
 fn joined(words: &[String]) -> String {
     words.join(" ")
 }
@@ -286,7 +304,7 @@ pub fn voice_match(decision: &Decision, transcript: &str, commands: &Commands) -
     }
     match decision.response_type.as_str() {
         "approval" => {
-            let plain = joined(&without_lead_ins(said));
+            let plain = joined(&plain_choice(said));
             let answers = |label: &str, list: &[&str]| {
                 is_one_of(&text, list) || is_one_of(&plain, list) || is_one_of(&text, &[label])
             };
@@ -306,7 +324,7 @@ pub fn voice_match(decision: &Decision, transcript: &str, commands: &Commands) -
                 .collect();
             let count = labels.len();
             let chosen = by_label(&said, &labels).or_else(|| {
-                let plain = without_lead_ins(said.clone());
+                let plain = plain_choice(said.clone());
                 match plain.as_slice() {
                     [word] => by_position(word, count).or_else(|| by_label(&plain, &labels)),
                     // A letter followed by its own label: "B, Pebble".

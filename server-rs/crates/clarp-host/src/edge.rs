@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 227;
+pub const HOST_CONTRACT: u64 = 228;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -597,6 +597,17 @@ pub const FEATURES: &[(&str, u64)] = &[
     // `helper_report`, and `POST /chat-read` (`chat-read`, and a silent `read` push that takes
     // a chat's notifications down, also when a chat is opened or a request ends).
     ("notification_events", 227),
+    // `undo_ms` on a resolve or a form submit holds the answer from the agent so that the user
+    // can take it back: `undoable`/`undo_until` while held, `POST /decisions/{id}/undo` and
+    // `POST /artifacts/{id}/submissions/{submission_id}/undo`, also of a queued message the
+    // agent has not started.
+    ("decision_undo", 228),
+    // An approval takes the user's own words (`answer: {"text"}`), told to the agent as no
+    // approval; approval rows say `allow_custom_text: true`.
+    ("approval_custom_text", 228),
+    // `POST /decisions/{id}/match`: what a spoken answer to a request means
+    // (`contract/fixtures/decision-voice-match.json`).
+    ("decision_voice_match", 228),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'

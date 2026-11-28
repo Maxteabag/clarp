@@ -1,0 +1,663 @@
+{
+  "about": "What a spoken answer to a request means (POST /decisions/{id}/match, feature decision_voice_match). Each case: the request it answers (from `requests`), the transcript `text`, optional `commands` the app sends, and the Host's answer `expect`. The Host matches; apps read these to know what to expect and never match by themselves. Kept by server-rs/crates/clarp-kernel/src/artifacts/voice_match.rs and checked by server-rs/crates/clarp-kernel/tests/voice_match_vectors.rs.",
+  "requests": {
+    "approval": {
+      "response_type": "approval",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": []
+    },
+    "approval_labels": {
+      "response_type": "approval",
+      "yes_label": "Deploy",
+      "no_label": "Hold",
+      "options": []
+    },
+    "choice": {
+      "response_type": "single_choice",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": [
+        {
+          "id": "rock",
+          "label": "Pebble"
+        },
+        {
+          "id": "stone",
+          "label": "Granite"
+        },
+        {
+          "id": "glass",
+          "label": "Sea glass"
+        }
+      ]
+    },
+    "env": {
+      "response_type": "single_choice",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": [
+        {
+          "id": "prod",
+          "label": "Prod"
+        },
+        {
+          "id": "staging",
+          "label": "Staging"
+        }
+      ]
+    },
+    "text": {
+      "response_type": "text_input",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": []
+    }
+  },
+  "cases": [
+    {
+      "request": "choice",
+      "text": "B",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "a letter alone"
+    },
+    {
+      "request": "choice",
+      "text": "velg B",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "lead-in"
+    },
+    {
+      "request": "choice",
+      "text": "Jeg velger b.",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "lead-in and punctuation"
+    },
+    {
+      "request": "choice",
+      "text": "be",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "nb letter name"
+    },
+    {
+      "request": "choice",
+      "text": "se",
+      "expect": {
+        "kind": "option",
+        "option_id": "glass",
+        "label": "Sea glass"
+      },
+      "note": "nb letter name"
+    },
+    {
+      "request": "choice",
+      "text": "bee",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "en letter name"
+    },
+    {
+      "request": "choice",
+      "text": "Alternativ A",
+      "expect": {
+        "kind": "option",
+        "option_id": "rock",
+        "label": "Pebble"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "andre",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "nb ordinal"
+    },
+    {
+      "request": "choice",
+      "text": "den tredje",
+      "expect": {
+        "kind": "option",
+        "option_id": "glass",
+        "label": "Sea glass"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "nummer 2",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "option two",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "the first one",
+      "expect": {
+        "kind": "option",
+        "option_id": "rock",
+        "label": "Pebble"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "B takk",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "pebble",
+      "expect": {
+        "kind": "option",
+        "option_id": "rock",
+        "label": "Pebble"
+      },
+      "note": "label"
+    },
+    {
+      "request": "choice",
+      "text": "Sea Glass!",
+      "expect": {
+        "kind": "option",
+        "option_id": "glass",
+        "label": "Sea glass"
+      },
+      "note": "label, case and punctuation"
+    },
+    {
+      "request": "choice",
+      "text": "gran",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "unique prefix of three letters or more"
+    },
+    {
+      "request": "choice",
+      "text": "jeg tar pebble",
+      "expect": {
+        "kind": "option",
+        "option_id": "rock",
+        "label": "Pebble"
+      },
+      "note": "label among words that add nothing"
+    },
+    {
+      "request": "choice",
+      "text": "B, Granite",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "letter followed by its own label"
+    },
+    {
+      "request": "choice",
+      "text": "B, Pebble",
+      "expect": {
+        "kind": "custom",
+        "text": "B, Pebble"
+      },
+      "note": "letter and another option's label disagree"
+    },
+    {
+      "request": "choice",
+      "text": "B men bare for prod",
+      "expect": {
+        "kind": "custom",
+        "text": "B men bare for prod"
+      },
+      "note": "more than a choice"
+    },
+    {
+      "request": "choice",
+      "text": "kanskje granite eller pebble",
+      "expect": {
+        "kind": "custom",
+        "text": "kanskje granite eller pebble"
+      },
+      "note": "two labels"
+    },
+    {
+      "request": "choice",
+      "text": "eh, B",
+      "expect": {
+        "kind": "option",
+        "option_id": "stone",
+        "label": "Granite"
+      },
+      "note": "filler"
+    },
+    {
+      "request": "choice",
+      "text": "ok så velg C",
+      "expect": {
+        "kind": "option",
+        "option_id": "glass",
+        "label": "Sea glass"
+      },
+      "note": "filler opening"
+    },
+    {
+      "request": "choice",
+      "text": "d",
+      "expect": {
+        "kind": "custom",
+        "text": "d"
+      },
+      "note": "no fourth option"
+    },
+    {
+      "request": "choice",
+      "text": "e",
+      "expect": {
+        "kind": "custom",
+        "text": "e"
+      },
+      "note": "no fifth option"
+    },
+    {
+      "request": "choice",
+      "text": "neste",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "Hopp over",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "skip",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "angre",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "Avbryt.",
+      "expect": {
+        "kind": "command",
+        "command": "cancel"
+      }
+    },
+    {
+      "request": "choice",
+      "text": "",
+      "expect": {
+        "kind": "custom",
+        "text": ""
+      },
+      "note": "heard nothing"
+    },
+    {
+      "request": "choice",
+      "text": "  eh  ",
+      "expect": {
+        "kind": "custom",
+        "text": ""
+      },
+      "note": "only filler is nothing"
+    },
+    {
+      "request": "env",
+      "text": "prod",
+      "expect": {
+        "kind": "option",
+        "option_id": "prod",
+        "label": "Prod"
+      }
+    },
+    {
+      "request": "env",
+      "text": "sta",
+      "expect": {
+        "kind": "option",
+        "option_id": "staging",
+        "label": "Staging"
+      }
+    },
+    {
+      "request": "env",
+      "text": "b",
+      "expect": {
+        "kind": "option",
+        "option_id": "staging",
+        "label": "Staging"
+      }
+    },
+    {
+      "request": "env",
+      "text": "B men bare for prod",
+      "expect": {
+        "kind": "custom",
+        "text": "B men bare for prod"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "ja",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "Ja!",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "jepp",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "kjør",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "ok",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "go ahead",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "svar ja",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "lead-in"
+    },
+    {
+      "request": "approval",
+      "text": "Yes",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "the card's own label"
+    },
+    {
+      "request": "approval",
+      "text": "nei",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "No.",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "stopp",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "sí",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "es"
+    },
+    {
+      "request": "approval",
+      "text": "oui",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "fr"
+    },
+    {
+      "request": "approval",
+      "text": "non",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      },
+      "note": "fr"
+    },
+    {
+      "request": "approval",
+      "text": "हाँ",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "hi"
+    },
+    {
+      "request": "approval",
+      "text": "नहीं",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      },
+      "note": "hi"
+    },
+    {
+      "request": "approval",
+      "text": "好",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "zh"
+    },
+    {
+      "request": "approval",
+      "text": "不",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      },
+      "note": "zh"
+    },
+    {
+      "request": "approval",
+      "text": "ja, men vent til i morgen",
+      "expect": {
+        "kind": "custom",
+        "text": "ja, men vent til i morgen"
+      },
+      "note": "more than yes is the user's own words"
+    },
+    {
+      "request": "approval",
+      "text": "angre",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      }
+    },
+    {
+      "request": "approval",
+      "text": "neste",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      }
+    },
+    {
+      "request": "approval_labels",
+      "text": "deploy",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      },
+      "note": "the card's own yes label"
+    },
+    {
+      "request": "approval_labels",
+      "text": "hold",
+      "expect": {
+        "kind": "approval",
+        "choice": "rejected"
+      },
+      "note": "the card's own no label"
+    },
+    {
+      "request": "approval_labels",
+      "text": "ja",
+      "expect": {
+        "kind": "approval",
+        "choice": "accepted"
+      }
+    },
+    {
+      "request": "text",
+      "text": "B",
+      "expect": {
+        "kind": "custom",
+        "text": "B"
+      },
+      "note": "a text request is always the user's words"
+    },
+    {
+      "request": "text",
+      "text": "123456",
+      "expect": {
+        "kind": "custom",
+        "text": "123456"
+      }
+    },
+    {
+      "request": "text",
+      "text": "ja",
+      "expect": {
+        "kind": "custom",
+        "text": "ja"
+      }
+    },
+    {
+      "request": "text",
+      "text": "neste",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      },
+      "note": "commands still work"
+    },
+    {
+      "request": "choice",
+      "text": "videre",
+      "commands": {
+        "next": [
+          "videre"
+        ],
+        "undo": [
+          "angre"
+        ],
+        "cancel": [
+          "avbryt"
+        ]
+      },
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      },
+      "note": "the app's own command words"
+    },
+    {
+      "request": "approval",
+      "text": "deshacer",
+      "commands": {
+        "undo": [
+          "deshacer"
+        ]
+      },
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "the app's own command words in its user's language"
+    }
+  ]
+}

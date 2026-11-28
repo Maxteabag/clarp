@@ -3452,6 +3452,9 @@ impl Worker {
         let pages = self.setup.blobs.as_ref();
         match library::carry_out(actor, &self.setup.record, want, now, pages) {
             Ok(carried) => {
+                if let Some(item) = carried.taken_back {
+                    self.queue_edit = Some(QueueEdit::Deleted(item));
+                }
                 for out in carried.outs {
                     self.after(out);
                 }

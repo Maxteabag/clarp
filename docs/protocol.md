@@ -3176,6 +3176,58 @@ report. Create it with `POST /artifacts`:
   it is never served on the Host origin. Clients before contract 19 show it as
   a form with an empty answer set. Feature `html_reports`.
 
+### Answers the user can take back, approvals in own words, spoken answers (Rust Host contract 228)
+
+Three features, each opt-in: an app that sends none of the new fields sees no change.
+
+**`decision_undo`.** `POST /decisions/<id>/resolve` takes an optional `undo_ms`, an integer from
+0 to 15000 (anything else is 400 `{"error": "undo_ms must be an integer from 0 to 15000"}`).
+Absent or 0 is the old behaviour. Otherwise the answer is saved at once (status, answer,
+revision) and its message to the agent is held until `now + undo_ms`; the Host wakes on time and
+delivers it with no polling. The hold is ignored for an answer given on the user's behalf and for
+the Host's own bound-privacy cards. While the answer is held, the artifact's `decision` carries
+`undoable: true` and `undo_until` (epoch ms); the fields are absent otherwise, and the artifact
+is sent again on the event stream when the hold ends. An agent's `agent_artifacts wait` keeps
+waiting while an answer is `undoable`.
+
+`POST /decisions/<id>/undo` `{"expected_revision": n}` (the revision the resolve answered with)
+is for the administrator and paired devices; the agents' tools token gets 403. It answers 200
+`{"artifact", "undone": true}` with the request `pending` again (answer and `resolved_*`
+cleared, `revision + 1`, artifact status `active`); 200 `{"artifact", "undone": false}` when it
+was pending already; 409 `{"error": "too_late"}` when the agent has the answer (its message was
+delivered and its turn started), the request expired or was cancelled, or an agent answered it
+on the user's behalf; 409 `decision revision changed` or `decision not found`. After the hold, an
+answer whose message still waits in the agent's queue can be taken back too: the message goes
+as with `DELETE /turn-queue/<id>`. An answer given after an undo reaches the agent as a message
+of its own (`u-decision-<id>-u<n>`).
+
+Forms work the same way. `POST /artifacts/<id>/submit` (a `render_spec` or an `html_form`) takes
+`undo_ms` beside its other fields; the receipt carries `undoable` and `undo_until` while held, as
+does a render spec's row (top level), its opened `submission`, and an HTML form's
+`latest_submission`. `POST /artifacts/<id>/submissions/<submission_id>/undo` (owner and devices)
+answers 200 `{"artifact", "undone": true}` with the submission gone and a render spec open again
+in its earlier status, 200 `{"artifact", "undone": false}` for a submission that is not there,
+or 409 `{"error": "too_late"}`. A submission id that was taken back is never accepted again: send
+the answers anew under a new id.
+
+**`approval_custom_text`.** An approval takes `answer: {"text": "..."}` instead of `choice`
+(exactly one of the two). It ends `answered` (`resolved_choice` `answered`), and the agent is
+told that the user neither approved nor rejected the action, with their words, and that this is
+not approval. Approval rows say `allow_custom_text: true`; a `single_choice` request keeps its own
+value.
+
+**`decision_voice_match`.** `POST /decisions/<id>/match` `{"text": "<transcript>", "commands":
+{"next": [...], "undo": [...], "cancel": [...]}}` (`commands` optional: the app's own command
+words in its user's language, matched before the Host's) changes nothing and answers one of
+`{"kind": "option", "option_id", "label"}`, `{"kind": "approval", "choice": "accepted" |
+"rejected"}`, `{"kind": "custom", "text"}` (the transcript as said; `""` when nothing was heard)
+or `{"kind": "command", "command": "next" | "undo" | "cancel"}`. Only a clear answer is an option
+or a yes or no: a letter, a number or ordinal, an option's label, a yes or no word, with filler
+and lead-ins ("velg", "option") left out. Anything more is the user's own words. A text request
+always answers `custom` unless the words are a command. The cases are in
+`contract/fixtures/decision-voice-match.json`; apps read them and never match by themselves. The
+tools token gets 403.
+
 ### Moving a render spec: `GET /artifacts/<id>/export`
 
 For the administrator's token only, and only when it comes in the `Authorization` header: the

@@ -85,6 +85,19 @@ pub enum Want {
         known: bool,
         /// The app asks for the agent's reply to the answer to be spoken.
         synthesize_audio: bool,
+        /// How long the answer is held from the agent, for its user to take it back.
+        hold_ms: i64,
+    },
+    /// The user takes their answer back while the agent does not have it yet.
+    Undo {
+        decision_id: String,
+        expected_revision: i64,
+    },
+    /// The user takes answers they sent to a form back while its agent has not started on
+    /// them.
+    TakeBack {
+        artifact_id: String,
+        submission_id: String,
     },
     Dismiss {
         decision_id: String,
@@ -121,6 +134,8 @@ pub enum Want {
         data: Box<J>,
         elsewhere: Option<Box<(String, Submission)>>,
         capable: render_spec::Access,
+        /// How long the answers are held from the agent, for their user to take them back.
+        hold_ms: i64,
     },
 }
 
@@ -140,6 +155,8 @@ pub struct Done {
 pub struct Carried {
     pub said: Result<Done, Refused>,
     pub outs: Vec<Outputs>,
+    /// The message an undo took out of the agent's queue, for those who watch the queue.
+    pub taken_back: Option<clarp_actor::Waiting>,
 }
 
 fn kept(artifacts: &[Artifact]) -> Kept<'_> {
@@ -160,7 +177,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
     if actor.moved().is_some() {
         return Ok(outs);
     }
-    for decision_id in actor.artifacts().undelivered() {
+    for decision_id in actor.artifacts().due_deliveries(now) {
         let Some(artifact) = actor.artifacts().of_decision(&decision_id).cloned() else {
             continue;
         };
@@ -194,8 +211,12 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
             .as_ref()
             .and_then(|decision| decision.delivery.as_ref())
             .is_some_and(|delivery| delivery.synthesize_audio);
+        let message_id = artifact
+            .decision
+            .as_ref()
+            .map_or_else(String::new, decisions::Decision::message_id);
         let message = Message {
-            id: format!("u-decision-{decision_id}"),
+            id: message_id,
             speak,
             text: prompt,
             origin: Origin::Trigger {
@@ -220,7 +241,7 @@ pub fn settle(actor: &mut Actor, now: i64) -> Result<Vec<Outputs>, ActorError> {
     // What a user answered to a form is left for the form's agent the way a user leaves a
     // message for an agent that is busy: it waits its turn in the queue, where its user can
     // still take it back, and starts at once when the agent is free.
-    for (artifact_id, submission_id) in actor.artifacts().untold() {
+    for (artifact_id, submission_id) in actor.artifacts().untold_due(now) {
         let told = actor.artifacts().told(&artifact_id, &submission_id, now);
         let Some((form, prompt, spoken)) = told else {
             continue;
@@ -268,6 +289,35 @@ pub fn carry_out(
 ) -> Result<Carried, ActorError> {
     // What ran out is closed before anything is answered about it.
     let mut outs = settle(actor, now)?;
+    match want {
+        Want::Undo {
+            decision_id,
+            expected_revision,
+        } => {
+            let planned = actor
+                .artifacts()
+                .undo(decision_id, *expected_revision, now)
+                .map(|undo| match undo {
+                    decisions::Undo::Open(artifact) => (artifact, false, None),
+                    decisions::Undo::Reopened { artifact, queued } => (artifact, true, queued),
+                });
+            return reopened(actor, record, planned, outs, now);
+        }
+        Want::TakeBack {
+            artifact_id,
+            submission_id,
+        } => {
+            let planned = actor
+                .artifacts()
+                .take_back(artifact_id, submission_id, now)
+                .map(|taken| match taken {
+                    forms::Taken::Gone(form) => (form, false, None),
+                    forms::Taken::Back { form, queued } => (form, true, queued),
+                });
+            return reopened(actor, record, planned, outs, now);
+        }
+        _ => {}
+    }
     let maker = Maker {
         agent_id: &record.agent_id,
         session: &record.session,
@@ -333,12 +383,14 @@ pub fn carry_out(
                 verified,
                 known,
                 synthesize_audio,
+                hold_ms,
             } => {
                 let given = Given {
                     expected_revision: *expected_revision,
                     choice: choice.as_ref(),
                     answer: answer.as_ref(),
                     synthesize_audio: *synthesize_audio,
+                    hold_ms: *hold_ms,
                 };
                 let by = OnBehalf {
                     session: on_behalf_session.as_deref(),
@@ -351,6 +403,11 @@ pub fn carry_out(
                 decision_id,
                 expected_revision,
             } => changed(book.dismiss(decision_id, *expected_revision, now)),
+            // Carried out above, where the agent's queue can be changed.
+            Want::Undo { .. } | Want::TakeBack { .. } => Err(Refused {
+                why: Why::Value,
+                message: "an undo is carried out apart".to_string(),
+            }),
             Want::Withdraw {
                 decision_id,
                 session,
@@ -401,6 +458,7 @@ pub fn carry_out(
                 data,
                 elsewhere,
                 capable,
+                hold_ms,
             } => {
                 let elsewhere = elsewhere
                     .as_deref()
@@ -419,7 +477,7 @@ pub fn carry_out(
                     });
                 catalog
                     .and_then(|catalog| {
-                        book.spec_submitted(&catalog, artifact_id, data, elsewhere, now)
+                        book.spec_submitted(&catalog, artifact_id, data, elsewhere, *hold_ms, now)
                     })
                     .map(|(form, said, changed)| {
                         receipt = Some(said);
@@ -434,6 +492,7 @@ pub fn carry_out(
             return Ok(Carried {
                 said: Err(refused),
                 outs,
+                taken_back: None,
             });
         }
     };
@@ -463,6 +522,70 @@ pub fn carry_out(
             receipt,
         }),
         outs,
+        taken_back: None,
+    })
+}
+
+/// An answer taken back, as it was planned on the agent's books: the artifact open again,
+/// whether that changes anything, and the message the answer became where it is in the
+/// agent's queue. That message is taken out of the queue first; once it no longer waits
+/// there, the agent has the answer and it is too late. On the agent's own thread, so that
+/// nothing starts in between.
+fn reopened(
+    actor: &mut Actor,
+    record: &AgentRecord,
+    planned: Result<(Artifact, bool, Option<String>), Refused>,
+    mut outs: Vec<Outputs>,
+    now: i64,
+) -> Result<Carried, ActorError> {
+    let (artifact, changed, queued) = match planned {
+        Ok(planned) => planned,
+        Err(refused) => {
+            return Ok(Carried {
+                said: Err(refused),
+                outs,
+                taken_back: None,
+            });
+        }
+    };
+    let mut taken_back = None;
+    if let Some(message_id) = queued {
+        let waiting = actor.queue()?;
+        let found = waiting.into_iter().find(|w| w.client_id == message_id);
+        let withdrawn = match &found {
+            Some(waiting) => Some(actor.withdraw(waiting.turn, "user", now)?),
+            None => None,
+        };
+        match withdrawn {
+            Some((true, out)) => {
+                outs.push(out);
+                taken_back = found;
+            }
+            _ => {
+                return Ok(Carried {
+                    said: Err(Refused {
+                        why: Why::Value,
+                        message: decisions::TOO_LATE.to_string(),
+                    }),
+                    outs,
+                    taken_back: None,
+                });
+            }
+        }
+    }
+    if changed {
+        outs.push(actor.keep(&kept(std::slice::from_ref(&artifact)), now)?);
+    }
+    let shown = artifact.public(&record.persona, actor.goals(), now);
+    Ok(Carried {
+        said: Ok(Done {
+            artifact: shown,
+            changed,
+            delivery_pending: false,
+            receipt: None,
+        }),
+        outs,
+        taken_back,
     })
 }
 
@@ -1232,6 +1355,16 @@ async fn post_artifact(
             .await?,
         ));
     }
+    // `/artifacts/<id>/submissions/<submission id>/undo`: the user takes answers back.
+    if let Some((artifact_id, submission_id)) = path
+        .strip_suffix("/undo")
+        .and_then(|rest| rest.split_once("/submissions/"))
+    {
+        if principal == Principal::Tools {
+            return Err(refused(StatusCode::FORBIDDEN, "owner undo required"));
+        }
+        return Ok(Json(take_back(&app, artifact_id, submission_id).await?));
+    }
     let capable = render_spec::capable(&app, &headers);
     if let Some(artifact_id) = rest.trim_matches('/').strip_suffix("/submit") {
         return Ok(Json(
@@ -1323,6 +1456,20 @@ async fn submit(
     let done = member.agent.artifact(want).await?.map_err(told)?;
     done.receipt
         .ok_or_else(|| refused(StatusCode::INTERNAL_SERVER_ERROR, "no receipt"))
+}
+
+/// The user takes answers they sent to a form back, while its agent has not started on them.
+async fn take_back(app: &App, artifact_id: &str, submission_id: &str) -> Result<Value, ApiError> {
+    let member = Fleet::of(app).holder(artifact_id, false).cloned();
+    let Some(member) = member else {
+        return Err(refused(StatusCode::CONFLICT, "form not found"));
+    };
+    let want = Want::TakeBack {
+        artifact_id: artifact_id.to_string(),
+        submission_id: submission_id.to_string(),
+    };
+    let done = ask_agent(&member, want).await?;
+    Ok(json!({ "artifact": done.artifact, "undone": done.changed }))
 }
 
 /// Changes an artifact, or does with it what a user does. `rest` is what follows
@@ -1696,7 +1843,12 @@ pub(crate) async fn decide(
     let found = rest
         .trim_matches('/')
         .rsplit_once('/')
-        .filter(|(_, action)| matches!(*action, "resolve" | "dismiss" | "withdraw"));
+        .filter(|(_, action)| {
+            matches!(
+                *action,
+                "resolve" | "dismiss" | "withdraw" | "undo" | "match"
+            )
+        });
     let Some((decision_id, action)) = found else {
         return Err(ApiError::plain(StatusCode::NOT_FOUND, "not found"));
     };
@@ -1704,6 +1856,13 @@ pub(crate) async fn decide(
     let tool_caller = if principal == Some(&Principal::Tools) {
         if action == "dismiss" {
             return Err(refused(StatusCode::FORBIDDEN, "owner dismissal required"));
+        }
+        // Only the user takes their own answer back, and only an app asks what was said.
+        if action == "undo" {
+            return Err(refused(StatusCode::FORBIDDEN, "owner undo required"));
+        }
+        if action == "match" {
+            return Err(refused(StatusCode::FORBIDDEN, "owner request required"));
         }
         let caller = crate::turn_identity::presented(app, turn)
             .await?
@@ -1726,7 +1885,18 @@ pub(crate) async fn decide(
     } else {
         None
     };
+    if action == "match" {
+        return spoken(app, &decision_id, data);
+    }
     let mut want = match action {
+        "undo" => {
+            let expected = whole(data, "expected_revision")?;
+            Want::Undo {
+                expected_revision: decisions::integer(&expected, "expected_revision", 1)
+                    .map_err(conflict)?,
+                decision_id: decision_id.clone(),
+            }
+        }
         "resolve" => {
             let on_behalf = data
                 .get("on_behalf_session")
@@ -1754,6 +1924,8 @@ pub(crate) async fn decide(
                 Some(_) => return Err(refused(StatusCode::BAD_REQUEST, "invalid decision choice")),
             };
             let expected = whole(data, "expected_revision")?;
+            let hold_ms = forms::undo_ms(data.get("undo_ms"))
+                .map_err(|why| refused(StatusCode::BAD_REQUEST, why.message))?;
             // The message the answer becomes is spoken only when the app asks for it.
             let synthesize_audio = match data.get("synthesize_audio") {
                 None | Some(Value::Null) => false,
@@ -1803,6 +1975,7 @@ pub(crate) async fn decide(
                 verified,
                 known,
                 synthesize_audio,
+                hold_ms,
             }
         }
         "dismiss" => {
@@ -1851,6 +2024,19 @@ pub(crate) async fn decide(
     {
         *synthesize_audio = app.mouth.can_speak(&member.record).await;
     }
+    // A card of the Host's own does what it asked the moment it is answered: there is nothing
+    // to hold, and nothing an undo could take back.
+    if let Want::Resolve { hold_ms, .. } = &mut want
+        && *hold_ms > 0
+        && crate::bound_privacy::asks(app, &decision_id).await
+    {
+        *hold_ms = 0;
+    }
+    if matches!(want, Want::Undo { .. }) {
+        // Too late is a conflict like the others: `{"error": "too_late"}`.
+        let done = ask_agent(member, want).await?;
+        return Ok(json!({ "artifact": done.artifact, "undone": done.changed }));
+    }
     let done = ask_agent(member, want).await?;
     if done.changed {
         push_ended(app, member, &decision_id);
@@ -1878,6 +2064,26 @@ pub(crate) async fn decide(
             "delivery_pending": done.delivery_pending,
         })
     })
+}
+
+/// `POST /decisions/<id>/match` `{text, commands}`: what a spoken answer to the request means.
+/// Changes nothing.
+fn spoken(app: &App, decision_id: &str, data: &Map<String, Value>) -> Result<Value, ApiError> {
+    let Some(text) = data.get("text").and_then(Value::as_str) else {
+        return Err(refused(StatusCode::BAD_REQUEST, "text must be a string"));
+    };
+    let commands = clarp_kernel::artifacts::voice_match::Commands::of(data.get("commands"));
+    let fleet = Fleet::holding(app, decision_id);
+    let decision = fleet.0.iter().find_map(|(_, view)| {
+        let artifact = view.books.artifacts.of_decision(decision_id)?;
+        artifact.decision.clone()
+    });
+    let Some(decision) = decision else {
+        return Err(refused(StatusCode::CONFLICT, "decision not found"));
+    };
+    Ok(clarp_kernel::artifacts::voice_match::voice_match(
+        &decision, text, &commands,
+    ))
 }
 
 async fn attention(State(app): State<App>, Query(query): Params) -> Json<Value> {

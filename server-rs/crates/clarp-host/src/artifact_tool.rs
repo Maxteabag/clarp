@@ -323,7 +323,9 @@ fn wait(app: &App, args: &[String], call: &ToolCall) -> Result<ToolAnswer, Strin
     };
     let decision = &artifact["decision"];
     let status = decision["status"].as_str().unwrap_or("");
-    if !status.is_empty() && status != "pending" {
+    // An answer its user may still take back is not the agent's yet: it waits on.
+    let held = decision["undoable"] == true;
+    if !status.is_empty() && status != "pending" && !held {
         let outcome = json!({
             "status": status,
             "answer": decision["answer"],
