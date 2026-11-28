@@ -44872,16 +44872,33 @@ fn the_quota_keeper_recovers_through_the_owners_selector_at_once_or_when_the_own
         Some(&accepted),
     );
     assert_eq!(status, 200, "{said}");
-    // By now the card was made long since (the run kept, the card answered): it paged nobody.
-    let decision_pushed = relay.taken().iter().any(|(path, _, body)| {
-        path == "/v1/push/send"
-            && body["notifications"][0]["payload"]["decision_id"] == card["decision"]["decision_id"]
+    // The quiet card does not page the phone. Resolving it still clears that card on
+    // every device. The pusher processes the request before the clear.
+    let card_pushes = || {
+        relay
+            .taken()
+            .into_iter()
+            .filter(|(path, _, _)| path == "/v1/push/send")
+            .flat_map(|(_, _, body)| {
+                body["notifications"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default()
+            })
+            .filter(|push| push["payload"]["decision_id"] == decision)
+            .collect::<Vec<_>>()
+    };
+    wait_for("the resolved card's silent clear", || {
+        card_pushes()
+            .iter()
+            .any(|push| push["payload"]["kind"] == "read")
     });
-    assert!(
-        !decision_pushed,
-        "the keeper's card was pushed: {:?}",
-        relay.taken()
-    );
+    for push in card_pushes() {
+        assert_eq!(push["pushType"], "background", "{push}");
+        assert_eq!(push["priority"], "5", "{push}");
+        assert_eq!(push["payload"]["kind"], "read", "{push}");
+        assert!(push["payload"]["aps"].get("alert").is_none(), "{push}");
+    }
     drop(host);
     let receipts = kept_records(&place, "quota-keeper-receipt");
     let receipt = receipts.values().next().unwrap();
