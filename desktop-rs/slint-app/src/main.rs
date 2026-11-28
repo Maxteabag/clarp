@@ -669,6 +669,7 @@ impl App {
         let image = self.engine.borrow_mut().avatar_source(&popup.session);
         platform::desktop::notify(platform::desktop::Note {
             title: popup.title.clone(),
+            name: Some(incoming.persona.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| popup.title.clone()),
             body: popup.body.clone(),
             session: popup.session.clone(),
             message_id: incoming.message_id.clone(),

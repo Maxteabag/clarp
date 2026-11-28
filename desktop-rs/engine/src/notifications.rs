@@ -7,7 +7,7 @@
 //! is not the selected one pops up.
 
 use clarp_core::json::{self, Object};
-use clarp_core::notify_events::{self, Incoming, Recent, Settings};
+use clarp_core::notify_events::{self, Incoming, Preset, Recent, Settings};
 use serde_json::{Value, json};
 
 use crate::{Change, Engine};
@@ -79,6 +79,32 @@ impl Engine {
         let Some(settings) = self.notifications.settings.as_mut() else { return };
         let body = settings.set_agent(&agent_id, event, choice);
         self.post_notification_settings(body);
+    }
+
+    /// A contact's preset: All or Only when it needs me set its choices
+    /// (and unmute it), Muted mutes it; Custom changes nothing.
+    pub fn set_agent_notification_preset(&mut self, session: &str, preset: Preset) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.set_agent_notification_preset(local, preset));
+        let Some(agent) = self.roster.find(session) else { return };
+        let (agent_id, muted) = (agent.agent_id.clone(), agent.muted);
+        match preset {
+            Preset::Custom => {}
+            Preset::Muted => self.set_agent_push_muted(session, true),
+            Preset::All | Preset::NeedsMe => {
+                if muted {
+                    self.set_agent_push_muted(session, false);
+                }
+                if let Some(choices) = self.notifications.settings.as_mut().and_then(|s| s.agents.get_mut(&agent_id)) {
+                    choices.muted = false;
+                }
+                let body = self.notifications.settings.as_mut().and_then(|s| s.set_preset(&agent_id, preset));
+                if let Some(body) = body {
+                    self.post_notification_settings(body);
+                } else {
+                    self.changes.push(Change::NotificationSettings);
+                }
+            }
+        }
     }
 
     fn post_notification_settings(&mut self, body: Value) {

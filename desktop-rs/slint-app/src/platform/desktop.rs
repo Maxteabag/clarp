@@ -402,6 +402,8 @@ pub fn muted_changed(muted: bool) {
 #[derive(Debug, Clone, Default)]
 pub struct Note {
     pub title: String,
+    /// The contact's name, for "Mute <name>".
+    pub name: String,
     pub body: String,
     /// The chat: a newer popup of the same chat replaces the older one.
     pub session: String,
@@ -417,6 +419,9 @@ pub struct Note {
     /// The buttons after Open and Mark read: (action key, label).
     pub choices: Vec<(String, String)>,
 }
+
+/// The settings row a popup's Settings opens at: the section's first.
+const NOTIFICATION_SETTINGS: &[&str] = &["notify-reply", "desktop-notifications"];
 
 /// The action key of an answer button (`choice:<option id>`).
 pub const CHOICE: &str = "choice:";
@@ -504,12 +509,19 @@ pub fn close_chat(session: &str) {
 }
 
 /// The popup's buttons as the desktop takes them: key, label, key, label.
+/// A click is Open; a question's answers come first, as a desktop shows
+/// only its first few; then Mark read, Mute <name> and the settings.
 fn actions(note: &Note) -> Vec<String> {
     use clarp_core::notify_events::text;
-    let mut out = vec!["default".to_owned(), text("notify.action.open").to_owned(), "mark-read".to_owned(), text("notify.action.mark_read").to_owned()];
+    let mut out = vec!["default".to_owned(), text("notify.action.open").to_owned()];
     for (key, label) in &note.choices {
         out.extend([key.clone(), label.clone()]);
     }
+    out.extend(["mark-read".to_owned(), text("notify.action.mark_read").to_owned()]);
+    if !note.name.is_empty() {
+        out.extend(["mute".to_owned(), text("notify.action.mute").replace("{name}", &note.name)]);
+    }
+    out.extend(["settings".to_owned(), text("notify.action.settings").to_owned()]);
     out
 }
 
@@ -531,14 +543,30 @@ pub fn action_invoked(id: u32, key: &str) {
 }
 
 /// What a popup's button does: open the chat at the message, mark it
-/// read, or answer the question (opening it when the answer cannot go).
+/// read, mute the contact, open the notification settings, or answer the
+/// question (opening it when the answer cannot go).
 pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
     let Some(app) = crate::app() else { return };
     close_chat(session);
-    if key == "mark-read" {
-        app.engine.borrow_mut().mark_chat_read(session);
-        crate::pump_now(&app);
-        return;
+    match key {
+        "mark-read" => {
+            app.engine.borrow_mut().mark_chat_read(session);
+            crate::pump_now(&app);
+            return;
+        }
+        "mute" => {
+            app.engine.borrow_mut().set_agent_push_muted(session, true);
+            crate::pump_now(&app);
+            return;
+        }
+        "settings" => {
+            perform(Action::Show);
+            if let Some(window) = crate::window() {
+                crate::settings_view::open_at(&app, &window, NOTIFICATION_SETTINGS);
+            }
+            return;
+        }
+        _ => {}
     }
     if let Some(option) = key.strip_prefix(CHOICE) {
         let answered = app.engine.borrow_mut().answer_from_notification(decision_id, response_type, option);

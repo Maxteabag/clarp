@@ -19,6 +19,10 @@ export struct ProfileInfo {
     heartbeat: bool,
     dreaming: bool,
     push-alerts: bool,
+    // The Host keeps notifications per event: a preset (0 All, 1 Only when
+    // it needs me, 2 Muted, 3 Custom) stands in for Push alerts.
+    notify-shown: bool,
+    notify-preset: int,
     context-fraction: float,
     // Empty while the Host does not say how much is used: no row then.
     context-used: string,
@@ -135,9 +139,13 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
-    // Per event for this contact, while its push alerts are on.
+    // Per event for this contact, under Customize.
     in property <[NotifyChoice]> notify-events;
+    in property <[string]> notify-presets;
+    // Customize was pressed: the events show under the preset.
+    in-out property <bool> notify-customize;
     callback set-notify-event(string, int);
+    callback set-notify-preset(int);
     callback set-agent-messages(int);
     // Bumped to bring the profile's Publications card into view (the chat's
     // ⋯ menu's Artifacts).
@@ -584,9 +592,31 @@ export component AgentProfile inherits Modal {
                         Text { text: line; color: Palette.text; font-size: 11 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                     }
                     Spot { spot: "dreaming"; ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
-                    Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
-                    // Muted wins over every event: the choices show while alerts are on.
-                    if root.info.push-alerts && ProfileBridge.notify-events.length > 0: VerticalLayout {
+                    if !root.info.notify-shown: Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
+                    // One choice first; Customize shows each event (Muted wins over them).
+                    if root.info.notify-shown: Spot {
+                        spot: "notify-preset";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: @tr("Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.notify-presets;
+                                current-index: root.info.notify-preset;
+                                accessible-label: @tr("Notifications");
+                                selected => { ProfileBridge.set-notify-preset(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
+                        }
+                    }
+                    if root.info.notify-shown && root.info.notify-preset < 2 && !ProfileBridge.notify-customize: HorizontalLayout {
+                        alignment: start;
+                        Spot {
+                            spot: "notify-customize";
+                            TextButton { text: @tr("Customize"); clicked => { ProfileBridge.notify-customize = true; } }
+                        }
+                    }
+                    if root.info.notify-shown && root.info.notify-preset != 2 && (ProfileBridge.notify-customize || root.info.notify-preset == 3): VerticalLayout {
                         spacing: 8px;
                         for event[index] in ProfileBridge.notify-events: Spot {
                             spot: "notify:" + index;

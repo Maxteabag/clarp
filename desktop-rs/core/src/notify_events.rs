@@ -125,6 +125,88 @@ impl Settings {
     }
 }
 
+/// A contact's notifications in one choice. Presets are only sets of the
+/// contact's own choices on the same document: All follows the owner's
+/// choice for every event, Only when it needs me turns on a question and a
+/// failed turn and the rest off, Muted is the contact's mute. Anything else
+/// is Custom.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Preset {
+    All,
+    NeedsMe,
+    Muted,
+    Custom,
+}
+
+impl Preset {
+    /// In the order the choice lists them.
+    pub const ALL: [Preset; 4] = [Preset::All, Preset::NeedsMe, Preset::Muted, Preset::Custom];
+
+    pub fn index(self) -> usize {
+        Preset::ALL.iter().position(|p| *p == self).unwrap_or(0)
+    }
+
+    pub fn from_index(index: usize) -> Preset {
+        Preset::ALL.get(index).copied().unwrap_or(Preset::Custom)
+    }
+
+    /// Its words (`notify.settings.preset.<name>`).
+    pub fn label(self) -> &'static str {
+        text(match self {
+            Preset::All => "notify.settings.preset.all",
+            Preset::NeedsMe => "notify.settings.preset.needs_me",
+            Preset::Muted => "notify.settings.preset.muted",
+            Preset::Custom => "notify.settings.preset.custom",
+        })
+    }
+}
+
+/// The events "Only when it needs me" keeps on.
+pub const NEEDS_ME: &[&str] = &["needs_you", "failed"];
+
+impl Settings {
+    /// Which preset the contact's choices are (`muted` from wherever the
+    /// app reads the contact's mute, which wins).
+    pub fn preset(&self, agent_id: &str, muted: bool) -> Preset {
+        let agent = self.agents.get(agent_id);
+        if muted || agent.is_some_and(|a| a.muted) {
+            return Preset::Muted;
+        }
+        let choices = agent.map(|a| &a.events);
+        if choices.is_none_or(HashMap::is_empty) {
+            return Preset::All;
+        }
+        let needs_me = self.events.iter().all(|e| choices.and_then(|c| c.get(&e.id)) == Some(&NEEDS_ME.contains(&e.id.as_str())));
+        if needs_me { Preset::NeedsMe } else { Preset::Custom }
+    }
+
+    /// The contact's choices for All or Only when it needs me, applied here
+    /// and as the Host takes them; None when nothing changes (or for Muted
+    /// and Custom, which are not sets of choices).
+    pub fn set_preset(&mut self, agent: &str, preset: Preset) -> Option<Value> {
+        let ids: Vec<String> = self.events.iter().map(|e| e.id.clone()).collect();
+        let choices = self.agents.entry(agent.to_owned()).or_default();
+        let mut events = serde_json::Map::new();
+        match preset {
+            Preset::All => {
+                for (id, _) in choices.events.drain() {
+                    events.insert(id, Value::Null);
+                }
+            }
+            Preset::NeedsMe => {
+                for id in ids {
+                    let on = NEEDS_ME.contains(&id.as_str());
+                    if choices.events.insert(id.clone(), on) != Some(on) {
+                        events.insert(id, Value::Bool(on));
+                    }
+                }
+            }
+            Preset::Muted | Preset::Custom => return None,
+        }
+        (!events.is_empty()).then(|| json!({"agent": agent, "events": events}))
+    }
+}
+
 /// One answer a needs_you notification offers as a button.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Choice {
@@ -250,9 +332,17 @@ pub const STRINGS: &[(&str, &str)] = &[
     ("notify.settings.default", "Default"),
     ("notify.settings.on", "On"),
     ("notify.settings.off", "Off"),
-    ("notify.settings.contact", "Notifications from this contact"),
+    ("notify.settings.contact", "Notifications"),
+    ("notify.settings.customize", "Customize"),
+    ("notify.settings.preset.all", "All"),
+    ("notify.settings.preset.needs_me", "Only when it needs me"),
+    ("notify.settings.preset.muted", "Muted"),
+    ("notify.settings.preset.custom", "Custom"),
     ("notify.action.open", "Open"),
     ("notify.action.mark_read", "Mark read"),
+    // {name}: the contact's name.
+    ("notify.action.mute", "Mute {name}"),
+    ("notify.action.settings", "Settings"),
     ("notify.body.needs_you", "Waiting for your answer"),
     ("notify.body.failed", "The turn failed"),
     ("notify.body.reply", "Done, your turn"),
@@ -334,6 +424,29 @@ mod tests {
         assert!(settings.effective("a1", "reply"));
         settings.set_agent("a3", "update", Some(false));
         assert_eq!(settings.agent_choice("a3", "update"), Some(false));
+    }
+
+    #[test]
+    fn presets_are_sets_of_the_contacts_choices() {
+        let mut settings = document();
+        assert_eq!(settings.preset("a1", false), Preset::Custom);
+        assert_eq!(settings.preset("a2", false), Preset::Muted);
+        assert_eq!(settings.preset("other", false), Preset::All);
+        assert_eq!(settings.preset("other", true), Preset::Muted);
+        let body = settings.set_preset("other", Preset::NeedsMe).unwrap();
+        assert_eq!(body["events"], json!({"reply": false, "job_done": false, "update": false}));
+        // The document here names no needs_you or failed: only its events count.
+        assert_eq!(settings.preset("other", false), Preset::NeedsMe);
+        assert_eq!(settings.set_preset("other", Preset::NeedsMe), None);
+        let body = settings.set_preset("a1", Preset::All).unwrap();
+        assert_eq!(body["events"]["job_done"], Value::Null);
+        assert_eq!(settings.preset("a1", false), Preset::All);
+        assert_eq!(settings.set_preset("a1", Preset::All), None);
+        assert_eq!(settings.set_preset("a1", Preset::Muted), None);
+        for preset in Preset::ALL {
+            assert_eq!(Preset::from_index(preset.index()), preset);
+            assert!(!preset.label().starts_with("notify."));
+        }
     }
 
     #[test]

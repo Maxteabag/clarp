@@ -175,7 +175,11 @@ pub struct Shown {
     pub prompts_more: bool,
     pub mcp: usize,
     pub schedules: usize,
-    /// Per-event choices for this contact (none while it is muted).
+    /// The Host keeps notifications per event: the preset replaces Push alerts.
+    pub notify_shown: bool,
+    /// The Customize button shows.
+    pub notify_customize: bool,
+    /// Per-event choices shown (under Customize or for a custom set).
     pub notify: usize,
 }
 
@@ -210,8 +214,16 @@ pub fn stops(shown: &Shown) -> Vec<Stop> {
     for id in ["model", "effort"] {
         add(id.into(), "model");
     }
-    for id in ["heartbeat", "dreaming", "push-alerts"] {
+    for id in ["heartbeat", "dreaming"] {
         add(id.into(), "autonomy");
+    }
+    if !shown.notify_shown {
+        add("push-alerts".into(), "autonomy");
+    } else {
+        add("notify-preset".into(), "autonomy");
+        if shown.notify_customize {
+            add("notify-customize".into(), "autonomy");
+        }
     }
     for index in 0..shown.notify {
         add(format!("notify:{index}"), "autonomy");
@@ -310,7 +322,13 @@ fn shown_now(window: &AppWindow) -> Shown {
         prompts_more: info.prompts_more,
         mcp: if info.mcp_shown { bridge.get_mcp().row_count() } else { 0 },
         schedules: bridge.get_schedules().row_count(),
-        notify: if info.push_alerts { bridge.get_notify_events().row_count() } else { 0 },
+        notify_shown: info.notify_shown,
+        notify_customize: info.notify_shown && info.notify_preset < 2 && !bridge.get_notify_customize(),
+        notify: if info.notify_shown && info.notify_preset != 2 && (bridge.get_notify_customize() || info.notify_preset == 3) {
+            bridge.get_notify_events().row_count()
+        } else {
+            0
+        },
     }
 }
 
@@ -383,6 +401,7 @@ fn step_choice(window: &AppWindow, id: &str, step: i32, round: bool) {
         return;
     }
     let (current, count) = match id {
+        "notify-preset" => (info.notify_preset, bridge.get_notify_presets().row_count()),
         "chat-view" => (info.chat_view_index, bridge.get_chat_view_choices().row_count()),
         "agent-messages" => (info.agent_messages_index, bridge.get_agent_message_choices().row_count()),
         "tool-activity" => (info.tool_activity_index, bridge.get_tool_activity_choices().row_count()),
@@ -398,6 +417,7 @@ fn step_choice(window: &AppWindow, id: &str, step: i32, round: bool) {
         return;
     }
     match id {
+        "notify-preset" => info.notify_preset = next,
         "chat-view" => info.chat_view_index = next,
         "agent-messages" => info.agent_messages_index = next,
         "tool-activity" => info.tool_activity_index = next,
@@ -407,6 +427,7 @@ fn step_choice(window: &AppWindow, id: &str, step: i32, round: bool) {
     // Shown at once; the Host's answer refreshes it.
     bridge.set_info(info);
     match id {
+        "notify-preset" => bridge.invoke_set_notify_preset(next),
         "chat-view" => bridge.invoke_set_chat_view(next),
         "agent-messages" => bridge.invoke_set_agent_messages(next),
         "tool-activity" => bridge.invoke_set_tool_activity(next),
@@ -428,7 +449,8 @@ fn enter(window: &AppWindow, id: &str) {
         "terminal" => bridge.invoke_open_terminal(),
         "voice" => bridge.invoke_voice(),
         "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort" => step_choice(window, id, 1, true),
-        id if id.starts_with("notify:") => step_choice(window, id, 1, true),
+        id if id.starts_with("notify:") || id == "notify-preset" => step_choice(window, id, 1, true),
+        "notify-customize" => bridge.set_notify_customize(true),
         "backend" if info.backend_enabled => bridge.invoke_open_transit(),
         "history-more" if !info.prompts_loading => bridge.invoke_load_older(),
         "heartbeat" => bridge.invoke_set_heartbeat(!info.heartbeat),
@@ -520,6 +542,7 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
             "heartbeat" => Some(on(info.heartbeat).into()),
             "dreaming" => Some(on(info.dreaming).into()),
             "push-alerts" => Some(on(info.push_alerts).into()),
+            "notify-customize" => Some(clarp_core::notify_events::text("notify.settings.customize").into()),
             "compact" if !info.compacting => Some("Compact".into()),
             "queue" => Some("Manage queue".into()),
             "relaunch" => Some("Relaunch".into()),
@@ -530,7 +553,7 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
             id if id.starts_with("schedule:") => index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)).map(|s| on(s.on).into()),
             _ => None,
         };
-        let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort") || cursor.starts_with("notify:");
+        let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort") || cursor.starts_with("notify:") || cursor == "notify-preset";
         out.push(("1-9".into(), "Sections".into()));
         out.push((pair("profile-up", "profile-down"), "Move".into()));
         out.push((key("profile-next-card"), "Next card".into()));
@@ -657,6 +680,7 @@ pub fn open(app: &Rc<App>, window: &AppWindow, session: &str) {
     }
     let bridge = window.global::<ProfileBridge>();
     bridge.set_confirm("".into());
+    bridge.set_notify_customize(false);
     set_cursor(window, "");
     show(app, window, "profile");
     hold_keyboard(window);
@@ -800,6 +824,9 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         available.iter().map(|n| NamedItem { id: n.as_str().into(), name: n.as_str().into(), on: chosen.contains(n), ..NamedItem::default() }).collect();
     bridge.set_mcp(ModelRc::new(VecModel::from(mcp)));
     bridge.set_notify_events(ModelRc::new(VecModel::from(notify_choices(&engine, session))));
+    let presets: Vec<SharedString> = clarp_core::notify_events::Preset::ALL.iter().map(|p| SharedString::from(p.label())).collect();
+    bridge.set_notify_presets(ModelRc::new(VecModel::from(presets)));
+    let preset = engine.notification_settings_for(session).map(|(settings, agent_id)| settings.preset(&agent_id, details.get("muted").and_then(Value::as_bool) == Some(true)));
     let schedules: Vec<NamedItem> = details
         .get("schedules")
         .and_then(Value::as_array)
@@ -847,6 +874,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         heartbeat: flag("heartbeat_enabled"),
         dreaming: flag("dreaming_enabled"),
         push_alerts: !flag("muted"),
+        notify_shown: preset.is_some(),
+        notify_preset: preset.map_or(0, |p| p.index() as i32),
         context_fraction: match tokens {
             Some(tokens) if window_size > 0 => tokens as f32 / window_size as f32,
             Some(_) => 0.0,
@@ -1153,6 +1182,16 @@ pub fn wire(window: &AppWindow) {
     bridge.on_set_heartbeat(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_heartbeat(session, on)));
     bridge.on_set_dreaming(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_dreaming(session, on)));
     bridge.on_set_push_alerts(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_push_muted(session, !on)));
+    bridge.on_set_notify_preset(|index| {
+        with_session(|app, window, session| {
+            let preset = clarp_core::notify_events::Preset::from_index(index.max(0) as usize);
+            // Custom is the events themselves: it shows them.
+            if preset == clarp_core::notify_events::Preset::Custom {
+                window.global::<ProfileBridge>().set_notify_customize(true);
+            }
+            app.engine.borrow_mut().set_agent_notification_preset(session, preset);
+        })
+    });
     bridge.on_set_notify_event(|id, index| {
         with_session(|app, _, session| {
             let choice = match index {
@@ -1253,5 +1292,20 @@ mod tests {
         assert_eq!(section(&plain, 9), None, "no backend row");
         assert_eq!(section(&plain, 1).as_deref(), Some("publications"), "always there, empty or not");
         assert_eq!(section(&plain, 2).as_deref(), Some("images"));
+    }
+
+    /// With the Host's notifications per event the preset stands in for
+    /// Push alerts, Customize until it is pressed, then each event.
+    #[test]
+    fn notifications_per_event_replace_push_alerts() {
+        let old = stops(&Shown::default());
+        assert!(ids(&old).contains(&"push-alerts") && !ids(&old).contains(&"notify-preset"));
+        let closed = stops(&Shown { notify_shown: true, notify_customize: true, ..Shown::default() });
+        let at = |all: &[Stop], id: &str| all.iter().position(|s| s.id == id);
+        assert_eq!(at(&closed, "push-alerts"), None);
+        assert_eq!(at(&closed, "notify-customize"), at(&closed, "notify-preset").map(|i| i + 1));
+        let open = stops(&Shown { notify_shown: true, notify: 2, ..Shown::default() });
+        assert_eq!(at(&open, "notify:0"), at(&open, "notify-preset").map(|i| i + 1));
+        assert!(ids(&open).contains(&"notify:1") && !ids(&open).contains(&"notify-customize"));
     }
 }

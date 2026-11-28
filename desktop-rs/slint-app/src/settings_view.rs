@@ -201,6 +201,16 @@ pub fn open(app: &App, window: &AppWindow) {
     watch_pressure();
 }
 
+/// Opens the surface at the first of `ids` it lists (a popup's Settings
+/// opens at NOTIFICATIONS).
+pub fn open_at(app: &App, window: &AppWindow, ids: &[&str]) {
+    open(app, window);
+    let rows = window.get_setting_rows();
+    if let Some(at) = ids.iter().find_map(|id| rows.iter().position(|r| r.id == *id)) {
+        window.set_setting_current(at as i32);
+    }
+}
+
 thread_local! {
     static PRESSURE_READ: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }

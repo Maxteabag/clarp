@@ -1883,7 +1883,7 @@ fn desktop_check(out: String) {
     fn send(event: serde_json::Value) {
         check(control("/__control/event", &event).is_ok(), &format!("the Host sends {}", event["notification_id"]));
     }
-    let (out2, out3) = (out.clone(), out.clone());
+    let (out2, out3, out4) = (out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, elapsed| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -1903,7 +1903,7 @@ fn desktop_check(out: String) {
             }
             check(shown[0]["title"].as_str().is_some_and(|t| t.contains("Rachel")) && shown[0]["body"] == "Echo from Rachel", &format!("a reply in a chat that is not open is notified: {shown:?}"));
             check(shown[0]["category"] == "im.received" && shown[0]["session"] == "rachel", &format!("as a message from the chat: {}", shown[0]));
-            check(shown[0]["actions"] == serde_json::json!(["default", "mark-read"]), &format!("with Open and Mark read: {}", shown[0]["actions"]));
+            check(shown[0]["actions"] == serde_json::json!(["default", "mark-read", "mute", "settings"]), &format!("with Open, Mark read, Mute and Settings: {}", shown[0]["actions"]));
             headless::type_text("x");
             true
         })),
@@ -1939,7 +1939,7 @@ fn desktop_check(out: String) {
             let bodies: Vec<&str> = shown.iter().filter_map(|n| n["body"].as_str()).collect();
             check(bodies == ["Echo from Rachel", "Second reply", "Ship it?"], &format!("one popup per id, none the Host turned off, read or on screen: {bodies:?}"));
             check(shown[1]["replaces"] == true && shown[1]["message_id"] == "m-pn-2", &format!("a newer reply replaces the chat's popup and opens at its message: {}", shown[1]));
-            check(shown[2]["actions"] == serde_json::json!(["default", "mark-read", "choice:a", "choice:b"]), &format!("a question's answers are buttons: {}", shown[2]["actions"]));
+            check(shown[2]["actions"] == serde_json::json!(["default", "choice:a", "choice:b", "mark-read", "mute", "settings"]), &format!("a question's answers are its first buttons: {}", shown[2]["actions"]));
             check(shown[2]["sound"] == false, "no sound while Sound is off");
             check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read on another device");
             true
@@ -1979,14 +1979,30 @@ fn desktop_check(out: String) {
             true
         })),
         ("contact", Box::new(move |_, window, elapsed| {
-            let events = window.global::<crate::ProfileBridge>().get_notify_events();
+            let bridge = window.global::<crate::ProfileBridge>();
+            let events = bridge.get_notify_events();
             if events.row_count() == 0 || elapsed < Duration::from_millis(400) {
                 return false;
             }
+            let info = bridge.get_info();
+            check(info.notify_shown && info.notify_preset == 3, &format!("a contact with its own choices is Custom: {}", info.notify_preset));
             let reply = events.iter().find(|e| e.id == "reply");
             check(reply.as_ref().is_some_and(|e| e.index == 2), "the contact's profile shows Replies off");
             check(events.iter().any(|e| e.id == "job_done" && e.index == 0 && e.choices.row_data(0).is_some_and(|c| c.contains("Off"))), "and Default naming the owner's choice");
-            shot(&out2, "desktop-notifications-contact");
+            shot(&out2, "desktop-notifications-contact-custom");
+            bridge.invoke_set_notify_preset(1);
+            true
+        })),
+        ("preset", Box::new(move |app, window, elapsed| {
+            let needs_me = app.engine.borrow().notification_settings().is_some_and(|s| s.preset("a1", false) == clarp_core::notify_events::Preset::NeedsMe);
+            let info = window.global::<crate::ProfileBridge>().get_info();
+            if !needs_me || info.notify_preset != 1 || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            let last = posts("/notification-settings").last().cloned().unwrap_or_default();
+            check(last["body"]["events"]["needs_you"] == true && last["body"]["events"]["failed"] == true && last["body"]["events"]["update"] == false,
+                  &format!("Only when it needs me sets the contact's choices on the Host: {}", last["body"]));
+            shot(&out3, "desktop-notifications-contact");
             headless::press(slint::platform::Key::Escape);
             true
         })),
@@ -1994,11 +2010,13 @@ fn desktop_check(out: String) {
             let mut pressed = false;
             move |_, window, elapsed| {
                 if window.get_surface() == "settings" {
+                    let current = window.get_setting_rows().row_data(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
+                    check(current == "notify-reply", &format!("a popup's Settings opens the notification settings: {current}"));
                     return true;
                 }
                 // Once, after the profile has closed.
                 if !pressed && elapsed > Duration::from_millis(300) {
-                    headless::press_with(&[slint::platform::Key::Control], ",");
+                    crate::platform::desktop::act_on("rachel", "", "", "", "settings");
                     pressed = true;
                 }
                 false
@@ -2016,7 +2034,7 @@ fn desktop_check(out: String) {
             check(section.is_some() && order.iter().all(|i| i.is_some_and(|i| Some(i) > section)) && order.windows(2).all(|w| w[0] < w[1]),
                   &format!("NOTIFICATIONS lists the Host's events, then this computer's switches: {order:?} after {section:?}"));
             check(rows.iter().find(|r| r.id == "notify-job-done").is_some_and(|r| !r.on), "a background job is off by default");
-            shot(&out3, "desktop-notifications-settings");
+            shot(&out4, "desktop-notifications-settings");
             true
         })),
     ];
