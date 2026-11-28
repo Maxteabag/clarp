@@ -5,6 +5,9 @@
 //! the explorer and the switcher say the list is stale instead of a banner.
 
 use std::time::{Duration, SystemTime};
+use clarp_core::tr;
+
+// i18n-screen: chat list
 
 /// Waits between a failed snapshot and the next try; the last repeats.
 pub const RETRY_SCHEDULE: [Duration; 5] =
@@ -104,8 +107,10 @@ impl State {
     /// 14:02 · retrying"); empty unless stale. `clock` writes a time.
     pub fn note(&self, clock: impl Fn(SystemTime) -> String) -> String {
         match self {
-            State::Stale { since: Some(since), .. } => format!("Agent list from {} · retrying", clock(*since)),
-            State::Stale { since: None, .. } => "Agent list not loaded yet · retrying".to_owned(),
+            // i18n: chat list, quiet note: the agent list is old and being read again; {} is the time it was last read ("14:02")
+            State::Stale { since: Some(since), .. } => tr!("Agent list from {} · retrying", clock(*since)),
+            // i18n: chat list, quiet note: the agent list has not loaded and is being read again
+            State::Stale { since: None, .. } => tr!("Agent list not loaded yet · retrying"),
             _ => String::new(),
         }
     }
@@ -114,8 +119,13 @@ impl State {
     pub fn detail(&self) -> String {
         match self {
             State::Stale { reason, failures, .. } => {
-                let times = if *failures == 1 { "once".to_owned() } else { format!("{failures} times") };
-                format!("Refreshing the agent list failed {times}: {reason}")
+                if *failures == 1 {
+                    // i18n: chat list, tooltip of the stale-list note: the last refresh failed once; {} is the reason
+                    tr!("Refreshing the agent list failed once: {}", reason)
+                } else {
+                    // i18n: chat list, tooltip of the stale-list note: how many refreshes failed; {0} is the count (2 or more), {1} the reason
+                    tr!("Refreshing the agent list failed {0} times: {1}", failures, reason)
+                }
             }
             _ => String::new(),
         }

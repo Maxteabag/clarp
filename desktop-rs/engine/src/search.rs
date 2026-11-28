@@ -15,6 +15,7 @@ use clarp_core::protocol;
 use serde_json::Value;
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 enum CacheRead {
@@ -326,8 +327,10 @@ impl Engine {
         host.pending = false;
         host.answered = true;
         host.error = match status {
-            403 if message.contains("bound_conversation") || message.contains("bound") => "this chat's words are not searched for this device".to_owned(),
-            0 => format!("could not be reached ({message})"),
+            // i18n: search results, after a Host's name: its chat is kept from this device's search (lowercase)
+            403 if message.contains("bound_conversation") || message.contains("bound") => tr!("this chat's words are not searched for this device"),
+            // i18n: search results, after a Host's name: the Host did not answer; {} is the error (lowercase)
+            0 => tr!("could not be reached ({})", message),
             _ => message.to_owned(),
         };
         self.changes.push(Change::Search);

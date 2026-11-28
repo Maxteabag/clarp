@@ -8,6 +8,9 @@ use serde_json::{Value, json};
 use url::Url;
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: pairing
 
 impl Engine {
     pub fn has_stored_credential(&self) -> bool {
@@ -90,12 +93,14 @@ impl Engine {
     pub fn pair_device(&mut self, url: &str, code: &str) {
         let code = code.trim().to_owned();
         if code.is_empty() {
-            self.set_error("Enter the one-time pairing code");
+            // i18n: pairing dialog, error: the code field is empty
+            self.set_error(&tr!("Enter the one-time pairing code"));
             return;
         }
         self.set_base_url(url);
         let Some(endpoint) = Url::parse(&self.base_url).ok().filter(|u| u.host_str().is_some_and(|h| !h.is_empty())) else {
-            self.set_error("Enter a valid Clarp server URL");
+            // i18n: pairing dialog, error: the Host address is not a web address
+            self.set_error(&tr!("Enter a valid Clarp server URL"));
             return;
         };
         self.token.clear();

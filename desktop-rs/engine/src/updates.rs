@@ -13,6 +13,9 @@ use clarp_net::SseSignal;
 use serde_json::{Value, json};
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: updates
 
 /// Attention, jobs and artifacts follow the sidebar instead of competing
 /// with it for the Host on a cold start.
@@ -665,8 +668,9 @@ impl Engine {
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
             if let Some(job_id) = action.strip_prefix("job:") {
-                let outcome = if object.get("changed") == Some(&Value::Bool(false)) { "Already stopped" } else { "Stopped" };
-                self.updates.job_outcomes.insert(job_id.to_owned(), outcome.into());
+                // i18n: processes, outcome beside a background job after Stop: it had already ended, or it is now stopped (past participle)
+                let outcome = if object.get("changed") == Some(&Value::Bool(false)) { tr!("Already stopped") } else { tr!("job" => "Stopped") };
+                self.updates.job_outcomes.insert(job_id.to_owned(), outcome);
                 self.changes.push(Change::Processes);
             }
             self.changes.push(Change::Updates);
@@ -684,7 +688,8 @@ impl Engine {
                 && json::string(object, "submission_id") == submission
                 && json::string(object, "artifact_id") == artifact
                 && object.get("version").map(Value::to_string).as_deref() == Some(version);
-            let status = if echoed { "Answers accepted".to_owned() } else { "Not sent: the Host's receipt did not match these answers".to_owned() };
+            // i18n: card status after sending answers: accepted, or refused because the Host's receipt differs
+            let status = if echoed { tr!("Answers accepted") } else { tr!("Not sent: the Host's receipt did not match these answers") };
             self.updates.artifact_status.insert(artifact.to_owned(), status);
             self.changes.push(Change::Updates);
         } else {
@@ -756,18 +761,21 @@ impl Engine {
             self.updates.pending_actions.remove(action);
             self.updates.error = detail.to_owned();
             if let Some(job_id) = action.strip_prefix("job:") {
-                self.updates.job_outcomes.insert(job_id.to_owned(), format!("Not stopped: {detail}"));
+                // i18n: processes, outcome beside a background job whose Stop failed; {} is the reason
+                self.updates.job_outcomes.insert(job_id.to_owned(), tr!("Not stopped: {}", detail));
                 self.changes.push(Change::Processes);
             }
             self.changes.push(Change::Updates);
         } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
             let (artifact, decision) = rest.split_once('|').unwrap_or((rest, ""));
             self.updates.pending_actions.remove(&format!("decision:{decision}"));
-            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
+            // i18n: card status: the answer or decision was not sent; {} is the reason
+            self.updates.artifact_status.insert(artifact.to_owned(), tr!("Not sent: {}", detail));
             self.changes.push(Change::Updates);
         } else if let Some(rest) = tag.strip_prefix("form-submit:") {
             let artifact = rest.split('|').next().unwrap_or_default();
-            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
+            // i18n: card status: the form's answers were not sent; {} is the reason
+            self.updates.artifact_status.insert(artifact.to_owned(), tr!("Not sent: {}", detail));
             self.changes.push(Change::Updates);
         } else {
             return false;

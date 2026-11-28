@@ -16,6 +16,9 @@ use clarp_core::update_feeds;
 use serde_json::Value;
 
 use crate::{Change, Engine};
+use clarp_core::tr;
+
+// i18n-screen: artifacts
 
 /// Images asked for per page (`GET /media`).
 pub const MEDIA_PAGE: usize = 60;
@@ -60,15 +63,22 @@ impl Kind {
     }
 
     /// The filter's label.
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Kind::Image => "Images",
-            Kind::Video => "Videos",
-            Kind::Audio => "Audio",
-            Kind::Document => "Documents",
-            Kind::Data => "Data",
-            Kind::Decision => "Decisions",
-            Kind::Other => "Other",
+            // i18n: artifacts gallery, filter chip: pictures (plural noun)
+            Kind::Image => tr!("Images"),
+            // i18n: artifacts gallery, filter chip: videos (plural noun)
+            Kind::Video => tr!("Videos"),
+            // i18n: artifacts gallery, filter chip: audio files (noun)
+            Kind::Audio => tr!("Audio"),
+            // i18n: artifacts gallery, filter chip: documents (plural noun)
+            Kind::Document => tr!("Documents"),
+            // i18n: artifacts gallery, filter chip: tables and charts (noun)
+            Kind::Data => tr!("Data"),
+            // i18n: artifacts gallery, filter chip: decision cards (plural noun)
+            Kind::Decision => tr!("Decisions"),
+            // i18n: artifacts gallery, filter chip: everything else (noun)
+            Kind::Other => tr!("filter" => "Other"),
         }
     }
 }
@@ -262,7 +272,8 @@ fn from_media(row: &Value) -> Option<Publication> {
     Some(Publication {
         key: format!("media:{id}"),
         kind: kind_of("", mime),
-        title: [caption, name].into_iter().find(|t| !t.is_empty()).unwrap_or("Image").to_owned(),
+        // i18n: artifacts gallery, title of a picture with no caption or file name (noun)
+        title: [caption, name].into_iter().find(|t| !t.is_empty()).map_or_else(|| tr!("Image"), str::to_owned),
         summary: if caption.is_empty() { String::new() } else { name.to_owned() },
         artifact_type: String::new(),
         mime_type: mime.to_owned(),
@@ -286,7 +297,8 @@ fn from_artifact(row: &Value) -> Option<Publication> {
     let mime = text(row, "mime_type");
     let asset = media_link(row).unwrap_or_default();
     let file_name = text(row, "file_name");
-    let title = [text(row, "title"), file_name].into_iter().find(|t| !t.is_empty()).unwrap_or("Artifact");
+    // i18n: artifacts gallery, title of an artifact with no title or file name (noun: something an agent published)
+    let title = [text(row, "title"), file_name].into_iter().find(|t| !t.is_empty()).map_or_else(|| tr!("Artifact"), str::to_owned);
     Some(Publication {
         key: if asset.is_empty() { format!("artifact:{id}") } else { format!("media:{asset}") },
         kind: kind_of(kind_name, mime),

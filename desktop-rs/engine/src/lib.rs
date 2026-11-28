@@ -630,7 +630,8 @@ impl Engine {
         on_peer!(self.peer_ref(session), |engine, local| engine.chat_name(local));
         if session.starts_with("pair:") {
             let title = self.room(session).map(|r| json::string(r, "title")).unwrap_or_default();
-            return if title.is_empty() { "Agent conversation".into() } else { title };
+            // i18n: chat title of a conversation between agents that has no title of its own
+            return if title.is_empty() { clarp_core::tr!("Agent conversation") } else { title };
         }
         self.roster.find(session).map_or_else(|| session.to_owned(), |a| display_name(a).to_owned())
     }
@@ -944,7 +945,8 @@ impl Engine {
         let endpoint = match Url::parse(&self.base_url) {
             Ok(url) if url.host_str().is_some_and(|h| !h.is_empty()) => url,
             _ => {
-                self.set_error("Enter a valid Clarp server URL");
+                // i18n: pairing dialog, error: the Host address is not a web address
+                self.set_error(&clarp_core::tr!("Enter a valid Clarp server URL"));
                 return;
             }
         };

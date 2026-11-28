@@ -187,7 +187,8 @@ impl Engine {
             return true;
         }
         if tag.starts_with("agent-coordination:") {
-            self.set_error(&format!("Could not change messages between agents: {detail}"));
+            // i18n: error banner: the chat's messages-between-agents choice was not saved; {} is the Host's reason
+            self.set_error(&clarp_core::tr!("Could not change messages between agents: {}", detail));
             self.request_snapshot();
             return true;
         }

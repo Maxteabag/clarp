@@ -15,6 +15,9 @@ use clarp_core::settings::Settings;
 use serde_json::{Value, json};
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: errors
 
 /// Snapshots asked for while a created session is awaited, before the
 /// launch says it is still loading.
@@ -195,11 +198,13 @@ impl Engine {
         use clarp_core::catalog::{ANTIGRAVITY_ACP, LEGACY_ANTIGRAVITY};
 
         if backend == LEGACY_ANTIGRAVITY {
-            self.set_error("Choose a backend in New Session");
+            // i18n: error banner: the agent's backend can no longer start sessions; the user picks another in the New Session dialog
+            self.set_error(&tr!("Choose a backend in New Session"));
             return false;
         }
         if backend == ANTIGRAVITY_ACP && !self.backend_options().iter().any(|choice| choice["id"] == backend) {
-            self.set_error("Antigravity is unavailable for new sessions on this Host");
+            // i18n: error banner when starting an agent (Antigravity is a product name)
+            self.set_error(&tr!("Antigravity is unavailable for new sessions on this Host"));
             return false;
         }
         true
@@ -442,12 +447,14 @@ impl Engine {
             return false;
         }
         if !self.connected {
-            self.set_error("Connect to the Host before starting a contact");
+            // i18n: error banner: a contact (a saved agent persona) cannot start while the Host is not connected
+            self.set_error(&tr!("Connect to the Host before starting a contact"));
             return false;
         }
         let wanted = name.trim().to_lowercase();
         let Some(contact) = self.launch.contacts.iter().find(|c| c.name.to_lowercase() == wanted).map(|c| c.name.clone()) else {
-            self.set_error("This contact is no longer idle; choose its existing chat");
+            // i18n: error banner: the contact already has a running chat
+            self.set_error(&tr!("This contact is no longer idle; choose its existing chat"));
             return false;
         };
         let backend = backend.trim();
@@ -473,7 +480,8 @@ impl Engine {
         }
         let (name, directory, backend) = (name.trim(), working_directory.trim(), backend.trim());
         if name.is_empty() || directory.is_empty() || backend.is_empty() {
-            self.set_error("Name, workspace, and backend are required");
+            // i18n: New Session dialog, error: a field is empty
+            self.set_error(&tr!("Name, workspace, and backend are required"));
             return;
         }
         if !self.check_launch_backend(backend) {
@@ -529,7 +537,8 @@ impl Engine {
         if session.is_empty() {
             self.launch.starting_contact.clear();
             self.changes.push(Change::Launch);
-            self.set_error("The Host did not return the new agent's session.");
+            // i18n: error banner after starting an agent: the Host's answer lacked the new session
+            self.set_error(&tr!("The Host did not return the new agent's session."));
             return;
         }
         let created = json::object(object, "agent");
@@ -569,7 +578,8 @@ impl Engine {
             if self.launch.created_snapshot_attempts <= CREATED_SNAPSHOT_ATTEMPTS {
                 self.after(CREATED_SNAPSHOT_RETRY, Message::CreatedAgentDue(expected));
             } else {
-                self.set_error("Your new agent is still loading. Press Enter to retry.");
+                // i18n: error banner: the new agent is not ready yet (Enter is the keyboard key)
+                self.set_error(&tr!("Your new agent is still loading. Press Enter to retry."));
             }
             return true;
         }
@@ -703,7 +713,8 @@ impl Engine {
     pub fn assign_contact(&mut self, session: &str, mode: &str, name: &str) {
         on_peer!(self.peer_mut(session), |engine, local| engine.assign_contact(local, mode, name));
         if session.is_empty() || !self.connected {
-            self.set_error("Connect and select an agent before assigning a contact");
+            // i18n: error banner: assigning a contact needs a connected Host and a chosen agent
+            self.set_error(&tr!("Connect and select an agent before assigning a contact"));
             return;
         }
         self.set_error("");
@@ -735,7 +746,8 @@ impl Engine {
         on_peer!(self.peer_mut(session), |engine, local| engine.open_agent_terminal(local));
         let Some(agent) = self.roster.find(session).cloned() else { return };
         let Some(bridge) = terminal_bridge() else {
-            self.set_error("Could not find this desktop's own program to open the terminal");
+            // i18n: error banner: the agent's terminal could not open
+            self.set_error(&tr!("Could not find this desktop's own program to open the terminal"));
             return;
         };
         let directory = self
@@ -749,7 +761,8 @@ impl Engine {
         let command = TerminalCommand { program: launcher, arguments: launch_arguments, directory };
         if let Err(error) = (self.launch.terminal)(&command) {
             eprintln!("Engine: could not start {}: {error}", command.program);
-            self.set_error(if xdg { "Could not start the default terminal" } else { "No default terminal launcher was found" });
+            // i18n: error banner: the computer's terminal app could not be started for the agent's terminal
+            self.set_error(&if xdg { tr!("Could not start the default terminal") } else { tr!("No default terminal launcher was found") });
         }
     }
 
