@@ -1187,20 +1187,21 @@ body.chat-open .status { display: none !important; }
   word-break: break-word;
   overflow-x: auto;
 }
-/* A fenced code block (web/src/lib/blocks.js): a thin line above the code
-   with the fence's language and a copy icon, then the code, which scrolls
-   sideways and is never covered. A tap or click opens it full screen. */
+/* A fenced code block (web/src/lib/blocks.js): a header row (the language,
+   then Copy and Expand icons) split from the code by a hairline, then the
+   code, which scrolls sideways and is never covered. The highlight theme is
+   a dark one, so code keeps its dark ground in the light theme too. */
 .turn .body .code-block {
-  margin: 4px 0;
-  /* The highlight theme is a dark one, so code keeps a dark ground in the
-     light theme too (in the dark theme this is what the old tint gave). */
+  margin: 8px 0;
   background: #14141d;
   color: #a9b1d6;
-  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, .07);
+  border-radius: 8px;
   overflow: hidden;
 }
 .turn .body .code-block > pre {
   margin: 0;
+  padding: 10px 14px 12px;
   background: transparent;
   border-radius: 0;
   white-space: pre;
@@ -1213,47 +1214,58 @@ body.chat-open .status { display: none !important; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 26px;
-  padding: 0 2px 0 10px;
-  border-bottom: 1px solid rgba(255, 255, 255, .06);
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 4px 0 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, .08);
 }
-.turn .body .table-block > .blk-head .blk-btn { color: var(--washi-low); }
-.turn .body .table-block > .blk-head .blk-btn:hover { color: var(--washi); }
 .turn .body .blk-lang {
-  font: 400 11px/1 var(--font-mono);
-  color: #737aa2;
-  letter-spacing: .02em;
+  min-width: 0;
+  font: 500 14px/1.2 var(--font-body);
+  color: #c0caf5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.turn .body .blk-actions { display: flex; flex: none; }
 .turn .body .blk-btn {
   flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   background: transparent;
-  color: #737aa2;
+  color: #9aa5ce;
   cursor: pointer;
 }
-.turn .body .blk-btn svg { width: 15px; height: 15px; }
-.turn .body .blk-btn:hover { color: #c0caf5; }
+.turn .body .blk-btn svg { width: 17px; height: 17px; }
+.turn .body .blk-btn:hover { color: #c0caf5; background: rgba(255, 255, 255, .06); }
+.turn .body .blk-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .turn .body .blk-btn.copied { color: #9ece6a; }
-/* A table's line holds only the expand icon, and only when the table is
-   wider than the message. */
+/* A finger needs a full-size target. */
+@media (pointer: coarse) {
+  .turn .body .blk-head { min-height: 44px; padding-right: 0; }
+  .turn .body .blk-lang { font-size: 15px; }
+  .turn .body .blk-btn { width: 44px; height: 44px; }
+  .turn .body .blk-btn svg { width: 19px; height: 19px; }
+}
+/* A table's row holds only the expand icon, and only when the table is wider
+   than the message. */
 .turn .body .table-block { margin: 6px 0; }
 .turn .body .table-block > .blk-head {
   display: none;
   justify-content: flex-end;
+  min-height: 0;
   border-bottom: 0;
   padding: 0;
 }
 .turn .body .table-block.wide > .blk-head { display: flex; }
+.turn .body .table-block > .blk-head .blk-btn { color: var(--washi-low); }
+.turn .body .table-block > .blk-head .blk-btn:hover { color: var(--washi); background: transparent; }
 .turn .body .table-block > .table-wrap { margin: 0; }
 .turn .body pre code {
   background: transparent;
