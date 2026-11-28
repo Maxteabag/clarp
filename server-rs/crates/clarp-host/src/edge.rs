@@ -5151,12 +5151,11 @@ fn expected_queue_turn(
     member: &Member,
     waiting: &clarp_actor::Waiting,
 ) -> Result<ExpectedTurn, ApiError> {
-    use std::num::NonZeroU64;
     #[derive(Deserialize)]
     struct Binding {
         server_id: String,
         agent_id: String,
-        turn_id: NonZeroU64,
+        turn_id: u64,
     }
     #[derive(Deserialize)]
     struct Request {
@@ -5194,12 +5193,16 @@ fn expected_queue_turn(
     let Some(binding) = request.expected_turn else {
         return Ok(ExpectedTurn::Omitted);
     };
-    if binding.agent_id.trim().is_empty() || binding.server_id.trim().is_empty() {
+    let turn = clarp_kernel::turn::TurnId(binding.turn_id);
+    if clarp_actor::queue_action_turn_id(turn).is_none()
+        || binding.agent_id.trim().is_empty()
+        || binding.server_id.trim().is_empty()
+    {
         return Err(invalid());
     }
     Ok(
         if binding.server_id == app.server_id && binding.agent_id == member.record.agent_id {
-            ExpectedTurn::Here(clarp_kernel::turn::TurnId(binding.turn_id.get()))
+            ExpectedTurn::Here(turn)
         } else {
             ExpectedTurn::OtherScope
         },

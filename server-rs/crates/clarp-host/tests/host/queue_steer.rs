@@ -281,6 +281,8 @@ fn queue_actions_bind_to_the_displayed_journal_turn_across_replacement() {
     for action in ["steer", "take-over"] {
         let before = queue();
         for bad in [
+            json!({"agent_id":a["agent_id"],"server_id":a["server_id"],"turn_id":1u64 << 63}),
+            json!({"agent_id":a["agent_id"],"server_id":a["server_id"],"turn_id":0}),
             Value::Null,
             json!(false),
             json!({}),
@@ -299,7 +301,9 @@ fn queue_actions_bind_to_the_displayed_journal_turn_across_replacement() {
         }
         let mut other_host = a.clone();
         other_host["server_id"] = json!("somewhere-else");
-        for wrong in [&other_binding, &other_host] {
+        let mut max = a.clone();
+        max["turn_id"] = json!(i64::MAX);
+        for wrong in [&other_binding, &other_host, &max] {
             let (status, refused) = host.ask(
                 "POST",
                 &format!("/turn-queue/q/{action}"),
@@ -340,6 +344,7 @@ fn queue_actions_bind_to_the_displayed_journal_turn_across_replacement() {
             &format!("/turn-queue/q/{action}"),
             Some(&json!({"expected_turn":a})),
         );
+        eprintln!("POST /turn-queue/q/{action} HTTP {status} {refused}");
         assert_eq!(
             (status, &refused["code"]),
             (409, &json!("stale_turn")),

@@ -143,8 +143,7 @@ With feature `queue_action_expected_turn` (Host contract 221), a client can bind
 either action to the running primary turn the user sees. Keep the complete
 `turn.queue_action_binding` from that chat's `GET /live?session=<agent>` in the
 current Host, agent and visit. Send it as `{"expected_turn": <binding>}`.
-The object contains `server_id`, `agent_id` and a positive numeric journal
-`turn_id`. The outer live turn's `turn_id` can be a caller-supplied trace.
+The object contains `server_id`, `agent_id` and journal `turn_id` in the inclusive integer range 1 to 9223372036854775807. The outer live turn's `turn_id` can be a caller-supplied trace.
 Discard the saved binding when the displayed turn changes or ends, when leaving
 the chat, and on resume or reconnect. Read a fresh live snapshot before enabling
 a guarded action again. An ended or foreign binding returns 409 `stale_turn`.
