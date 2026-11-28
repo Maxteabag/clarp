@@ -13,6 +13,9 @@ case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget)
 # desktop reports presence, which needs an unlocked login session: its own,
 # not the machine's (a CI runner has none).
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked
+# notify-daemon sends popups over D-Bus to its own slow daemon on the
+# private bus, not into the notification log.
+[ "$name" = notify-daemon ] && export CLARP_TEST_NOTIFY_DAEMON=1
 # The null sink "plays" a clip this long, so a check can pause it.
 case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
 # roster-stale lets a slow snapshot time out in 1.5 s, not a minute.

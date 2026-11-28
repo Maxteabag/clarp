@@ -36,7 +36,7 @@ env:
     scrollbar transcript scroll scroll-paint scroll-flash scroll-shake scroll-jump row-overlap composer live quiet-chat agent-messages conversation-view audience-flip a2a receipts
     artifacts artifact-open artifact-summary form-events render-spec artifact-keys link-hints keymap switcher panes sidebar banner
     layout-warning updates settings language themes fonts startup refocus avatars message-search host-search select-text mention customize chat-zoom
-    send desktop vim processes roster-stale roster-rows stop-receipt composer-buttons stalled-turn pair narrow explorer all-hosts backend-row kept-processes
+    send desktop notify-daemon vim processes roster-stale roster-rows stop-receipt composer-buttons stalled-turn pair narrow explorer all-hosts backend-row kept-processes
 
 jobs:
   test:

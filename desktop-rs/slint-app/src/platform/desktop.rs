@@ -451,8 +451,18 @@ pub fn window_focused() -> bool {
     std::env::var_os("CLARP_TEST_FOREGROUND").is_some() || SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.focused))
 }
 
+/// A check's own notification daemon on its private bus
+/// (`CLARP_TEST_NOTIFY_DAEMON`): popups go over D-Bus as on a desktop, tray
+/// or not, instead of into `CLARP_TEST_NOTIFY_LOG`.
+pub fn test_daemon() -> bool {
+    std::env::var_os("CLARP_TEST_NOTIFY_DAEMON").is_some()
+}
+
 /// Records what a check asked of the desktop instead of showing it.
 fn test_log(line: serde_json::Value) -> bool {
+    if test_daemon() {
+        return false;
+    }
     let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") else { return false };
     use std::io::Write;
     let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{line}"));
@@ -472,7 +482,7 @@ pub fn notify(note: Note) {
     }));
     if logged {
         // A check's popup is kept as shown, so the next of its chat replaces it.
-        remember(Shown { id: 0, session: note.session, message_id: note.message_id, decision_id: note.decision_id, response_type: note.response_type });
+        remember(shown_of(&note, 0));
         return;
     }
     #[cfg(target_os = "macos")]
@@ -491,7 +501,9 @@ pub fn close_decision(decision_id: &str) {
     close_where(|s| s.decision_id == decision_id, serde_json::json!({"closed_decision": decision_id}));
 }
 
-/// Closes the popups `which` picks (`logged` is what a check records).
+/// Closes the popups `which` picks (`logged` is what a check records). A
+/// popup still on its way is closed as soon as the desktop names it, and a
+/// popup waiting behind it that `which` picks is not sent.
 fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
@@ -499,7 +511,22 @@ fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
         *shown = kept;
         gone
     });
-    if gone.is_empty() {
+    #[cfg(not(target_os = "macos"))]
+    let in_flight = IN_FLIGHT.with(|flights| {
+        let mut any = false;
+        for flight in flights.borrow_mut().iter_mut() {
+            if which(&flight.popup) {
+                (flight.close, flight.next) = (true, None);
+                any = true;
+            } else if flight.next.as_ref().is_some_and(|next| which(&shown_of(next, 0))) {
+                flight.next = None;
+            }
+        }
+        any
+    });
+    #[cfg(target_os = "macos")]
+    let in_flight = false;
+    if gone.is_empty() && !in_flight {
         return;
     }
     if test_log(logged) {
@@ -507,18 +534,32 @@ fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
     }
     #[cfg(not(target_os = "macos"))]
     for popup in gone {
-        runtime::handle().spawn(async move {
-            let closed = async {
-                let connection = zbus::Connection::session().await?;
-                connection
-                    .call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some(NOTIFICATIONS), "CloseNotification", &(popup.id,))
-                    .await
-            };
-            if let Err(error) = closed.await {
-                eprintln!("clarp-slint: could not close a notification: {error}");
-            }
-        });
+        close_notification(popup.id);
     }
+}
+
+/// What a popup is for, as kept once the desktop has named it `id`.
+fn shown_of(note: &Note, id: u32) -> Shown {
+    Shown {
+        id,
+        session: note.session.clone(),
+        message_id: note.message_id.clone(),
+        decision_id: note.decision_id.clone(),
+        response_type: note.response_type.clone(),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn close_notification(id: u32) {
+    runtime::handle().spawn(async move {
+        let closed = async {
+            let connection = zbus::Connection::session().await?;
+            connection.call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some(NOTIFICATIONS), "CloseNotification", &(id,)).await
+        };
+        if let Err(error) = closed.await {
+            eprintln!("clarp-slint: could not close a notification: {error}");
+        }
+    });
 }
 
 /// The popup's buttons as the desktop takes them: key, label, key, label.
@@ -609,6 +650,19 @@ const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
 thread_local! {
     /// The buttons are listened to once the first popup is shown.
     static LISTENING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// The chats whose Notify is on its way: one at a time per chat, as only
+    /// its answer names the popup a newer one replaces or a close takes down.
+    static IN_FLIGHT: RefCell<Vec<InFlight>> = const { RefCell::new(Vec::new()) };
+}
+
+/// A chat's Notify on its way, and what came for the chat meanwhile: the
+/// newest popup, sent once the id is known, or a close, done then. The
+/// later of the two wins.
+#[cfg(not(target_os = "macos"))]
+struct InFlight {
+    popup: Shown,
+    next: Option<Note>,
+    close: bool,
 }
 
 /// Through Notification Center (as Script Editor, the sender `osascript`
@@ -637,12 +691,28 @@ fn notify_macos(title: String, body: String, sound: bool) {
 #[cfg(not(target_os = "macos"))]
 fn notify_freedesktop(note: Note) {
     let has_tray = SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.tray.is_some()));
-    if !has_tray {
+    if !has_tray && !test_daemon() {
         return;
     }
     if !LISTENING.with(|l| l.replace(true)) {
         runtime::handle().spawn(listen_to_popups());
     }
+    // The chat's last Notify has not answered: this one goes once it has,
+    // replacing the popup it names.
+    let note = IN_FLIGHT.with(|flights| {
+        let mut flights = flights.borrow_mut();
+        match flights.iter_mut().find(|f| f.popup.session == note.session) {
+            Some(flight) => {
+                (flight.next, flight.close) = (Some(note), false);
+                None
+            }
+            None => {
+                flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false });
+                Some(note)
+            }
+        }
+    });
+    let Some(note) = note else { return };
     let replaces = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map_or(0, |s| s.id));
     let actions = actions(&note);
     runtime::handle().spawn(async move {
@@ -669,13 +739,36 @@ fn notify_freedesktop(note: Note) {
                 .await?;
             reply.body().deserialize::<u32>()
         };
-        match sent.await {
-            Ok(id) => later(move || {
-                remember(Shown { id, session: note.session, message_id: note.message_id, decision_id: note.decision_id, response_type: note.response_type })
-            }),
-            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
+        let answered = sent.await;
+        if let Err(error) = &answered {
+            eprintln!("clarp-slint: notification failed: {error}");
         }
+        let id = answered.ok();
+        later(move || delivered(shown_of(&note, id.unwrap_or(0)), id));
     });
+}
+
+/// The desktop answered a chat's Notify (`id`, or None when it failed):
+/// the popup is kept, or closed when a close came meanwhile, and the
+/// chat's newer popup goes next, replacing it.
+#[cfg(not(target_os = "macos"))]
+fn delivered(popup: Shown, id: Option<u32>) {
+    let flight = IN_FLIGHT.with(|flights| {
+        let mut flights = flights.borrow_mut();
+        let at = flights.iter().position(|f| f.popup.session == popup.session)?;
+        Some(flights.remove(at))
+    });
+    let close = flight.as_ref().is_some_and(|f| f.close);
+    if let Some(id) = id {
+        if close {
+            close_notification(id);
+        } else {
+            remember(popup);
+        }
+    }
+    if let Some(next) = flight.and_then(|f| f.next) {
+        notify_freedesktop(next);
+    }
 }
 
 /// Follows the popups' buttons and their closing on the session bus.
