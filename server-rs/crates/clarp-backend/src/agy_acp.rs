@@ -54,6 +54,7 @@ use clarp_child::MANAGED_AGY_ENV as MANAGED;
 
 /// The card's name.
 pub const ID: &str = "agy-acp";
+pub use shared::here as native_store;
 /// What the ids of this card's live items begin with. The turn follows it, since agy's own
 /// numbering of what it says starts again each turn ([`AcpInterpreter::shown`]).
 const SHOWN: &str = "aa";

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  normalizeBackend, resumableBackend, supportsForkBackend, catalogBackendIds,
+  normalizeBackend, resumableBackend, supportsForkBackend, catalogBackendIds, launchBackend,
   supportsResumeBackend, supportsCompactBackend, supportsMcpBackend,
   supportsSteerBackend, effortUI, backendLabel, backendDetail,
   tierForContact, allowedBackendForContact, isContactBackendAllowed,
@@ -65,7 +65,27 @@ describe('catalogue-driven chooser', () => {
       providers: { grok: { installed: false }, claude: { installed: false } },
     };
     expect(catalogBackendIds(nothingInstalled)).toEqual(['grok', 'claude']);
-    expect(catalogBackendIds(null)).toEqual(['claude', 'codex', 'agy', 'grok', 'opencode', 'deepseek', 'muse']);
+    expect(catalogBackendIds(null)).toEqual(['claude', 'codex', 'grok', 'opencode', 'deepseek', 'muse']);
+  });
+
+  it('authors ACP only where offered and waits for canonical native adoption', () => {
+    const both = { providers: {
+      agy: { available: true },
+      'agy-acp': { available: true, supports_resume: true },
+    } };
+    expect(catalogBackendIds(both)).toEqual(['agy-acp']);
+    expect(normalizeBackend('agy')).toBe('agy');
+    expect(launchBackend('agy')).toBe('agy-acp');
+    expect(launchBackend('antigravity-acp')).toBe('agy-acp');
+    expect(supportsResumeBackend('agy-acp', both)).toBe(false);
+    const supported = { providers: { 'agy-acp': {
+      available: true, supports_resume: true, past_sessions_backend: 'agy-acp',
+    } } };
+    expect(supportsResumeBackend('agy-acp', supported)).toBe(true);
+    expect(catalogBackendIds({ providers: { agy: { available: true } } })).not.toContain('agy');
+    expect(catalogBackendIds({ providers: {
+      'agy-acp': { available: false },
+    } })).not.toContain('agy-acp');
   });
 
   it('treats a missing flag as the old-Host default, never as "no"', () => {

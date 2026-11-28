@@ -38,7 +38,6 @@ use crate::{ids, wire};
 /// The tools whose sessions this Host reads.
 const CLAUDE: &str = "claude";
 const CODEX: &str = "codex";
-const AGY: &str = "agy";
 /// How many sessions of a directory are offered, and how many of every directory.
 const OF_A_DIRECTORY: usize = 20;
 const OF_EVERY_DIRECTORY: usize = 100;
@@ -54,11 +53,6 @@ pub(crate) fn projects(home: &Path) -> PathBuf {
 pub(crate) fn codex_home(home: &Path) -> PathBuf {
     let said = std::env::var_os("CODEX_HOME").filter(|said| !said.is_empty());
     said.map_or_else(|| home.join(".codex"), PathBuf::from)
-}
-
-/// Where Antigravity keeps what is its own, for a user whose home is `home`.
-fn agy_own(home: &Path) -> PathBuf {
-    home.join(clarp_backend::agy::OWN)
 }
 
 /// `GET /past-sessions?cwd=&backend=&scope=`: the sessions a tool kept in a directory
@@ -80,8 +74,8 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
     };
     let (root, codex, of) = (projects(&home), codex_home(&home), cwd.clone());
     let opencode = history::opencode::database(&home);
-    let agy = agy_own(&home);
-    let read = move || match tool.as_str() {
+    let agy = clarp_backend::agy_acp::native_store();
+    let read = move || match clarp_backend::canonical_id(&tool) {
         CODEX => {
             let index = codex.join("state_5.sqlite");
             past::codex_sessions(&codex.join("sessions"), Some(&index), &of, all, limit)
@@ -99,7 +93,7 @@ async fn listed(Query(query): Query<HashMap<String, String>>) -> Json<Value> {
             if all { "" } else { &of },
             limit,
         ),
-        AGY => past::agy_sessions(&agy, if all { "" } else { &of }, limit),
+        clarp_backend::agy_acp::ID => past::agy_sessions(&agy, if all { "" } else { &of }, limit),
         _ => past::claude_sessions(&root, &of, all, limit),
     };
     let sessions = tokio::task::spawn_blocking(read).await.unwrap_or_default();
@@ -225,7 +219,7 @@ fn read_of_opencode(named: &str) -> Option<Held> {
 /// with the Host's record of the one before, which is no part of what the user said. The
 /// transcript names no model the conversation ran on.
 fn read_of_agy(named: &str) -> Option<Held> {
-    let base = agy_own(&crate::config::home());
+    let base = clarp_backend::agy_acp::native_store();
     let transcript = std::fs::read_to_string(past::agy_transcript(&base, named)?).ok()?;
     let mut turns = history::agy(&transcript);
     for turn in &mut turns {
@@ -346,7 +340,7 @@ pub(crate) async fn begins(
         })
         .await;
     }
-    if tool.eq_ignore_ascii_case(AGY) {
+    if clarp_backend::canonical_id(&tool.to_ascii_lowercase()) == clarp_backend::agy_acp::ID {
         let forks = fork.is_some();
         return begins_where_it_ran(app, asked, resume, forks, "Antigravity", read_of_agy).await;
     }
