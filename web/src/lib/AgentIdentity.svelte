@@ -68,6 +68,6 @@
     <span
       class="history-agent-status {activityStatusClass(status.activity_status)}"
       title={activity}
-    >{#if host}<HostBadge name={host} /> · {/if}{activity}</span>
+    >{#if host}<HostBadge name={host} />{#if activity} · {/if}{/if}{activity}</span>
   </span>
 </button>
