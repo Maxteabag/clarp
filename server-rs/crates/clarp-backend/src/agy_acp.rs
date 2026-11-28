@@ -223,9 +223,9 @@ impl Backend for AgyAcp {
     fn answered(&self, printed: &str) -> Result<String, String> {
         let answer = printed
             .lines()
+            .rev()
             .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .filter(|line| line["type"] == "result")
-            .last()
+            .find(|line| line["type"] == "result")
             .ok_or_else(|| "Antigravity ACP returned no result".to_string())?;
         let text = text_of(&answer["result"]).trim();
         if answer["is_error"] == true {
