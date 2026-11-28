@@ -149,7 +149,7 @@
         <h2 class="hd-title">{title}</h2>
         <p class="hd-reason">{reasonBody(rec.reason, label, t)}</p>
         <p class="hd-meta">
-          {#if rec.lastOk}<span>{t('host_down.last_seen', { when: formatRelative(rec.lastOk, reach.now) })}</span><span class="hd-sep">·</span>{/if}
+          {#if rec.lastOk}<span>{reach.now - rec.lastOk < 60000 ? t('host_down.last_seen_now') : t('host_down.last_seen', { when: formatRelative(rec.lastOk, reach.now) })}</span><span class="hd-sep">·</span>{/if}
           <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t, formatCountdown)}</span>
         </p>
         <div class="hd-actions">

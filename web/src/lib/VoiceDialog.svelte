@@ -64,7 +64,7 @@
 {#if open}
   <div class="start-dialog">
     <div class="start-card">
-      <h3 id="voiceTitle">{t('voice.title', { name })}</h3>
+      <h3 id="voiceTitle" data-kicker={t('voice.kicker')}>{t('voice.title', { name })}</h3>
       {#if bio}<p class="voice-bio">{bio}</p>{/if}
       <ul class="voice-list">
         {#if state}

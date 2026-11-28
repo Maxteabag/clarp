@@ -255,7 +255,7 @@
 {:else if app.authRejected}
   <!-- The server is reachable and refusing every request: the saved token is
        wrong. Waiting or reconnecting cannot fix that, only a fresh link can. -->
-  <div class="reconnect auth-rejected" role="alert">
+  <div class="reconnect auth-rejected" role="alert" data-kicker={t('app.not_authorized')}>
     <span>{@html t('app.token_rejected', { command: '<code>clarp-admin url</code>' })}</span>
   </div>
 {:else if app.showReconnect}

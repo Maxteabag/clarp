@@ -1522,7 +1522,7 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
 }
 .reconnect span { font-size: 12px; color: var(--washi-low); letter-spacing: .04em; }
 .reconnect.hidden { display: none; }
-.reconnect.auth-rejected::before { content: 'Not authorized'; }
+.reconnect.auth-rejected::before { content: attr(data-kicker); }
 .reconnect.auth-rejected { max-width: 320px; }
 .reconnect.auth-rejected code { color: var(--washi); font: 12px/1.4 var(--font-mono, monospace); }
 
@@ -1806,7 +1806,7 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
   letter-spacing: .04em;
 }
 .start-card h3#startTitle::before {
-  content: 'Start';
+  content: attr(data-kicker);
   display: block;
   font: 600 10px/1 var(--font-body);
   letter-spacing: .16em;
@@ -1815,7 +1815,7 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
   margin-bottom: 6px;
 }
 .start-card h3#voiceTitle::before {
-  content: 'Voice';
+  content: attr(data-kicker);
   display: block;
   font: 600 10px/1 var(--font-body);
   letter-spacing: .16em;
@@ -1866,6 +1866,25 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
 }
 .start-field input:focus,
 .start-field select:focus { border-bottom-color: var(--washi); }
+.orchestrator-card {
+  /* The fields scroll between a fixed title and Cancel/Save, so the buttons stay on screen
+     however long the provider texts run in a language. */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.orchestrator-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 0 -22px;
+  padding: 0 22px;
+}
+.orchestrator-card .start-actions {
+  flex: none;
+  padding-top: 14px;
+  border-top: 1px solid var(--ink-edge);
+}
 .orchestrator-last {
   min-height: 54px;
   margin: 0 0 14px;

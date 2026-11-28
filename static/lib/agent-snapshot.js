@@ -90,6 +90,9 @@ function normalizeAgent(row) {
     latest_state_ts: toSeconds(row.latest_state_ts || row.ts),
     status_text: String(row.status_text || '').trim(),
     last_message: String(row.last_message || '').trim(),
+    // The preview part (feature chat_preview_parts), worded in the app's language by chat-preview.js.
+    last_message_preview: row.last_message_preview && typeof row.last_message_preview === 'object'
+      ? { ...row.last_message_preview } : null,
     conversation_id: row.conversation_id || '',
     head_revision: Number(row.head_revision) || 0,
     last_message_id: row.last_message_id || '',

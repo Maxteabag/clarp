@@ -78,7 +78,7 @@
         </button>
         {#if open}
           <ul class="lv-members">
-            {#each row.members as m (m.id)}<li class={m.status}><span class="lv-verb">{m.verb}</span> {m.label}</li>{/each}
+            {#each row.members as m (m.id)}<li class={m.status} title={m.text}><span class="lv-verb">{m.before}</span>{m.label}<span class="lv-verb">{m.after}</span></li>{/each}
           </ul>
         {/if}
       </div>

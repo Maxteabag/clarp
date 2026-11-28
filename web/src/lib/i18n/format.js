@@ -96,30 +96,44 @@ export function pluralCategory(count, locale = i18n.locale) {
   return new Intl.PluralRules(locale).select(count);
 }
 
-const durationFormats = new Map();
+// How each language writes a length of time: the CLDR unit width that reads right there and what
+// goes between the units. Narrow units read wrong outside English: nb narrow joins with a comma
+// ("1m, 34s") and hi narrow seconds "से" is also the postposition "from". Chinese writes the units
+// together ("1分钟34秒"). A language not listed gets short units with a space.
+const DURATION_STYLE = {
+  en: { width: 'narrow', sep: ' ' },
+  nb: { width: 'short', sep: ' ' },
+  es: { width: 'short', sep: ' ' },
+  fr: { width: 'short', sep: ' ' },
+  hi: { width: 'long', sep: ' ' },
+  zh: { width: 'short', sep: '' },
+};
+
+const unitFormats = new Map();
+function unitFormat(locale, unit, width) {
+  const k = `${locale}|${unit}|${width}`;
+  let f = unitFormats.get(k);
+  if (!f) { f = new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: width }); unitFormats.set(k, f); }
+  return f;
+}
+
 /**
- * A length of time: "4s", "1m 5s", "1h 2m" in English, the language's own units elsewhere
- * (`style` 'narrow' | 'short' | 'long'). Under a minute counts seconds, under an hour minutes
- * and seconds, otherwise hours and minutes. Uses Intl.DurationFormat where the browser has it,
- * else each unit through Intl.NumberFormat.
+ * A length of time: "4s", "1m 5s", "1h 2m" in English, "1 min 34 sek" in nb, "1 मिनट 34 सेकंड"
+ * in hi, "1分钟34秒" in zh-Hans. Under a minute counts seconds, under an hour minutes and seconds,
+ * otherwise hours and minutes; a zero unit after the first is left out. `style` ('narrow' |
+ * 'short' | 'long') overrides the language's unit width.
  */
-export function formatDuration(ms, style = 'narrow', locale = i18n.locale) {
+export function formatDuration(ms, style, locale = i18n.locale) {
   const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
   const m = Math.floor(s / 60);
-  const parts = s < 60 ? { seconds: s }
-    : m < 60 ? { minutes: m, seconds: s % 60 }
-    : { hours: Math.floor(m / 60), minutes: m % 60 };
-  if (typeof Intl.DurationFormat === 'function') {
-    const k = locale + style;
-    let f = durationFormats.get(k);
-    if (!f) { f = new Intl.DurationFormat(locale, { style }); durationFormats.set(k, f); }
-    return f.format(parts);
-  }
-  const unit = { hours: 'hour', minutes: 'minute', seconds: 'second' };
-  const shown = Object.entries(parts).filter(([, n]) => n);
-  return (shown.length ? shown : [['seconds', 0]])
-    .map(([u, n]) => new Intl.NumberFormat(locale, { style: 'unit', unit: unit[u], unitDisplay: style }).format(n))
-    .join(' ');
+  const parts = s < 60 ? [['second', s]]
+    : m < 60 ? [['minute', m], ['second', s % 60]]
+    : [['hour', Math.floor(m / 60)], ['minute', m % 60]];
+  const lang = DURATION_STYLE[locale] || DURATION_STYLE[String(locale).split('-')[0]] || { width: 'short', sep: ' ' };
+  const width = style || lang.width;
+  return parts.filter(([, n], i) => i === 0 || n)
+    .map(([unit, n]) => unitFormat(locale, unit, width).format(n))
+    .join(lang.sep);
 }
 
 /** "Mike, Rachel and Ida" / "Mike, Rachel og Ida": names joined as the language joins a list. */
