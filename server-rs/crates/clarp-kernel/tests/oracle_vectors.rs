@@ -151,7 +151,7 @@ fn a_call_runs_on_the_voice_the_python_host_would_run_it_on() {
     let vectors = vectors();
     let voice = &vectors["voice"];
     assert_eq!(json!(VOICE_KEY), voice["key"]);
-    assert_eq!(json!(VOICES), voice["providers"]);
+    assert_eq!(json!(&VOICES[..2]), voice["providers"]);
     assert_eq!(json!(GEMINI_MODEL), voice["usual_model"]);
     let (mut cases, mut fallen_back) = (0, 0);
     for case in voice["cases"].as_array().unwrap() {
@@ -164,6 +164,7 @@ fn a_call_runs_on_the_voice_the_python_host_would_run_it_on() {
             voice: text(settings, "voice"),
             of_oracle: settings["of_oracle"].as_str(),
             usual: text(settings, "usual"),
+            elevenlabs: None,
         };
         assert_eq!(voices.status(), case["status"], "{case}");
         assert_eq!(json!(voices.effective()), case["effective"], "{case}");
@@ -175,7 +176,8 @@ fn a_call_runs_on_the_voice_the_python_host_would_run_it_on() {
         match oracle::choose_voice(&case["value"]) {
             Ok(kept) => assert_eq!(json!(kept), case["kept"], "{case}"),
             Err(why) => {
-                assert_eq!(json!(why), case["refused"], "{case}");
+                let refused_by_reference = case["refused"].as_str().unwrap();
+                assert_eq!(why, format!("{refused_by_reference}, elevenlabs"), "{case}");
                 assert_eq!(case["kept"], Value::Null, "{case}");
                 refused += 1;
             }

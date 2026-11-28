@@ -67,7 +67,7 @@ pub mod opening_launch;
 pub(crate) mod tools;
 mod transcript;
 
-pub(crate) use live::{Voice, dial};
+pub(crate) use live::{Voice, dial, dial_at};
 
 /// What became of a request to ring, under the desk's lock.
 enum Placing {
