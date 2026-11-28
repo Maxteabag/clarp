@@ -20,6 +20,10 @@ pub struct Model {
     pub model: String,
 }
 
+fn model_key<'a>(provider: &'a str, model: &'a str) -> (&'a str, &'a str) {
+    (execution_provider(provider), model)
+}
+
 impl Policy {
     pub fn configure(
         &mut self,
@@ -81,7 +85,11 @@ impl Policy {
                     return Err(bad(&error));
                 }
             }
-            if models.iter().collect::<BTreeSet<_>>().len() != models.len() {
+            let mut seen = BTreeSet::new();
+            if models
+                .iter()
+                .any(|model| !seen.insert(model_key(&model.provider, &model.model)))
+            {
                 return Err(bad("Duplicate model"));
             }
             next.model_chain = models;
@@ -175,24 +183,34 @@ pub fn choices(primary: Pick, effective: &Value) -> (Pick, Vec<(usize, Pick)>) {
     if effective["source"] != "global" {
         return (primary, vec![]);
     }
-    let chain = effective["chain"]
+    let mut chain = effective["chain"]
         .as_array()
         .into_iter()
         .flatten()
-        .map(|row| Pick {
-            backend: row["provider"].as_str().unwrap_or_default().into(),
-            model: row["model"].as_str().unwrap_or_default().into(),
-            effort: String::new(),
+        .enumerate()
+        .map(|(index, row)| {
+            (
+                index,
+                row["provider"].as_str().unwrap_or_default(),
+                row["model"].as_str().unwrap_or_default(),
+            )
         });
-    let mut chain = chain.enumerate();
-    let Some((_, primary)) = chain.next() else {
+    let Some((_, backend, model)) = chain.next() else {
         return (primary, vec![]);
     };
+    let pick = |backend: &str, model: &str| Pick {
+        backend: backend.into(),
+        model: model.into(),
+        effort: String::new(),
+    };
+    // Historical policies can contain aliases of the same model. Preserve each
+    // surviving row's saved spelling and receipt index.
+    let mut seen = BTreeSet::from([model_key(backend, model)]);
     let alternatives = chain
-        .filter(|(_, pick)| pick != &primary)
-        .map(|(index, pick)| (index - 1, pick))
+        .filter(|&(_, backend, model)| seen.insert(model_key(backend, model)))
+        .map(|(index, backend, model)| (index - 1, pick(backend, model)))
         .collect();
-    (primary, alternatives)
+    (pick(backend, model), alternatives)
 }
 
 pub fn schema_object(text: &str, schema: &Value) -> Option<Value> {
