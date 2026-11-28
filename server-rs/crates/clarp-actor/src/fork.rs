@@ -346,8 +346,8 @@ fn read_now(
     let turn = TurnId(asked.turn);
     // Publish the predecessor's Joined and JoinRead atomically on consumption.
     // A rollback before that append sees the original untouched mailbox.
-    if let Some(join) = &asked.reservation {
-        if !batch.release_fork(turn, join)
+    if let Some(join) = &asked.reservation
+        && (!batch.release_fork(turn, join)
             || batch
                 .command(
                     Command::Join {
@@ -356,10 +356,9 @@ fn read_now(
                     },
                     t,
                 )
-                .is_err()
-        {
-            return Ok(false);
-        }
+                .is_err())
+    {
+        return Ok(false);
     }
     if batch.command(Command::JoinRead { turn }, t).is_err() {
         return Ok(false);
