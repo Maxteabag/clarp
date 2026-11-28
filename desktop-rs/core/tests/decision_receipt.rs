@@ -140,7 +140,8 @@ fn anything_else_stays_a_message() {
     assert_eq!(receipt.outcome.label(), "Resolved");
     // A clarification whose answer does not parse still says answered.
     let receipt = parse(&prompt("Q?", "", "The user answered this clarification: not json. Continue using this answer.")).unwrap();
-    assert_eq!(receipt.outcome, Outcome::Answered("Answered".into()));
+    assert_eq!(receipt.outcome, Outcome::Answered(String::new()));
+    assert_eq!(receipt.outcome.label(), "Answered");
 }
 
 /// One line of a reply or prompt for a preview (sidebar, overview,
