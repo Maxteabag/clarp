@@ -3498,11 +3498,14 @@ def main():
     parser.add_argument("--log", required=True)
     parser.add_argument("--roster", type=int, default=0)
     parser.add_argument("--peer", action="store_true")
+    parser.add_argument("--timed-row", action="store_true", help="show an ongoing turn for elapsed-time layout review")
     parser.add_argument("--rich", action="store_true")
     args = parser.parse_args()
     log_path = args.log
     if args.peer:
         become_peer()
+    if args.timed_row:
+        agents[1].update(busy=True, latest_state="thinking", turn_started_at=int(time.time() * 1000) - 399_000)
     if args.rich:
         become_rich()
     fill_roster(args.roster)

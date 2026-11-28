@@ -34,4 +34,8 @@ for screen in "${screens[@]}"; do
     name=${screen%%:*}; command=${screen#*:}
     CLARP_LANGUAGE="$lang" CLARP_SHOT_COMMAND="$command" slint-app/tests/shot.sh "$out/$name-$lang.png" rachel "$theme" || status=1
 done
+if [ "$lang" = hi ]; then
+    CLARP_LANGUAGE=hi CLARP_SHOT_NARROW_LIST=1 CLARP_FAKE_HOST_ARGS="$CLARP_FAKE_HOST_ARGS --timed-row" \
+        slint-app/tests/shot.sh "$out/narrow-elapsed-hi.png" rachel "$theme" || status=1
+fi
 exit $status

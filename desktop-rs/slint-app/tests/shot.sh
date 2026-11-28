@@ -14,7 +14,12 @@ mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
 /usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" ${CLARP_FAKE_HOST_ARGS:-} &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
-env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
+settings=off
+if [ "${CLARP_SHOT_NARROW_LIST:-}" = 1 ]; then
+    settings="$scratch/settings.json"
+    printf '%s\n' '{"layout/explorerWidth":240}' > "$settings"
+fi
+env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \

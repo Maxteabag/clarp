@@ -2079,11 +2079,11 @@ msgstr "पुराने ग्रुप करें"
 #. Settings > Tool activity, an option: how tool calls show in the chat
 #. Tool activity choice: tool calls fold into one group per turn (adjective)
 msgid "Grouped"
-msgstr "ग्रुप किया गया"
+msgstr "समूहों में"
 
 #. Settings page, section heading in capitals: the Clarp Host this window talks to; Host is the product noun
 msgid "HOST"
-msgstr "HOST"
+msgstr "Host"
 
 #. Settings page, section heading in capitals: how the Host is doing (its diagnostics); Host is the product noun
 msgid "HOST STATUS"
@@ -3093,14 +3093,14 @@ msgstr "अगला एजेंट"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens the next agent that is waiting for you.
 msgid "Next agent needing attention"
-msgstr "ध्यान चाहने वाला अगला एजेंट"
+msgstr "अगला एजेंट जिसे आपका जवाब चाहिए"
 
 #. Keys help (?), in the chat: what a key does, beside the keys of `next-attention`
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
 #. Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
 #. Vim mode, the which-key panel: what the keys "<Space> a" do in the chat and the explorer
 msgid "Next attention"
-msgstr "ध्यान देने वाला अगला"
+msgstr "अगला अनुरोध"
 
 #. chat list, accessibility label of the small numbered badge on a chat row: its place in the queue of chats that need the user's attention; {} is the number (1 is next)
 msgid "Next attention, number {}"
@@ -4043,7 +4043,7 @@ msgstr "रिसर्च"
 
 #. Start agent dialog, placeholder of the name field: an example agent name; a common first name in the language may replace it
 msgid "Rachel"
-msgstr "Priya"
+msgstr "Rachel"
 
 #. Settings > Colours, a colour setting's name, the row label (noun). What it colours: Colour of the explorer, dialogs and bars
 msgid "Raised surface"
@@ -6533,7 +6533,7 @@ msgstr "काम कर रहा है"
 
 #. chat list row stamp while the agent works; {} is how long ("6m 39s") (lowercase)
 msgid "working {}"
-msgstr "काम कर रहा है {}"
+msgstr "{} से काम कर रहा है"
 
 #. processes panel hint: x stops the job (imperative)
 msgid "x stop"
