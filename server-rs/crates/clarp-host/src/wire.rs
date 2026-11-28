@@ -2056,6 +2056,9 @@ pub fn no_conversation(cwd: &str) -> Value {
         "latest_ts": "",
         "cwd": cwd,
         "includes_automated": true,
+        // The chat list's line of a chat that has said nothing (feature `chat_preview_parts`).
+        "last_message": "",
+        "last_message_preview": null,
     })
 }
 
@@ -2968,6 +2971,10 @@ mod tests {
             (&json!(true), &json!(""))
         );
         assert!(nothing.get("file").is_none());
+        assert_eq!(
+            (&nothing["last_message"], &nothing["last_message_preview"]),
+            (&json!(""), &Value::Null)
+        );
     }
 
     #[test]
