@@ -893,10 +893,10 @@ pub static SPECS: &[Spec] = &[
     Spec {
         name: "confirmstop",
         key: "behaviour/confirmStop",
-        // i18n: Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent
+        // i18n: Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask before stopping (Ctrl+.) or releasing an agent
         label: en::tr!("Confirm stop and release"),
         // i18n: Settings page and Ctrl+K, the line under the preference “Confirm stop and release” saying what it does.
-        description: en::tr!("Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"),
+        description: en::tr!("Ask before stopping (Ctrl+.) or releasing an agent"),
         aliases: &["confirm dialogs", "are you sure", "confirmation", "safety", "prompt before stop"],
         section: BEHAVIOUR,
         kind: toggle(false),

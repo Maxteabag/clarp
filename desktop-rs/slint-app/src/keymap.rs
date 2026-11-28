@@ -169,8 +169,8 @@ fn state(name: &str) -> Vec<Binding> {
             b("switcher", &["Ctrl+K"], tr!("Commands"), true, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows or hides the explorer (sidebar)
             b("sidebar", &["Ctrl+B"], tr!("Show/hide sidebar"), false, Always, false),
-            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It the key hints along the bottom of the window.
-            b("shortcut-bar", &["Ctrl+Shift+K"], tr!("Show/hide keybindings"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows or hides the key hints along the bottom of the window.
+            b("shortcut-bar", &["Ctrl+Shift+K"], tr!("Show/hide shortcut bar"), false, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It creates a new contact and opens a chat with it.
             b("quick-new-agent", &["Ctrl+Shift+N"], tr!("New contact & chat"), false, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It changes the open contact's name.

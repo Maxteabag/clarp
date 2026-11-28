@@ -260,8 +260,8 @@ fn catalog_strings() -> Vec<String> {
         // i18n: Settings > Appearance, description of the "Teams" reading theme (font and product names stay as they are)
         tr!("Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."),
         // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
-        tr!("Teams Dark"),
-        // i18n: Settings > Appearance, description of the "Teams Dark" reading theme (font and product names stay as they are)
+        tr!("Teams dark"),
+        // i18n: Settings > Appearance, description of the "Teams dark" reading theme (font and product names stay as they are)
         tr!("Microsoft Teams dark: Segoe UI in off-white on Teams' near-black surfaces, a light lavender Teams purple and a brand-tinted own-message bubble."),
     ]
 }

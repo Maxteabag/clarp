@@ -189,7 +189,7 @@ fn empty_of(kind: Kind) -> String {
         // i18n: artifacts gallery, empty state under the Decisions filter
         Kind::Decision => tr!("No decisions from this agent"),
         // i18n: artifacts gallery, empty state under the Other filter
-        Kind::Other => tr!("No other from this agent"),
+        Kind::Other => tr!("No other artifacts from this agent"),
     }
 }
 
