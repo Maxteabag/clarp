@@ -87,7 +87,8 @@ export function untrackHost(id) {
 
 /** Runs `fn` when the Host answers again after not answering. */
 export function onRecover(id, fn) {
-  recoverHooks.set(id, fn);
+  if (!recoverHooks.has(id)) recoverHooks.set(id, new Set());
+  recoverHooks.get(id).add(fn);
 }
 
 /** The Host's record, or null. */
@@ -100,6 +101,24 @@ export function isDown(id) {
   const r = reach.hosts[id];
   return !!(r && r.down && reach.deviceOnline);
 }
+
+/** The panel is shown: down, or "Back online" for its two seconds. Reads reach.now. */
+export function panelShown(id) {
+  const r = reach.hosts[id];
+  if (!r || !reach.deviceOnline) return false;
+  return r.down || r.backUntil > reach.now;
+}
+
+/** The combined list's line for each of `ids` that does not answer: [{id, label, since}]. */
+export function downHosts(ids) {
+  return ids.filter(isDown).map(id => {
+    const r = reach.hosts[id];
+    return { id, label: r.label || 'This Host', since: r.downSince || reach.now };
+  });
+}
+
+export function openPanel(id) { reach.panel = id; }
+export function closePanel() { reach.panel = ''; }
 
 /** The other Hosts this device reads itself, for the classifier and the diagnostics. */
 function othersOf(id) {
@@ -153,7 +172,7 @@ export function noteOk(id, info = {}) {
   persist();
   if (wasDown) {
     clog('hostReach', `id=${id.startsWith('peer:') ? 'peer' : id === PRIMARY ? 'serving' : 'saved'} state=back`);
-    try { recoverHooks.get(id)?.(); } catch (_) {}
+    for (const fn of recoverHooks.get(id) || []) { try { fn(); } catch (_) {} }
     if (reach.panel === id) setTimeout(() => { if (reach.panel === id && !reach.hosts[id]?.down) reach.panel = ''; }, 2000);
   }
   reclassify();
