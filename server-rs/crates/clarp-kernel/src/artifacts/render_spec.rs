@@ -466,6 +466,17 @@ fn message_with_action(
     )
 }
 
+/// The answer that closed a render spec, while its user may still take it back.
+pub(super) fn held_answer(artifact: &Artifact) -> Option<&Submission> {
+    if artifact.status != "completed" {
+        return None;
+    }
+    artifact
+        .submissions
+        .first()
+        .filter(|submission| submission.undo_until().is_some())
+}
+
 /// What the earliest accepted answer chose, if this is a completed button form.
 pub(super) fn answered_button(artifact: &Artifact) -> Option<(&str, &str)> {
     if artifact.status != "completed" {
@@ -523,16 +534,15 @@ pub fn opened(row: &mut Value, artifact: &Artifact) {
     }
     let answered = artifact.submissions.first();
     if let Some(submission) = answered.filter(|_| artifact.status == "completed") {
-        fields.insert(
-            "submission".to_string(),
-            json!({
-                "submission_id": submission.submission_id,
-                "version": submission.version,
-                "answers": submission.answers.clone().unwrap_or(Value::Null),
-                "accepted_at": submission.created_at,
-                "delivery_status": submission.status(),
-            }),
-        );
+        let mut shown = json!({
+            "submission_id": submission.submission_id,
+            "version": submission.version,
+            "answers": submission.answers.clone().unwrap_or(Value::Null),
+            "accepted_at": submission.created_at,
+            "delivery_status": submission.status(),
+        });
+        submission.mark_undoable(&mut shown);
+        fields.insert("submission".to_string(), shown);
     }
 }
 
@@ -660,12 +670,16 @@ impl ArtifactBook {
         artifact_id: &str,
         data: &J,
         elsewhere: Option<(&str, &Submission)>,
+        hold_ms: i64,
         now: i64,
     ) -> Result<(Artifact, Value, bool), Refused> {
         let Some(form) = self.get(artifact_id).filter(|form| form.kind == KIND) else {
             return Err(Refusal::new("not_open", "").refused());
         };
         let sid = data.get("submission_id").and_then(J::str);
+        if sid.is_some_and(|sid| form.taken_back.iter().any(|back| back == sid)) {
+            return Err(Refusal::new("reused_id", "/submission_id").refused());
+        }
         let own = sid.and_then(|sid| self.submission(sid));
         let previous = own
             .map(|(artifact, submission)| (artifact.artifact_id.as_str(), submission))
@@ -711,6 +725,8 @@ impl ArtifactBook {
             prompt: Some(prompt),
             delivered_at: None,
             answers: Some(answers),
+            hold_until: (hold_ms > 0).then_some(now + hold_ms),
+            reopen_status: Some(form.status.clone()),
         };
         let receipt = submission.receipt(artifact_id);
         let mut form = form.clone();

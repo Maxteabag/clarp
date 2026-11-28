@@ -71,6 +71,13 @@ pub struct Submission {
     /// taken (its single read shows what was sent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub answers: Option<Value>,
+    /// The user may still take these answers back until then: they are not told to the
+    /// agent before (`undo_ms` on the submit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_until: Option<i64>,
+    /// The status the form had before these answers closed it, for an undo to open it again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reopen_status: Option<String>,
 }
 
 impl Submission {
@@ -83,15 +90,30 @@ impl Submission {
         }
     }
 
+    /// Until when the user may take these answers back, while they are held from the agent.
+    pub fn undo_until(&self) -> Option<i64> {
+        self.hold_until.filter(|_| self.delivered_at.is_none())
+    }
+
+    /// Marks answers that are held as ones that may still be taken back.
+    pub fn mark_undoable(&self, item: &mut Value) {
+        if let Some(until) = self.undo_until() {
+            item["undoable"] = json!(true);
+            item["undo_until"] = json!(until);
+        }
+    }
+
     /// What the one who sent the answers is answered.
     pub fn receipt(&self, artifact_id: &str) -> Value {
-        json!({
+        let mut receipt = json!({
             "submission_id": self.submission_id,
             "artifact_id": artifact_id,
             "version": self.version,
             "accepted": true,
             "delivery_status": self.status(),
-        })
+        });
+        self.mark_undoable(&mut receipt);
+        receipt
     }
 
     /// Answers that come again under an id that was used: the same answers are answered as
@@ -114,6 +136,8 @@ impl Submission {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Sent {
     pub submission_id: String,
+    /// How long they are held from the agent so that the user can take them back.
+    pub hold_ms: i64,
     /// The version of the form the answers are for, as it was sent.
     pub version: Value,
     answers: Value,
@@ -122,6 +146,38 @@ pub struct Sent {
     pub payload_hash: String,
     /// Whether the reply is to be spoken, when the sender said.
     pub synthesize_audio: Option<bool>,
+}
+
+/// What a submission whose id was taken back is refused with, when it comes again.
+pub const TAKEN_BACK: &str = "submission ID was taken back; send the answers under a new ID";
+
+/// How long answers are to be held from the agent, as a submit or a resolve says it
+/// (`undo_ms`): 0 when it says nothing, refused outside 0 to [`UNDO_MOST_MS`].
+///
+/// [`UNDO_MOST_MS`]: super::decisions::UNDO_MOST_MS
+pub fn undo_ms(value: Option<&Value>) -> Result<i64, Refused> {
+    let most = super::decisions::UNDO_MOST_MS;
+    match value {
+        None | Some(Value::Null) => Ok(0),
+        Some(Value::Number(number)) => match number.as_i64() {
+            Some(ms) if (0..=most).contains(&ms) => Ok(ms),
+            _ => refuse(format!("undo_ms must be an integer from 0 to {most}")),
+        },
+        Some(_) => refuse(format!("undo_ms must be an integer from 0 to {most}")),
+    }
+}
+
+/// What taking a form's answers back comes to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Taken {
+    /// No such answers on the form (taken back before): nothing changes.
+    Gone(Artifact),
+    /// The form without them, open again. `queued` names the message they became, which has
+    /// to be taken out of the agent's queue first: if it no longer waits there, it is too late.
+    Back {
+        form: Artifact,
+        queued: Option<String>,
+    },
 }
 
 /// Reads what a user sent to the form `artifact_id`.
@@ -145,6 +201,7 @@ pub fn sent(artifact_id: &str, data: &Map<String, Value>) -> Result<Sent, Refuse
         Some(Value::Bool(audio)) => Some(*audio),
         Some(_) => return refuse("synthesize_audio must be a boolean"),
     };
+    let hold_ms = undo_ms(data.get("undo_ms"))?;
     let version = data.get("version").cloned().unwrap_or(Value::Null);
     let weighed = sorted_ascii(&json!([artifact_id, version, encoded]));
     let payload_hash = Sha256::digest(weighed.as_bytes())
@@ -153,6 +210,7 @@ pub fn sent(artifact_id: &str, data: &Map<String, Value>) -> Result<Sent, Refuse
         .collect();
     Ok(Sent {
         submission_id: submission_id.to_string(),
+        hold_ms,
         version,
         answers: answers.clone(),
         encoded,
@@ -213,6 +271,9 @@ impl ArtifactBook {
         if form.payload.get("read_only") == Some(&Value::Bool(true)) {
             return refuse(READ_ONLY);
         }
+        if form.taken_back.contains(&sent.submission_id) {
+            return refuse(TAKEN_BACK);
+        }
         // Putting a form away only hides it in the inbox; it does not close it.
         if !matches!(form.status.as_str(), "ready" | "active") {
             return refuse("HTML form no longer accepts answers");
@@ -247,6 +308,8 @@ impl ArtifactBook {
             prompt: Some(prompt),
             delivered_at: None,
             answers: None,
+            hold_until: (sent.hold_ms > 0).then_some(now + sent.hold_ms),
+            reopen_status: None,
         };
         let receipt = submission.receipt(artifact_id);
         let mut form = form.clone();
@@ -278,6 +341,59 @@ impl ArtifactBook {
             .into_iter()
             .map(|(_, artifact_id, submission_id)| (artifact_id, submission_id))
             .collect()
+    }
+
+    /// The submissions to be told to their agent now (not held any more), the oldest first:
+    /// each with the id of its form.
+    pub fn untold_due(&self, now: i64) -> Vec<(String, String)> {
+        self.untold()
+            .into_iter()
+            .filter(|(artifact_id, submission_id)| {
+                self.any(artifact_id)
+                    .and_then(|form| {
+                        form.submissions
+                            .iter()
+                            .find(|submission| &submission.submission_id == submission_id)
+                    })
+                    .and_then(Submission::undo_until)
+                    .is_none_or(|until| until <= now)
+            })
+            .collect()
+    }
+
+    /// The user takes answers they sent to a form back while its agent has not started on
+    /// them: the form without them, open again, and the id never taken again.
+    pub fn take_back(
+        &self,
+        artifact_id: &str,
+        submission_id: &str,
+        now: i64,
+    ) -> Result<Taken, Refused> {
+        let Some(form) = self
+            .get(artifact_id)
+            .filter(|form| form.kind == "html_form" || form.kind == super::render_spec::KIND)
+        else {
+            return refuse("form not found");
+        };
+        let Some(index) = form
+            .submissions
+            .iter()
+            .position(|submission| submission.submission_id == submission_id)
+        else {
+            return Ok(Taken::Gone(form.clone()));
+        };
+        let mut form = form.clone();
+        let submission = form.submissions.remove(index);
+        let queued = submission
+            .delivered_at
+            .map(|_| answer_row_id(&submission.submission_id));
+        if let Some(status) = submission.reopen_status {
+            form.status = status;
+            form.completed_at = None;
+        }
+        form.updated_at = now.max(form.updated_at + 1);
+        form.taken_back.push(submission.submission_id);
+        Ok(Taken::Back { form, queued })
     }
 
     /// A submission is told to its agent: the form as it is after, and what the agent is
