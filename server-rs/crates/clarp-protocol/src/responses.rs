@@ -11,6 +11,8 @@ pub struct SendResponse {
     /// How the message was taken: started now, queued, steered into a running turn, and so on.
     pub dispatch: String,
     pub trace_id: String,
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub admission: Option<SendAdmission>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queued: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -34,6 +36,25 @@ pub struct SendResponse {
     /// the short line the app shows.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<WhileBusyFallback>,
+}
+
+/// The disposition of one client message. Only committed routes carry a revision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SendAdmission {
+    pub client_msg_id: String,
+    pub admission_route: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_revision: Option<u64>,
+}
+
+impl SendAdmission {
+    pub fn new(id: &str, route: Option<(&str, u64)>) -> Self {
+        Self {
+            client_msg_id: id.to_owned(),
+            admission_route: route.map_or("unresolved", |(name, _)| name).to_owned(),
+            admission_revision: route.map(|(_, revision)| revision),
+        }
+    }
 }
 
 /// A send of the owner's that could not do what its `while_busy` asked for.

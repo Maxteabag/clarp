@@ -3469,3 +3469,28 @@ owner. It runs the server user's login shell with the server home as its working
 directory. Frames and resize messages use the same protocol as `/terminal/<session>`.
 Disconnect closes only this shell process group; no agent binding, dispatch, queue
 or provider inference is created. Feature: `server_home_terminal` (Host contract 48).
+
+### Owner Conversation fork admission
+
+Feature `owner_conversation_fork` (contract 226) applies to the opted-in
+Hazel Claude Conversation pilot. The app posts its ordinary owner message
+once with a stable `client_msg_id`. The response adds that ID and
+`admission_route`. A durable unread fork reservation is `conversation_fork`,
+an ordinarily queued message is `waiting`, and a message that entered a
+turn is `started`. Each has a positive integer `admission_revision` from
+the agent journal. The older queue fields retain their meanings.
+
+Authenticated `GET /send-admission?session=S&client_msg_id=ID` returns the
+session, ID and current disposition. An unknown ID, or a send kept while
+the agent opens whose route is undecided, is `unresolved` with the revision
+omitted. Reconnect and timeouts use this lookup. If resubmission is needed,
+reuse the same ID. Ordinary fallback after a reservation advances the
+revision. A failure after the fork read the message leaves it consumed.
+The owner can look up a committed send after closing its Conversation view.
+
+On the ordered events stream, `send-admission` hints carry `session`,
+`agent_id`, `client_msg_id`, `admission_route` and `admission_revision`.
+Reconcile ordinary queue starts on the existing queue/transcript events and
+read again after reconnect. For each session and ID keep the highest
+authoritative revision across HTTP and SSE, even if the initial POST response
+arrives last. An unresolved read supplies no authoritative revision.

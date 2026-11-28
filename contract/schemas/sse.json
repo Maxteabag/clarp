@@ -115,6 +115,22 @@
         "at": {"type": "integer"}
       }
     },
+    "send-admission": {
+      "type": "object",
+      "required": ["type", "event_id", "session", "agent_id"],
+      "properties": {
+        "type": {"const": "send-admission"},
+        "event_id": {"type": "integer"},
+        "session": {"type": "string"},
+        "agent_id": {"type": "string"},
+        "client_msg_id": {"type": "string"},
+        "admission_route": {"enum": ["conversation_fork", "waiting", "started"]},
+        "admission_revision": {"type": "integer", "minimum": 1}
+      },
+      "if": {"required": ["words_withheld"], "properties": {"words_withheld": {"const": true}}},
+      "then": {"not": {"anyOf": [{"required": ["client_msg_id"]}, {"required": ["admission_revision"]}, {"required": ["admission_route"]}]}},
+      "else": {"required": ["client_msg_id", "admission_revision", "admission_route"]}
+    },
     "queue-updated": {
       "type": "object",
       "additionalProperties": true,

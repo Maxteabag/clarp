@@ -98,6 +98,12 @@ enum Stage {
 /// One message of the user's that the fork took.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Asked {
+    /// Unread reservation persisted only in this lane. Older lanes already
+    /// committed an ordinary Joined and keep its original lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reservation: Option<Join>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    client_msg_id: Option<String>,
     turn: u64,
     message_seq: u64,
     stage: Stage,
@@ -287,6 +293,43 @@ fn lane_item(record: &Record, now_ms: i64) -> Result<clarp_ports::log::NewItem, 
     record_item(kind::FORK, kind::FORK_LANE.to_string(), record, now_ms)
 }
 
+fn route_key(id: &str) -> String {
+    format!("owner-send-admission-{id}")
+}
+
+pub(super) fn route_item(
+    id: &str,
+    route: &str,
+    now: i64,
+) -> Result<clarp_ports::log::NewItem, ActorError> {
+    record_item(kind::FORK, route_key(id), &route, now)
+}
+
+/// Release each still-unread join in the same append as its new disposition.
+fn give_back(
+    batch: &mut Batch<'_>,
+    record: &mut Record,
+    out: &mut Outputs,
+    now_ms: i64,
+) -> Result<(), ActorError> {
+    record.broken = true;
+    for asked in &mut record.asked {
+        if asked.read || !matches!(asked.stage, Stage::Waiting | Stage::Running) {
+            continue;
+        }
+        if let Some(join) = &asked.reservation {
+            batch.release_fork(TurnId(asked.turn), join);
+        }
+        if let Some(id) = &asked.client_msg_id {
+            batch.item(route_item(id, "waiting", now_ms)?);
+            out.admission_changes.push(id.clone());
+        }
+        asked.stage = Stage::GivenBack;
+        out.changed.queue = true;
+    }
+    Ok(())
+}
+
 /// The fork has begun to answer its message: the message enters the conversation now, in the
 /// append that holds the first thing the fork said. `false`: the agent's own turn has taken
 /// the message back, and nothing of the fork's is written.
@@ -301,8 +344,28 @@ fn read_now(
         return Ok(true);
     }
     let turn = TurnId(asked.turn);
+    // Publish the predecessor's Joined and JoinRead atomically on consumption.
+    // A rollback before that append sees the original untouched mailbox.
+    if let Some(join) = &asked.reservation {
+        if !batch.release_fork(turn, join)
+            || batch
+                .command(
+                    Command::Join {
+                        turn,
+                        join: join.clone(),
+                    },
+                    t,
+                )
+                .is_err()
+        {
+            return Ok(false);
+        }
+    }
     if batch.command(Command::JoinRead { turn }, t).is_err() {
         return Ok(false);
+    }
+    if let Some(id) = &asked.client_msg_id {
+        out.admission_changes.push(id.clone());
     }
     asked.read = true;
     asked.last_row = message.id.clone();
@@ -318,6 +381,44 @@ pub(crate) fn turn_key(turn: u64) -> String {
 }
 
 impl Actor {
+    /// The keyed route marker is in the same append as acceptance, reservation or
+    /// giveback. MESSAGE is affirmative proof that the ordinary turn or fork read it.
+    pub fn send_admission(&self, id: &str) -> Result<Option<(&'static str, u64)>, ActorError> {
+        let log = self.recorder.log();
+        let Some(mark) = log.find(&route_key(id))? else {
+            return Ok(None);
+        };
+        let Some(row) = log.find(&Message::filed(id).0)? else {
+            return Ok(None);
+        };
+        if row.kind == kind::MESSAGE {
+            return Ok(Some(("started", row.seq.max(mark.seq))));
+        }
+        let Some(turn) = row.turn.map(TurnId) else {
+            return Ok(None);
+        };
+        if row.kind != kind::WAITING
+            || !self
+                .recorder
+                .agent()
+                .waiting()
+                .any(|waiting| waiting.id == turn)
+        {
+            return Ok(None);
+        }
+        let route: String =
+            serde_json::from_slice(&mark.body).map_err(|e| ActorError::Corrupt(e.to_string()))?;
+        match route.as_str() {
+            "conversation_fork" if self.recorder.agent().joins().contains_key(&turn) => {
+                Ok(Some(("conversation_fork", mark.seq)))
+            }
+            "waiting" if !self.recorder.agent().joins().contains_key(&turn) => {
+                Ok(Some(("waiting", mark.seq)))
+            }
+            _ => Ok(None),
+        }
+    }
+
     /// The session each row of a page comes from: what a reply says of itself, the fork's for
     /// a turn the fork answered, and else the session the agent's turn ran in. One look by
     /// key for each turn of the page.
@@ -461,7 +562,14 @@ impl Actor {
             recovery: None,
             together: false,
         };
+        let client_msg_id = self
+            .recorder
+            .log()
+            .find(&route_key(message.told_id()))?
+            .map(|_| message.told_id().to_owned());
         record.asked.push(Asked {
+            reservation: Some(join.clone()),
+            client_msg_id: client_msg_id.clone(),
             turn: turn.0,
             message_seq,
             stage: Stage::Waiting,
@@ -476,13 +584,17 @@ impl Actor {
             stopped: false,
         });
         let mut batch = self.recorder.batch();
-        if batch.command(Command::Join { turn, join }, now_ms).is_err() {
+        if batch.reserve_fork(turn, message_seq, &join).is_err() {
             return no();
+        }
+        let mut out = Outputs::default();
+        if let Some(id) = client_msg_id {
+            batch.item(route_item(&id, "conversation_fork", now_ms)?);
+            out.admission_changes.push(id);
         }
         batch.item(lane_item(&record, now_ms)?);
         batch.commit()?;
         self.fork.record = Some(record);
-        let mut out = Outputs::default();
         self.fork_next(&mut out, now_ms)?;
         Ok((true, out))
     }
@@ -552,7 +664,18 @@ impl Actor {
             .args
             .extend(["--settings".to_owned(), edit_guard().to_string()]);
         let stdin_file = self.profile.stdin_path_of(turn, FORK_ATTEMPT);
-        write_whole(&stdin_file, &launch.stdin)?;
+        if let Err(error) = write_whole(&stdin_file, &launch.stdin) {
+            eprintln!(
+                "clarp-host: fork input for turn {} could not be written: {error}",
+                turn.0
+            );
+            let mut batch = self.recorder.batch();
+            give_back(&mut batch, &mut record, out, now_ms)?;
+            batch.item(lane_item(&record, now_ms)?);
+            batch.commit()?;
+            self.fork.record = Some(record);
+            return Ok(());
+        }
         record.asked[index].stage = Stage::Running;
         let mut batch = self.recorder.batch();
         batch.item(lane_item(&record, now_ms)?);
@@ -883,12 +1006,7 @@ impl Actor {
                         "clarp-host: agent {}: its fork could not answer turn {}: {outcome:?}",
                         self.profile.session, turn.0
                     );
-                    record.broken = true;
-                    for asked in &mut record.asked {
-                        if matches!(asked.stage, Stage::Waiting | Stage::Running) && !asked.read {
-                            asked.stage = Stage::GivenBack;
-                        }
-                    }
+                    give_back(&mut batch, &mut record, out, now_ms)?;
                 }
             }
             batch.item(lane_item(&record, now_ms)?);
@@ -956,12 +1074,16 @@ impl Actor {
         };
         let joins = self.recorder.agent().joins();
         let mut changed = false;
+        let mut returned = Vec::new();
         for asked in &mut record.asked {
             if matches!(asked.stage, Stage::Waiting | Stage::Running)
                 && !asked.read
                 && !joins.contains_key(&TurnId(asked.turn))
             {
                 asked.stage = Stage::GivenBack;
+                if let Some(id) = &asked.client_msg_id {
+                    returned.push(id.clone());
+                }
                 changed = true;
                 if self
                     .fork
@@ -984,6 +1106,10 @@ impl Actor {
             return Ok(());
         }
         let mut batch = self.recorder.batch();
+        for id in returned {
+            batch.item(route_item(&id, "waiting", now_ms)?);
+            out.admission_changes.push(id);
+        }
         batch.item(lane_item(&record, now_ms)?);
         batch.commit()?;
         self.fork.record = Some(record);
@@ -1318,6 +1444,28 @@ impl Actor {
         }))
     }
 
+    pub(super) fn restore_fork_lane(&mut self) -> Result<(), ActorError> {
+        let Some(item) = self.recorder.log().find(kind::FORK_LANE)? else {
+            return Ok(());
+        };
+        let record: Record = serde_json::from_slice(&item.body).map_err(|error| {
+            ActorError::Corrupt(format!("log item {} is not a fork: {error}", item.seq))
+        })?;
+        if !record.broken && record.state == State::Open {
+            for asked in &record.asked {
+                if !asked.read
+                    && matches!(asked.stage, Stage::Waiting | Stage::Running)
+                    && let Some(join) = &asked.reservation
+                {
+                    self.recorder
+                        .restore_fork(TurnId(asked.turn), asked.message_seq, join);
+                }
+            }
+        }
+        self.fork.record = Some(record);
+        Ok(())
+    }
+
     /// Takes the fork up as the log has it, when the actor is opened: a turn of it that ran
     /// on is read up to where the log is and followed again.
     pub(super) fn fork_take_up(
@@ -1325,18 +1473,14 @@ impl Actor {
         out: &mut Outputs,
         now_ms: i64,
     ) -> Result<(), ActorError> {
-        let Some(item) = self.recorder.log().find(kind::FORK_LANE)? else {
+        let Some(record) = self.fork.record.as_ref() else {
             return Ok(());
         };
-        let record: Record = serde_json::from_slice(&item.body).map_err(|error| {
-            ActorError::Corrupt(format!("log item {} is not a fork: {error}", item.seq))
-        })?;
         let running = record
             .asked
             .iter()
             .find(|asked| asked.stage == Stage::Running)
             .map(|asked| (TurnId(asked.turn), asked.message_seq, asked.offset));
-        self.fork.record = Some(record);
         if let Some((turn, message_seq, offset)) = running {
             let message = self.message_at(message_seq)?;
             let name = attempt_of(turn_name(&message.id), FORK_ATTEMPT);

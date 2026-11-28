@@ -9,59 +9,7 @@ use super::*;
 /// say `QUIET`; every turn notes its launch in `launches` (whose it is, and the user's words)
 /// and holds until `finish-<whose>` or `finish` is there, or until it is stopped, when it
 /// leaves `<whose>-gone`.
-const CLAUDE: &str = r#"#!/usr/bin/env python3
-import json
-import pathlib
-import signal
-import sys
-import time
-
-if "--version" in sys.argv:
-    print("2.1.320 (Claude Code)")
-    raise SystemExit(0)
-
-def after(flag):
-    return sys.argv[sys.argv.index(flag) + 1] if flag in sys.argv else None
-
-sid = after("--session-id") or after("--resume") or "stand-in"
-root = pathlib.Path(__file__).resolve().parent
-incoming = json.loads(sys.stdin.readline())
-prompt = incoming["message"]["content"][0]["text"]
-whose = "fork" if "You are a short-lived fork of your own session." in prompt else "main"
-said = next((line for line in prompt.splitlines() if line.startswith("U:")), "")
-with (root / "launches").open("a") as lines:
-    lines.write(json.dumps({"whose": whose, "said": said, "session": sid}) + "\n")
-
-def stopped(*_):
-    (root / f"{whose}-gone").write_text("stopped")
-    raise SystemExit(0)
-
-signal.signal(signal.SIGTERM, stopped)
-# Claude Code is asked to stop with an interrupt first.
-signal.signal(signal.SIGINT, stopped)
-
-def send(kind, **fields):
-    print(json.dumps({"type": kind, "session_id": sid, **fields}), flush=True)
-
-send("system", subtype="init")
-if whose == "main" and 'The fork replied: "Here, from the fork."' in prompt:
-    (root / "fork-note-read").write_text(sid)
-if whose == "fork" and "QUIET" not in prompt:
-    # Streamed, as Claude Code streams: the reply is whole at its message_stop.
-    def event(body):
-        send("stream_event", event=body)
-    event({"type": "message_start", "message": {"id": "msg_fork"}})
-    event({"type": "content_block_start", "index": 0,
-           "content_block": {"type": "text", "text": "Here, from the fork."}})
-    event({"type": "message_stop"})
-(root / f"{whose}-running").write_text(sid)
-for _ in range(3000):
-    if (root / "finish").exists() or (root / f"finish-{whose}").exists():
-        break
-    time.sleep(0.02)
-send("result", subtype="success", is_error=False, result="done")
-(root / f"{whose}-gone").write_text("finished")
-"#;
+const CLAUDE: &str = include_str!("../../../../tools/tests/owner-admission/claude.py");
 
 const OWNER: &str = "fixture-owner-token";
 
@@ -126,7 +74,7 @@ fn live_ops(heard: &Arc<Mutex<Vec<Value>>>, session: &str) -> Vec<Value> {
         .collect()
 }
 
-/// A Host with the stand-in, whose owner lets `oak` answer through a fork, and `oak` in
+/// A Host with the stand-in, whose owner lets `hazel-74f6` answer through a fork, and `hazel-74f6` in
 /// Conversation view; the stand-ins end however the test ends.
 struct Forking {
     place: Place,
@@ -152,7 +100,7 @@ impl Forking {
         std::fs::create_dir_all(xdg.join("clarp-host")).unwrap();
         std::fs::write(
             xdg.join("clarp-host/config.toml"),
-            "[conversation_forks]\nagents = [\"oak\"]\n",
+            "[conversation_forks]\nagents = [\"hazel-74f6\"]\n",
         )
         .unwrap();
         let world = [
@@ -161,13 +109,17 @@ impl Forking {
         ];
         let finish = Finish(place.root.join("finish"));
         let host = place.start_in(OWNER, &[], &world);
+        let address: std::net::SocketAddr = host.address.parse().unwrap();
+        assert!(address.ip().is_loopback() && address.port() != 7690);
+        assert_eq!(host.token, OWNER);
+        eprintln!("non-live guard: isolated fixture {address}, synthetic token");
         host.post(
             "/agents",
-            json!({"name": "Oak", "session": "oak", "backend": "claude"}),
+            json!({"name": "Oak", "session": "hazel-74f6", "backend": "claude"}),
         );
         host.post(
             "/agent-chat-view",
-            json!({"session": "oak", "chat_view": "conversation"}),
+            json!({"session": "hazel-74f6", "chat_view": "conversation"}),
         );
         Self {
             place,
@@ -185,19 +137,19 @@ impl Forking {
         self.host.post(
             "/send",
             json!({
-                "session": "oak", "text": "U: work on the build.", "client_msg_id": "work-1",
+                "session": "hazel-74f6", "text": "U: work on the build.", "client_msg_id": "work-1",
                 "sender": "remote-helper", "origin": "user",
             }),
         );
         let running = self.at("main-running");
         wait_for("the agent's own turn", || running.exists());
         wait_for("the agent's own session to be known", || {
-            !row(&self.host, "oak")["backend_session_id"]
+            !row(&self.host, "hazel-74f6")["backend_session_id"]
                 .as_str()
                 .unwrap_or("")
                 .is_empty()
         });
-        let shown = live(&self.host, "oak");
+        let shown = live(&self.host, "hazel-74f6");
         assert_eq!(shown["turn"]["audience"], "agents", "{shown:#}");
         shown
     }
@@ -232,10 +184,10 @@ fn waited(host: &Host, what: &str, mut ready: impl FnMut() -> bool) {
         assert!(
             std::time::Instant::now() < deadline,
             "timed out waiting for {what}:\nlog {:#}\nlive {:#}\nrow {:#}\nqueue {:#}",
-            host.get("/log?session=oak&limit=100")["turns"],
-            live(host, "oak"),
-            row(host, "oak"),
-            host.get("/turn-queue?session=oak"),
+            host.get("/log?session=hazel-74f6&limit=100")["turns"],
+            live(host, "hazel-74f6"),
+            row(host, "hazel-74f6"),
+            host.get("/turn-queue?session=hazel-74f6"),
         );
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -255,19 +207,19 @@ fn the_users_message_during_an_agents_turn_is_answered_by_a_fork_that_a_stop_end
         host.get("/server-info")["contract"]["features"]["conversation_fork"],
         153
     );
-    assert_eq!(row(host, "oak")["conversation_fork"], true);
+    assert_eq!(row(host, "hazel-74f6")["conversation_fork"], true);
     assert_eq!(row(host, "elm")["conversation_fork"], false);
 
     let main_id = forking.busy_for_an_agent()["turn"]["turn_id"].clone();
     let main_session = std::fs::read_to_string(forking.at("main-running")).unwrap();
 
     // An app with the chat open follows the agent's live events.
-    let heard = follow(host, "/events?live=oak");
+    let heard = follow(host, "/events?live=hazel-74f6");
     wait_for("the live subscription to open", || {
         !heard.lock().unwrap().is_empty()
     });
     let main_turns = || -> Vec<Value> {
-        live_ops(&heard, "oak")
+        live_ops(&heard, "hazel-74f6")
             .into_iter()
             .filter(|op| op["op"] == "main_turn")
             .map(|op| op["main_turn"].clone())
@@ -275,13 +227,13 @@ fn the_users_message_during_an_agents_turn_is_answered_by_a_fork_that_a_stop_end
     };
 
     // The user writes: the fork answers at once, in the same chat.
-    host.send("oak", "U: are you there?", "u-1");
+    host.send("hazel-74f6", "U: are you there?", "u-1");
     let fork_running = forking.at("fork-running");
     waited(host, "the fork's turn", || fork_running.exists());
     let fork_session = std::fs::read_to_string(&fork_running).unwrap();
     assert_ne!(fork_session, main_session);
     let reply = || {
-        host.get("/log?session=oak&limit=100")["turns"]
+        host.get("/log?session=hazel-74f6&limit=100")["turns"]
             .as_array()
             .unwrap()
             .iter()
@@ -297,7 +249,7 @@ fn the_users_message_during_an_agents_turn_is_answered_by_a_fork_that_a_stop_end
     // `/live` shows the fork's turn, with the agent's own beside it.
     let mut shown = Value::Null;
     wait_for("the fork's turn to be shown", || {
-        shown = live(host, "oak");
+        shown = live(host, "hazel-74f6");
         shown["turn"]["audience"] == "user"
     });
     let main = &shown["main_turn"];
@@ -318,28 +270,30 @@ fn the_users_message_during_an_agents_turn_is_answered_by_a_fork_that_a_stop_end
     assert!(told.get("headline").is_none());
 
     // A Stop without a target ends the fork's turn, and nothing of the agent's own.
-    let stopped = host.post("/stop", json!({"session": "oak"}));
+    let stopped = host.post("/stop", json!({"session": "hazel-74f6"}));
     assert_eq!(stopped["terminated"], 1, "{stopped}");
     assert_eq!(stopped["queue_paused"], false, "{stopped}");
     wait_for("the fork's turn to end", || {
-        live(host, "oak").get("main_turn").is_none()
+        live(host, "hazel-74f6").get("main_turn").is_none()
     });
-    let shown = live(host, "oak");
+    let shown = live(host, "hazel-74f6");
     assert_eq!(shown["turn"]["turn_id"], main_id, "{shown:#}");
     wait_for("main_turn null on the live events", || {
         main_turns().last().is_some_and(Value::is_null)
     });
     assert_eq!(
-        row(host, "oak")["busy"],
+        row(host, "hazel-74f6")["busy"],
         true,
         "the agent's own turn runs on"
     );
 
     // A Stop that names the agent's own turn ends it.
-    let stopped = host.post("/stop", json!({"session": "oak", "target": "main"}));
+    let stopped = host.post("/stop", json!({"session": "hazel-74f6", "target": "main"}));
     assert_eq!(stopped["terminated"], 1, "{stopped}");
     assert_eq!(stopped["queue_paused"], true, "{stopped}");
-    wait_for("the agent to be free", || row(host, "oak")["busy"] == false);
+    wait_for("the agent to be free", || {
+        row(host, "hazel-74f6")["busy"] == false
+    });
     // Both tools were stopped, not let go.
     for (tool, gone) in [
         ("the fork's", "fork-gone"),
@@ -357,14 +311,14 @@ fn conversation_words_answer_beside_the_owners_work_and_return_as_a_note() {
     for busy in ["steer", "take_over"] {
         let forking = Forking::new(busy);
         let host = &forking.host;
-        host.send("oak", "U: work on my build.", "owner-work");
+        host.send("hazel-74f6", "U: work on my build.", "owner-work");
         waited(host, "the owner's running work", || {
             forking.at("main-running").exists()
-                && row(host, "oak")["backend_session_id"]
+                && row(host, "hazel-74f6")["backend_session_id"]
                     .as_str()
                     .is_some_and(|key| !key.is_empty())
         });
-        let shown = live(host, "oak");
+        let shown = live(host, "hazel-74f6");
         assert_eq!(shown["turn"]["audience"], "user");
         let main_id = shown["turn"]["turn_id"].clone();
 
@@ -372,12 +326,12 @@ fn conversation_words_answer_beside_the_owners_work_and_return_as_a_note() {
         host.post(
             "/send",
             json!({
-                "session": "oak", "text": "U: hello, how are you",
+                "session": "hazel-74f6", "text": "U: hello, how are you",
                 "client_msg_id": "owner-greeting", "while_busy": busy,
             }),
         );
         waited(host, "the fork's reply before the work ends", || {
-            let rows = host.get("/log?session=oak&limit=100");
+            let rows = host.get("/log?session=hazel-74f6&limit=100");
             rows["turns"]
                 .as_array()
                 .unwrap()
@@ -388,25 +342,25 @@ fn conversation_words_answer_beside_the_owners_work_and_return_as_a_note() {
             "owner-fork {busy} durable reply {} ms (fixture)",
             sent.elapsed().as_millis()
         );
-        let alongside = live(host, "oak");
+        let alongside = live(host, "hazel-74f6");
         assert_eq!(alongside["main_turn"]["turn_id"], main_id, "{alongside:#}");
         assert_eq!(alongside["main_turn"]["status"], "running");
         assert!(!forking.at("main-gone").exists());
 
         std::fs::write(forking.at("finish-fork"), "").unwrap();
         waited(host, "the fork to yield the chat", || {
-            live(host, "oak")["turn"]["turn_id"] == main_id
+            live(host, "hazel-74f6")["turn"]["turn_id"] == main_id
         });
         std::fs::write(forking.at("finish-main"), "").unwrap();
         waited(host, "the same work to finish", || {
-            row(host, "oak")["busy"] == false
+            row(host, "hazel-74f6")["busy"] == false
         });
         assert_eq!(
             std::fs::read_to_string(forking.at("main-gone")).unwrap(),
             "finished"
         );
 
-        host.send("oak", "U: continue with my next task.", "owner-next");
+        host.send("hazel-74f6", "U: continue with my next task.", "owner-next");
         waited(host, "the main session to read the fork's note", || {
             forking.at("fork-note-read").exists()
         });
@@ -426,9 +380,9 @@ fn a_users_turn_held_behind_the_forks_turn_ends_at_once_on_a_stop_of_the_agents_
     let forking = Forking::new("fork-held-turn");
     let host = &forking.host;
     forking.busy_for_an_agent();
-    host.send("oak", "U: are you there?", "u-1");
+    host.send("hazel-74f6", "U: are you there?", "u-1");
     waited(host, "the fork's reply in the chat", || {
-        log_row(host, "oak", "u-1").is_some()
+        log_row(host, "hazel-74f6", "u-1").is_some()
     });
 
     // The agent's own turn ends while the fork still answers; the user writes again. That
@@ -437,9 +391,9 @@ fn a_users_turn_held_behind_the_forks_turn_ends_at_once_on_a_stop_of_the_agents_
     waited(host, "the agent's own turn to end", || {
         forking.at("main-gone").exists()
     });
-    host.send("oak", "U: and the plan?", "u-2");
+    host.send("hazel-74f6", "U: and the plan?", "u-2");
     waited(host, "the user's turn to wait for the fork's", || {
-        row(host, "oak")["busy"] == true
+        row(host, "hazel-74f6")["busy"] == true
     });
     let launched_for = |said: &str| {
         forking
@@ -457,18 +411,18 @@ fn a_users_turn_held_behind_the_forks_turn_ends_at_once_on_a_stop_of_the_agents_
 
     // A Stop of the agent's own turn ends the waiting turn at once: it never ran, and the
     // fork answers on.
-    let stopped = host.post("/stop", json!({"session": "oak", "target": "main"}));
+    let stopped = host.post("/stop", json!({"session": "hazel-74f6", "target": "main"}));
     assert_eq!(stopped["queue_paused"], true, "{stopped}");
     waited(host, "the waiting turn to end", || {
-        row(host, "oak")["busy"] == false
+        row(host, "hazel-74f6")["busy"] == false
     });
     assert!(!forking.at("fork-gone").exists(), "the fork answers on");
-    assert_eq!(live(host, "oak")["turn"]["audience"], "user");
+    assert_eq!(live(host, "hazel-74f6")["turn"]["audience"], "user");
 
     // The fork's turn ends: the stopped turn does not run after it.
     std::fs::write(forking.at("finish-fork"), "").unwrap();
     waited(host, "the fork's turn to end", || {
-        forking.at("fork-gone").exists() && live(host, "oak").get("main_turn").is_none()
+        forking.at("fork-gone").exists() && live(host, "hazel-74f6").get("main_turn").is_none()
     });
     std::thread::sleep(Duration::from_millis(500));
     assert_eq!(
@@ -477,7 +431,7 @@ fn a_users_turn_held_behind_the_forks_turn_ends_at_once_on_a_stop_of_the_agents_
         "{:?}",
         forking.launches()
     );
-    assert_eq!(row(host, "oak")["busy"], false);
+    assert_eq!(row(host, "hazel-74f6")["busy"], false);
 }
 
 #[test]
@@ -485,39 +439,39 @@ fn a_stopped_fork_that_had_not_answered_settles_its_message_as_stopped_in_what_a
     let forking = Forking::new("fork-stopped-unread");
     let host = &forking.host;
     let main_id = forking.busy_for_an_agent()["turn"]["turn_id"].clone();
-    let heard = follow(host, "/events?live=oak");
+    let heard = follow(host, "/events?live=hazel-74f6");
     wait_for("the live subscription to open", || {
         !heard.lock().unwrap().is_empty()
     });
 
     // The fork takes the message and says nothing yet; the user stops it.
-    host.send("oak", "U: QUIET, never mind", "u-1");
+    host.send("hazel-74f6", "U: QUIET, never mind", "u-1");
     waited(host, "the fork's turn", || {
         forking.at("fork-running").exists()
     });
     let mut fork_id = Value::Null;
     waited(host, "the fork's turn to be shown", || {
-        let shown = live(host, "oak");
+        let shown = live(host, "hazel-74f6");
         fork_id = shown["turn"]["turn_id"].clone();
         shown["turn"]["audience"] == "user"
     });
-    let stopped = host.post("/stop", json!({"session": "oak"}));
+    let stopped = host.post("/stop", json!({"session": "hazel-74f6"}));
     assert_eq!(stopped["terminated"], 1, "{stopped}");
     assert_eq!(stopped["queue_paused"], false, "{stopped}");
 
     // The chat has the message, settled as stopped; it no longer waits.
     waited(host, "the stopped message in the chat", || {
-        log_row(host, "oak", "u-1").is_some_and(|row| row["turn"]["status"] == "stopped")
+        log_row(host, "hazel-74f6", "u-1").is_some_and(|row| row["turn"]["status"] == "stopped")
     });
-    let queue = host.get("/turn-queue?session=oak");
+    let queue = host.get("/turn-queue?session=hazel-74f6");
     assert!(queue["items"].as_array().unwrap().is_empty(), "{queue:#}");
 
     // `/live` ended the fork's turn as interrupted and shows the agent's own turn again.
     waited(host, "the agent's own turn to be shown again", || {
-        live(host, "oak")["turn"]["turn_id"] == main_id
+        live(host, "hazel-74f6")["turn"]["turn_id"] == main_id
     });
-    assert!(live(host, "oak").get("main_turn").is_none());
-    let ops = live_ops(&heard, "oak");
+    assert!(live(host, "hazel-74f6").get("main_turn").is_none());
+    let ops = live_ops(&heard, "hazel-74f6");
     assert!(
         ops.iter().any(|op| op["op"] == "turn"
             && op["turn"]["turn_id"] == fork_id
@@ -528,7 +482,7 @@ fn a_stopped_fork_that_had_not_answered_settles_its_message_as_stopped_in_what_a
     // The agent's own turn ends: the stopped message does not run then either.
     std::fs::write(forking.at("finish-main"), "").unwrap();
     waited(host, "the agent to be free", || {
-        row(host, "oak")["busy"] == false
+        row(host, "hazel-74f6")["busy"] == false
     });
     std::thread::sleep(Duration::from_millis(500));
     let runs = forking
@@ -537,6 +491,106 @@ fn a_stopped_fork_that_had_not_answered_settles_its_message_as_stopped_in_what_a
         .filter(|(_, said)| said == "U: QUIET, never mind")
         .count();
     assert_eq!(runs, 1, "only the fork's: {:?}", forking.launches());
-    assert!(log_row(host, "oak", "u-1").is_some());
+    assert!(log_row(host, "hazel-74f6", "u-1").is_some());
     forking.grace();
+}
+
+#[test]
+fn owner_admission_survives_failure_and_reconnect() {
+    for fail in [false, true] {
+        let forking = Forking::new("owner-admission");
+        let host = &forking.host;
+        let session = "hazel-74f6";
+        let id = "admission-probe";
+        let path = format!("/send-admission?session={session}&client_msg_id={id}");
+        let read = || host.get(&path);
+        let unknown = read();
+        assert_eq!(unknown["admission_route"], "unresolved");
+        assert!(unknown.get("admission_revision").is_none());
+        let main = host.send(session, "U: owner work", "owner-work");
+        assert_eq!(main["admission_route"], "started");
+        waited(host, "running main with bound session", || {
+            forking.at("main-running").exists()
+                && row(host, session)["backend_session_id"]
+                    .as_str()
+                    .is_some_and(|s| !s.is_empty())
+        });
+        let heard = follow(host, "/events");
+        let prompt = if fail {
+            "U: ADMISSION FAIL"
+        } else {
+            "U: ADMISSION"
+        };
+        let send = || host.send(session, prompt, id);
+        let ack = send();
+        assert_eq!(ack["client_msg_id"], id);
+        assert_eq!(ack["admission_route"], "conversation_fork", "{ack}");
+        let initial = ack["admission_revision"].as_u64().unwrap();
+        assert_eq!(read()["admission_revision"], initial);
+        assert_eq!(send()["admission_revision"], initial);
+        let later = host.post("/send", json!({"session":session,"text":"U: later","client_msg_id":"later","queue_if_busy":true}));
+        assert!(later.get("admission_route").is_none());
+        waited(host, "fork at pre-read barrier", || {
+            forking.at("fork-ready").exists()
+        });
+        std::fs::write(forking.at("release-fork"), "").unwrap();
+        let route = if fail { "waiting" } else { "started" };
+        waited(host, "new committed route", || {
+            read()["admission_route"] == route
+        });
+        let next = read();
+        let revision = next["admission_revision"].as_u64().unwrap();
+        assert!(revision > initial);
+        assert_eq!(send()["admission_revision"], revision);
+        waited(host, "ordered admission hint", || {
+            heard.lock().unwrap().iter().any(|event| {
+                event["type"] == "send-admission"
+                    && event["client_msg_id"] == id
+                    && event["admission_revision"] == revision
+            })
+        });
+        assert_eq!(
+            forking
+                .launches()
+                .iter()
+                .filter(|(whose, _)| whose == "fork")
+                .count(),
+            1
+        );
+        eprintln!("admission fixture ACK={ack} GET={next}");
+        std::fs::write(forking.at("finish"), "").unwrap();
+        waited(host, "all accepted turns to complete", || {
+            row(host, session)["busy"] == false
+        });
+        assert_eq!(read()["admission_route"], "started");
+        let ordinary = forking
+            .launches()
+            .iter()
+            .filter(|(who, text)| who == "main" && text == prompt)
+            .count();
+        assert_eq!(ordinary, usize::from(fail));
+        let Forking {
+            host,
+            place,
+            _finish,
+        } = forking;
+        host.kill();
+        let program = place.root.join("claude");
+        let config = place.root.join("xdg");
+        let reopened = place.start_in(
+            OWNER,
+            &[],
+            &[
+                ("CLARP_CLAUDE_PROGRAM", program.to_str().unwrap()),
+                ("XDG_CONFIG_HOME", config.to_str().unwrap()),
+            ],
+        );
+        let recovered = reopened.get(&path);
+        assert_eq!(recovered["admission_route"], "started");
+        assert_eq!(
+            reopened.send(session, prompt, id)["admission_revision"],
+            recovered["admission_revision"]
+        );
+        eprintln!("admission fixture recovered={recovered}");
+    }
 }

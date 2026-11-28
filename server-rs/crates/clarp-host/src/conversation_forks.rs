@@ -50,6 +50,13 @@ pub(crate) fn may_fork(backend: &str, view: View, agent_id: &str, session: &str)
     backend == "claude" && view == View::Conversation && named(agent_id, session)
 }
 
+/// Ordinary typed or dictated words; all upload kinds stay on the file path.
+pub(crate) fn ordinary(message: &clarp_kernel::conversation::Message) -> bool {
+    clarp_actor::Actor::fork_answers(message)
+        && !message.text.trim_start().starts_with('/')
+        && clarp_backend::agy_acp::attached(&message.text).is_empty()
+}
+
 /// Puts `extra` (Claude Code settings, JSON) into the turn's arguments: into the `--settings`
 /// they have already, hook lists joined event by event, or as a `--settings` of its own. Claude
 /// Code reads one `--settings`: a fork's turn carries its edit guard there, and the Host's own
@@ -85,6 +92,18 @@ pub(crate) fn add_settings(args: &mut Vec<String>, extra: &str) {
 #[cfg(test)]
 #[allow(clippy::unwrap_used)]
 mod tests {
+    #[test]
+    fn plain_uploads_text_can_fork_while_an_attached_image_cannot() {
+        let message = |text: &str| clarp_kernel::conversation::Message {
+            text: text.to_owned(),
+            ..Default::default()
+        };
+        assert!(super::ordinary(&message("What does /uploads/ mean?")));
+        assert!(!super::ordinary(&message(
+            "Describe /tmp/uploads/picture.png"
+        )));
+    }
+
     use super::*;
 
     fn section(text: &str) -> toml::Value {

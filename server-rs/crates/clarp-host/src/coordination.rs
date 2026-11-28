@@ -38,6 +38,8 @@ pub struct Made {
     /// The authenticated HTTP chat send carried text rather than speech.
     #[serde(skip)]
     pub text_chat: bool,
+    #[serde(skip)]
+    pub owner_chat: bool,
     /// A live call checked by the HTTP entry point before voice routing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub voice_call: Option<String>,
@@ -96,6 +98,7 @@ pub(crate) async fn made(
         internal_sender: None,
         housekeeping: false,
         text_chat: false,
+        owner_chat: false,
         voice_call: None,
     })
 }
