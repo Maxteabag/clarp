@@ -418,6 +418,8 @@ pub struct Note {
     pub session: String,
     /// The message a click opens the chat at.
     pub message_id: String,
+    pub host: String,
+    pub order: Option<clarp_core::notify_events::AlertOrder>,
     /// Ask the desktop for its message sound.
     pub sound: bool,
     /// The agent's cached portrait (`file://`).
@@ -443,9 +445,11 @@ pub const FAILURE: &str = "failure:";
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 struct Shown {
     id: u32,
-    action_generation: u64,
+    action_generation: u128,
     session: String,
     message_id: String,
+    host: String,
+    order: Option<clarp_core::notify_events::AlertOrder>,
     decision_id: String,
     response_type: String,
 }
@@ -488,7 +492,7 @@ pub fn notify(note: Note) {
         "title": note.title, "body": note.body, "sound": note.sound, "session": note.session,
         "message_id": note.message_id, "image": note.image, "category": "im.received",
         "actions": actions(&note).chunks(2).map(|pair| pair[0].clone()).collect::<Vec<_>>(),
-        "replaces": SHOWN.with(|shown| shown.borrow().iter().any(|s| s.session == note.session)),
+        "replaces": SHOWN.with(|shown| shown.borrow().iter().any(|s| s.host == note.host && s.session == note.session)),
     }));
     if logged {
         // A check's popup is kept as shown, so the next of its chat replaces it.
@@ -496,20 +500,21 @@ pub fn notify(note: Note) {
         return;
     }
     #[cfg(target_os = "macos")]
-    notify_macos(note.title, note.body, note.sound);
+    {
+        remember(shown_of(&note, 0));
+        macos_popup(&note.host, &note.session, Some(note.clone()));
+    }
     #[cfg(not(target_os = "macos"))]
     notify_freedesktop(note);
 }
 
 /// The chat was opened or read on some device: its popup goes.
-pub fn close_chat(session: &str) {
-    close_where(|s| s.session == session, true, serde_json::json!({"closed": session}));
-}
-
-/// A question was answered, dismissed or withdrawn elsewhere: its popup
-/// goes, and only it (a newer popup of the chat stays).
-pub fn close_decision(decision_id: &str) {
-    close_where(|s| s.decision_id == decision_id, false, serde_json::json!({"closed_decision": decision_id}));
+pub fn close_read(session: &str, host: &str, target: &clarp_core::notify_events::ReadTarget) {
+    let logged = match target {
+        clarp_core::notify_events::ReadTarget::Decision(id) => serde_json::json!({"closed_decision": id}),
+        _ => serde_json::json!({"closed": session}),
+    };
+    close_where(|s| s.session == session && s.host == host && target.covers(s.order.as_ref(), &s.decision_id), logged);
 }
 
 /// Closes the popups `which` picks (`logged` is what a check records). A
@@ -517,9 +522,8 @@ pub fn close_decision(decision_id: &str) {
 /// unless another popup's Notify is replacing it, which then owns the id. A
 /// popup still on its way is closed as soon as the desktop names it, unless
 /// a newer popup of the chat waits to replace it; a popup waiting that
-/// `which` picks is not sent. `whole_chat` (the chat read or opened) also
-/// drops whatever else of the chat waits.
-fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_json::Value) {
+/// `which` picks is not sent.
+fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| which(s));
@@ -533,9 +537,6 @@ fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_j
             if which(&flight.popup) {
                 flight.close = true;
                 any = true;
-                if whole_chat {
-                    flight.next = None;
-                }
             }
             if flight.next.as_ref().is_some_and(|next| which(&shown_of(next, 0))) {
                 flight.next = None;
@@ -550,6 +551,10 @@ fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_j
     }
     if test_log(logged) {
         return;
+    }
+    #[cfg(target_os = "macos")]
+    for popup in &gone {
+        macos_popup(&popup.host, &popup.session, None);
     }
     #[cfg(not(target_os = "macos"))]
     for popup in gone {
@@ -597,6 +602,8 @@ fn shown_of(note: &Note, id: u32) -> Shown {
         action_generation: 0,
         session: note.session.clone(),
         message_id: note.message_id.clone(),
+        host: note.host.clone(),
+        order: note.order.clone(),
         decision_id: note.decision_id.clone(),
         response_type: note.response_type.clone(),
     }
@@ -635,11 +642,8 @@ fn actions(note: &Note) -> Vec<String> {
 fn remember(popup: Shown) {
     SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
-        shown.retain(|s| s.session != popup.session && (popup.id == 0 || s.id != popup.id));
+        shown.retain(|s| (s.host != popup.host || s.session != popup.session) && (popup.id == 0 || s.id != popup.id));
         shown.push(popup);
-        // A desktop closes popups on its own; this keeps the newest few.
-        let extra = shown.len().saturating_sub(32);
-        shown.drain(..extra);
     });
 }
 
@@ -656,13 +660,15 @@ pub fn action_invoked(id: u32, key: &str) {
         key
     } else {
         let Some((generation, action)) = key.split_once(':') else { return };
-        if generation.parse::<u64>().ok() != Some(popup.action_generation) {
+        if generation.parse::<u128>().ok() != Some(popup.action_generation) {
             return;
         }
         action
     };
-    close_id(id);
-    act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
+    if key != "mark-read" {
+        close_id(id);
+    }
+    act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key, Some(&popup));
 }
 
 /// What a popup's button does: open the chat at the message, mark it
@@ -670,15 +676,18 @@ pub fn action_invoked(id: u32, key: &str) {
 /// question, or send a failed turn's message again (opening the chat when
 /// the answer or the retry cannot go, and for Switch model and Sign in).
 pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
-    close_chat(session);
-    act(session, message_id, decision_id, response_type, key);
+    let shown = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == session && s.message_id == message_id && s.decision_id == decision_id).cloned());
+    if key != "mark-read" {
+        close_where(|s| s.session == session && s.message_id == message_id && s.decision_id == decision_id, serde_json::json!({"closed": session}));
+    }
+    act(session, message_id, decision_id, response_type, key, shown.as_ref());
 }
 
-fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
+fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str, shown: Option<&Shown>) {
     let Some(app) = crate::app() else { return };
     match key {
         "mark-read" => {
-            app.engine.borrow_mut().mark_chat_read(session);
+            app.engine.borrow_mut().mark_popup_read(session, shown.map_or("", |s| s.host.as_str()));
             crate::pump_now(&app);
             return;
         }
@@ -744,24 +753,34 @@ struct InFlight {
     replaces_closed: Option<u32>,
 }
 
-/// Through Notification Center (as Script Editor, the sender `osascript`
-/// is): the texts go as arguments, never into the script. No buttons.
+/// Notification Center needs an identifier for selective removal. Serialize its
+/// commands so a slow delivery cannot finish after its matching removal.
 #[cfg(target_os = "macos")]
-fn notify_macos(title: String, body: String, sound: bool) {
-    let script = if sound {
-        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv) sound name \"Glass\"\nend run"
-    } else {
-        "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run"
-    };
-    let spawned = std::thread::Builder::new().name("notify".into()).spawn(move || {
-        match std::process::Command::new("/usr/bin/osascript").args(["-e", script, &title, &body]).stdout(std::process::Stdio::null()).output() {
-            Ok(output) if output.status.success() => {}
-            Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr).trim()),
-            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
-        }
+fn macos_popup(host: &str, session: &str, note: Option<Note>) {
+    use std::sync::{OnceLock, mpsc};
+    type Command = (String, Option<Note>);
+    static WORKER: OnceLock<mpsc::Sender<Command>> = OnceLock::new();
+    let worker = WORKER.get_or_init(|| {
+        let (tx, rx) = mpsc::channel::<Command>();
+        std::thread::spawn(move || {
+            for (id, note) in rx {
+                let mut command = std::process::Command::new("/usr/bin/osascript");
+                command.args(["-l", "JavaScript", "-e", include_str!("notification_macos.js"), "--", &id]);
+                if let Some(note) = note {
+                    command.args([note.title, note.body, if note.sound { "Glass".into() } else { String::new() }]);
+                }
+                match command.output() {
+                    Ok(output) if output.status.success() => {}
+                    Ok(output) => eprintln!("clarp-slint: notification failed: {}", String::from_utf8_lossy(&output.stderr)),
+                    Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
+                }
+            }
+        });
+        tx
     });
-    if let Err(error) = spawned {
-        eprintln!("clarp-slint: notification failed: {error}");
+    let id = serde_json::json!(["clarp", std::process::id(), host, session]).to_string();
+    if worker.send((id, note)).is_err() {
+        eprintln!("clarp-slint: notification worker stopped");
     }
 }
 
@@ -787,13 +806,13 @@ fn send(note: Note, closed: Option<u32>) {
     // replacing the popup it names.
     let note = IN_FLIGHT.with(|flights| {
         let mut flights = flights.borrow_mut();
-        match flights.iter_mut().find(|f| f.popup.session == note.session) {
+        match flights.iter_mut().find(|f| f.popup.host == note.host && f.popup.session == note.session) {
             Some(flight) => {
-                (flight.next, flight.close) = (Some(note), false);
+                flight.next = Some(note);
                 None
             }
             None => {
-                let replaces = closed.or_else(|| SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map(|s| s.id)));
+                let replaces = closed.or_else(|| SHOWN.with(|shown| shown.borrow().iter().find(|s| s.host == note.host && s.session == note.session).map(|s| s.id)));
                 flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false, replacing: replaces, replaces_closed: closed });
                 Some(note)
             }
@@ -801,17 +820,10 @@ fn send(note: Note, closed: Option<u32>) {
     });
     let Some(note) = note else { return };
     // The shown popup's buttons stay its own until this Notify returns.
-    let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
+    let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.host == note.host && f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
     // The daemon may reuse a popup ID. Give each explicit button an identity
     // that stays with the popup that supplied it, even if its signal arrives late.
-    thread_local! {
-        static ACTION_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    }
-    let action_generation = ACTION_GENERATION.with(|counter| {
-        let next = counter.get().wrapping_add(1);
-        counter.set(next);
-        next
-    });
+    let action_generation = uuid::Uuid::new_v4().as_u128();
     let mut actions = actions(&note);
     for pair in actions.chunks_exact_mut(2).skip(1) {
         pair[0] = format!("{action_generation}:{}", pair[0]);
@@ -859,7 +871,7 @@ fn delivered(popup: Shown, id: Option<u32>) {
     let session = popup.session.clone();
     let flight = IN_FLIGHT.with(|flights| {
         let mut flights = flights.borrow_mut();
-        let at = flights.iter().position(|f| f.popup.session == session)?;
+        let at = flights.iter().position(|f| f.popup.host == popup.host && f.popup.session == session)?;
         Some(flights.remove(at))
     });
     let (close, next, replaces_closed) = flight.map_or((false, None, None), |f| (f.close, f.next, f.replaces_closed));

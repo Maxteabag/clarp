@@ -215,6 +215,43 @@ pub struct Choice {
     pub label: String,
 }
 
+/// A read and an alert are comparable only on the same Host and generation.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AlertOrder {
+    pub epoch: String,
+    pub position: (u64, u64),
+}
+
+impl AlertOrder {
+    pub fn parse(event: &Object, ms: &str, seq: &str) -> Option<Self> {
+        let epoch = event.get("order_epoch")?.as_str()?;
+        if epoch.trim().is_empty() {
+            return None;
+        }
+        // The desktop receives SSE, whose components are JSON integers.
+        let sequence = event.get(seq)?.as_u64()?;
+        if sequence == 0 {
+            return None;
+        }
+        Some(Self { epoch: epoch.into(), position: (event.get(ms)?.as_u64()?, sequence) })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadTarget {
+    Through(AlertOrder),
+    Decision(String),
+}
+
+impl ReadTarget {
+    pub fn covers(&self, order: Option<&AlertOrder>, decision: &str) -> bool {
+        match self {
+            Self::Through(end) => order.is_some_and(|o| o.epoch == end.epoch && o.position <= end.position),
+            Self::Decision(id) => id == decision,
+        }
+    }
+}
+
 /// What one `user-notification` says, as the desktop uses it.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Incoming {
@@ -224,6 +261,8 @@ pub struct Incoming {
     pub alert: Option<bool>,
     pub unread: Option<bool>,
     pub notification_id: String,
+    pub host: String,
+    pub order: Option<AlertOrder>,
     pub message_id: String,
     pub session: String,
     pub agent_id: String,
@@ -393,6 +432,8 @@ impl Incoming {
             event: if event_id.is_empty() { "reply".into() } else { event_id },
             alert: event.get("alert").and_then(Value::as_bool),
             unread: event.get("unread").and_then(Value::as_bool),
+            host: String::new(), // The SSE receiver supplies its authenticated Host identity.
+            order: if json::string(event, "event") == "call" { None } else { AlertOrder::parse(event, "event_at_ms", "event_seq") },
             notification_id: json::string(event, "notification_id"),
             // A failed turn's is the message it answered (`cause_message_id`).
             message_id: first(&["message_id", "source_message_id", "cause_message_id"]),

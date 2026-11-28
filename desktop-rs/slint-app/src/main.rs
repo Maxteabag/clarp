@@ -677,8 +677,7 @@ impl App {
                     platform::desktop::muted_changed(muted);
                 }
                 Change::Notification(popup) => self.popup(popup),
-                Change::NotificationRead(session) => platform::desktop::close_chat(session),
-                Change::QuestionEnded(decision_id) => platform::desktop::close_decision(decision_id),
+                Change::NotificationRead(session, host, target) => platform::desktop::close_read(session, host, target),
                 _ => {}
             }
         }
@@ -705,6 +704,8 @@ impl App {
             body: popup.body.clone(),
             session: popup.session.clone(),
             message_id: incoming.message_id.clone(),
+            host: incoming.host.clone(),
+            order: incoming.order.clone(),
             sound: incoming.sound(sound),
             image,
             decision_id: incoming.decision_id.clone(),

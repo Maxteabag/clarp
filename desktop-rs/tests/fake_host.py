@@ -221,12 +221,15 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from live_projection import LiveView  # noqa: E402
 
 live_features = False
+notification_events_offered = True
 # Notifications per event (feature notification_events): the owner's
 # document, as GET/POST /notification-settings answer it.
 NOTIFY_EVENTS = [("reply", True), ("needs_you", True), ("failed", True), ("update", True),
                  ("job_done", False), ("helper_report", False), ("call", True), ("account", True)]
 # decision_undo: answers held for Undo, by decision id -> (revision, attention item).
 held_answers = {}
+chat_read_receipts = []
+chat_read_release = threading.Event()
 notification_settings = {
     "events": [{"id": i, "message_key": f"notify.event.{i}", "default": d, "on": d} for i, d in NOTIFY_EVENTS],
     "agents": {},
@@ -1794,7 +1797,8 @@ class Handler(BaseHTTPRequestHandler):
             if viewport["on"]:
                 features += ["events_live_change", "events_chat_previews"]
             features.append("html_form_events")
-            features.append("notification_events")
+            if notification_events_offered:
+                features.append("notification_events")
             features.append("decision_undo")
             if turn_summaries:
                 features.append("log_turn_summary")
@@ -2868,6 +2872,16 @@ class Handler(BaseHTTPRequestHandler):
                 event.setdefault("conv", "conv-1")
             live_step(session, {"event": event}, set(body.get("skip", [])))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/release-chat-read":
+            chat_read_release.set()
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/chat-read-receipt":
+            # Deliver this receipt by HTTP alone so the check can delay its SSE echo.
+            with state_lock:
+                if body.get("hold"):
+                    chat_read_release.clear()
+                chat_read_receipts.append(body)
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/event":
             # Test control: push one SSE event to every stream.
             broadcast(body)
@@ -3125,11 +3139,18 @@ class Handler(BaseHTTPRequestHandler):
             broadcast({"type": "notification-settings-changed", **document})
             return self.reply(200, document)
         if url.path == "/chat-read":
-            record({"method": "POST", "path": url.path, "body": body})
             session = body.get("session", "")
             agent_id = next((a["agent_id"] for a in agents if a["session"] == session), "")
-            broadcast({"type": "chat-read", "session": session, "agent_id": agent_id, "at_ms": int(time.time() * 1000)})
-            return self.reply(200, {"ok": True})
+            receipt = {"session": session, "agent_id": agent_id, "at_ms": int(time.time() * 1000)}
+            with state_lock:
+                ordered = chat_read_receipts.pop(0) if chat_read_receipts else None
+            if ordered is None:
+                broadcast({"type": "chat-read", **receipt})
+            else:
+                if ordered.pop("hold", False) and not chat_read_release.wait(15):
+                    return self.reply(503, {"error": "fixture did not release chat-read"})
+                receipt.update(ordered)
+            return self.reply(200, {"ok": True, **receipt})
         if url.path == "/tool-explanations/settings":
             for key in ("enabled", "detail_level"):
                 if key in body:
@@ -3510,9 +3531,12 @@ def main():
     parser.add_argument("--log", required=True)
     parser.add_argument("--roster", type=int, default=0)
     parser.add_argument("--peer", action="store_true")
+    parser.add_argument("--without-notification-events", action="store_true")
     parser.add_argument("--timed-row", action="store_true", help="show an ongoing turn for elapsed-time layout review")
     parser.add_argument("--rich", action="store_true")
     args = parser.parse_args()
+    global notification_events_offered
+    notification_events_offered = not args.without_notification_events
     log_path = args.log
     if args.peer:
         become_peer()
