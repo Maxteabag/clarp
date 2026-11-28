@@ -41,6 +41,7 @@ struct UnreadSource {
 
 #[derive(Default)]
 pub(crate) struct Notifications {
+    storage_host: String,
     // One high-water mark per Host, chat and process generation.
     boundaries: HashMap<(String, String, String), (u64, u64)>,
     // Unread contributors per chat. Keep only the maximum within each
@@ -163,6 +164,9 @@ impl Engine {
         }
         if !host.is_empty() && let Some(order) = order {
             self.apply_read(session, host.to_owned(), ReadTarget::Through(order.clone()));
+            // POST /chat-read stamps the Host's current position. Sending it for
+            // an older popup would mark later alerts read on every device.
+            return;
         }
         if self.notifications.offered {
             self.api.post_json(&format!("chat-read:{session}"), "/chat-read", json!({"session": session}), None);
@@ -351,6 +355,7 @@ impl Engine {
 
     /// `/server-info` answered: whether the Host keeps settings per event.
     pub(crate) fn notifications_server_info(&mut self, info: &Object) {
+        self.restore_notification_reads();
         let offered = info
             .get("capabilities")
             .and_then(|c| c.get("features"))
@@ -373,6 +378,69 @@ impl Engine {
         }
     }
 
+    fn notification_cache(&self) -> Option<clarp_core::transcript_cache::TranscriptCache> {
+        let cache = self.transcript_cache.as_ref()?;
+        Some(clarp_core::transcript_cache::TranscriptCache::new(cache.root().join("notification-reads")))
+    }
+
+    // /server-info identifies the stream before it starts. Use its stable Host
+    // identity both for the primary and for the same Host opened as a peer.
+    fn restore_notification_reads(&mut self) {
+        if self.notifications.storage_host == self.server_id {
+            return;
+        }
+        self.notifications.storage_host = self.server_id.clone();
+        self.notifications.boundaries.clear();
+        self.notifications.unread.clear();
+        let Some(cache) = self.notification_cache() else { return };
+        let saved = cache.load(&self.server_id, "reads");
+        for row in json::array(&saved, "boundaries") {
+            if let Ok((host, session, epoch, position)) = serde_json::from_value(row.clone()) {
+                self.notifications.boundaries.insert((host, session, epoch), position);
+            }
+        }
+        for row in json::array(&saved, "unread") {
+            if let Ok((session, host, decision, epoch, position)) = serde_json::from_value(row.clone()) {
+                self.notifications.unread.entry(session).or_default().insert(UnreadSource { host, decision, epoch }, position);
+            }
+        }
+        self.restore_notification_badges();
+    }
+
+    fn save_notification_reads(&self) {
+        let Some(cache) = self.notification_cache() else { return };
+        let state = &self.notifications;
+        if state.storage_host.is_empty() {
+            return;
+        }
+        let boundaries: Vec<_> = state.boundaries.iter().map(|((host, session, epoch), pos)| (host, session, epoch, pos)).collect();
+        let unread: Vec<_> = state.unread.iter().flat_map(|(session, entries)| {
+            entries.iter().map(move |(source, pos)| (session, &source.host, &source.decision, &source.epoch, pos))
+        }).collect();
+        let mut snapshot = Object::new();
+        snapshot.insert("boundaries".into(), json!(boundaries));
+        snapshot.insert("unread".into(), json!(unread));
+        if let Err(error) = cache.save(&state.storage_host, "reads", &snapshot) {
+            eprintln!("Engine: saving notification reads: {error}");
+        }
+    }
+
+    pub(crate) fn forget_notification_reads(&mut self) {
+        if let Some(cache) = self.notification_cache() {
+            cache.remove(&self.notifications.storage_host, "reads");
+        }
+        self.notifications = Notifications::default();
+    }
+
+    pub(crate) fn restore_notification_badges(&mut self) {
+        for session in self.notifications.unread.keys() {
+            self.roster.mark_unread(session);
+        }
+        if !self.roster.take_ops().is_empty() {
+            self.changes.push(Change::Roster);
+        }
+    }
+
     /// Replies for the notification routes; true when it was one.
     pub(crate) fn notifications_json(&mut self, tag: &str, object: &Object) -> bool {
         if tag == SETTINGS_TAG {
@@ -383,7 +451,13 @@ impl Engine {
             self.undo_answered(decision_id, object);
             return true;
         }
-        tag.starts_with("chat-read:")
+        if let Some(session) = tag.strip_prefix("chat-read:") {
+            if object.get("session").and_then(Value::as_str) == Some(session) {
+                self.chat_read_event(session, object);
+            }
+            return true;
+        }
+        false
     }
 
     pub(crate) fn notifications_failure(&mut self, tag: &str, detail: &str) -> bool {
@@ -463,6 +537,7 @@ impl Engine {
                 self.mutate_roster(|r| r.clear_unread(session));
             }
         }
+        self.save_notification_reads();
         self.changes.push(Change::NotificationRead(session.into(), host, target));
     }
 
@@ -484,7 +559,7 @@ impl Engine {
             }
         }
         let selected = session == self.selected;
-        if !selected && incoming.unread != Some(false) && self.roster.find(&session).is_some_and(|a| !a.quiet) {
+        if !selected && incoming.unread != Some(false) && !session.is_empty() && !self.roster.find(&session).is_some_and(|a| a.quiet) {
             let key = UnreadSource {
                 host: incoming.host.clone(),
                 decision: incoming.decision_id.clone(),
@@ -493,10 +568,11 @@ impl Engine {
             let position = incoming.order.as_ref().map(|o| o.position);
             let latest = self.notifications.unread.entry(session.clone()).or_default().entry(key).or_default();
             *latest = (*latest).max(position);
+            self.save_notification_reads();
             self.mutate_roster(|r| r.apply_notification_event(event));
         }
         let quiet = self.roster.find(&session).is_some_and(|a| a.quiet);
-        if !incoming.alerts(quiet) || (selected && !self.notifications.offered) {
+        if json::string(event, "type") == "chat-unread" || !incoming.alerts(quiet) || (selected && !self.notifications.offered) {
             return;
         }
         if !self.notifications.recent.first_time(&incoming.notification_id) {

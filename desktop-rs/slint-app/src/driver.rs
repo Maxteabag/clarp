@@ -589,6 +589,7 @@ pub fn start_check(name: &str, out: String) {
         "keymap" => keymap_check(out),
         "voice" => voice_check(out),
         "desktop" => desktop_check(out),
+        "notify-restart" => notify_checks::restart_check(),
         "notify-daemon" => notify_checks::notify_daemon_check(out),
         "instance" => instance_check(out),
         "diagnostics" => diagnostics_check(out),

@@ -1195,6 +1195,7 @@ impl Engine {
             self.live_explanations(object.get("tool_explanations").and_then(Value::as_object));
         }
         self.mutate_roster(|r| r.apply_snapshot(object));
+        self.restore_notification_badges();
         self.changes.push(Change::Roster);
         self.archived.apply_snapshot(object);
         if !self.archived.take_ops().is_empty() {
@@ -2080,7 +2081,7 @@ impl Engine {
             clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, event),
             clarp_core::notify_events::SETTINGS_CHANGED => self.notification_settings_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
-            "user-notification" => {
+            "user-notification" | "chat-unread" => {
                 self.request_snapshot();
                 self.notification_event(event);
             }

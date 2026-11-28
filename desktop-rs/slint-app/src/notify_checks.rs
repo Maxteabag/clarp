@@ -354,3 +354,102 @@ fn approval_key(body: &str) -> Option<String> {
         (action == "choice:accepted").then(|| key.to_owned())
     })
 }
+
+/// Two real UI processes share the Host, data directory, notification daemon
+/// and session bus. Only their normal SSE receiver drives notification state.
+pub fn restart_check() {
+    fn journal() -> Vec<Value> {
+        let path = std::env::var("CLARP_RESTART_LOG").unwrap();
+        std::fs::read_to_string(path).unwrap_or_default().lines().map(|s| serde_json::from_str(s).unwrap()).collect()
+    }
+    fn press_fixture(key: &str) {
+        let path = std::path::PathBuf::from(std::env::var_os("CLARP_RESTART_LOG").unwrap());
+        std::fs::write(path.with_extension(key), []).unwrap();
+    }
+    fn ordered(text: &str, seq: u64) -> Value {
+        json!({"type":"user-notification","session":"mike","alert":true,"unread":true,
+               "preview":text,"notification_id":text,"decision_id":text,"order_epoch":"one","event_at_ms":51,"event_seq":seq})
+    }
+    fn read(seq: u64) -> Value {
+        json!({"type":"chat-read","session":"mike","order_epoch":"one","read_through_ms":51,"read_through_seq":seq})
+    }
+    let first = std::env::var("CLARP_CHECK_PASS").as_deref() == Ok("first");
+    let mut stages: Vec<Stage> = vec![("connected", Box::new(move |app, window, _| {
+        if app.engine.borrow().connection_state() != "live" || app.engine.borrow().server_id().is_empty() || app.engine.borrow().roster().find("mike").is_none() {
+            return false;
+        }
+        window.invoke_chat_chosen("rachel".into());
+        if first {
+            send(ordered("covered first", 2));
+        } else {
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "the larger sequence is still unread on restart");
+            send(ordered("covered first", 2));
+            send(read(2));
+            send(read(1));
+            let mut wrong = read(9);
+            wrong["order_epoch"] = "other".into();
+            send(wrong);
+            let mut foreign = read(9);
+            foreign["server_instance_id"] = "foreign".into();
+            send(foreign);
+            send(json!({"type":"agent-focus","session":"mike"}));
+        }
+        true
+    }))];
+    if first {
+        stages.push(("first alert delivered", Box::new(|_, _, _| {
+            if !journal().iter().any(|r| r["body"] == "covered first") { return false; }
+            send(read(2));
+            send(ordered("before restart", 3));
+            true
+        })));
+        stages.push(("daemon displayed", Box::new(|_, _, _| journal().iter().any(|r| r["body"] == "before restart"))));
+    } else {
+        stages.push(("replayed events processed", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            let mike = engine.roster().find("mike").unwrap();
+            if !mike.focused { return false; }
+            check(mike.unread, "stale, foreign and missing-order reads preserve unread");
+            send(json!({"type":"chat-read","session":"mike","decision_id":"before restart"}));
+            true
+        })));
+        stages.push(("restored decision cleared", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("mike").unwrap().unread { return false; }
+            send(ordered("after restart", 4));
+            true
+        })));
+        stages.push(("daemon reused ID", Box::new(|app, _, elapsed| {
+            let rows = journal();
+            if !rows.iter().any(|r| r["body"] == "after restart") || elapsed < Duration::from_millis(500) { return false; }
+            check(rows.iter().filter(|r| r["body"] == "covered first").count() == 1, "the covered alert never displays again");
+            check(rows.iter().all(|r| r.get("close").is_none() || r["close"] == "covered first"), "no close by a saved daemon ID");
+            check(rows.iter().find(|r| r["body"] == "after restart").unwrap()["replaces"] == 0, "the new app requests a fresh popup");
+            press_fixture("stale");
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "the later alert keeps its unread mark");
+            true
+        })));
+        stages.push(("old native action delivered", Box::new(|app, _, elapsed| {
+            if !journal().iter().any(|r| r["pressed"] == "stale") || elapsed < Duration::from_millis(500) { return false; }
+            check(super::posts("/chat-read").is_empty() && app.engine.borrow().roster().find("mike").unwrap().unread,
+                  "the old action cannot act on the reused ID");
+            press_fixture("current");
+            true
+        })));
+        stages.push(("current popup read", Box::new(|app, _, _| {
+            if !journal().iter().any(|r| r["close"] == "after restart") { return false; }
+            check(!app.engine.borrow().roster().find("mike").unwrap().unread, "the covering read clears the current evidence");
+            send(json!({"type":"chat-unread","session":"mike","unread":true,"preview":"quiet failure"}));
+            send(read(99));
+            send(json!({"type":"agent-focus","session":"rachel"}));
+            true
+        })));
+        stages.push(("unordered evidence survives", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            if !engine.roster().find("rachel").is_some_and(|a| a.focused) { return false; }
+            check(engine.roster().find("mike").unwrap().unread, "chat-unread survives a read without comparable order");
+            check(journal().iter().all(|r| r["body"] != "quiet failure"), "chat-unread never pops up");
+            true
+        })));
+    }
+    run_stages(stages);
+}

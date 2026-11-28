@@ -445,7 +445,7 @@ pub const FAILURE: &str = "failure:";
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 struct Shown {
     id: u32,
-    action_generation: u64,
+    action_generation: u128,
     session: String,
     message_id: String,
     host: String,
@@ -656,7 +656,7 @@ pub fn action_invoked(id: u32, key: &str) {
         key
     } else {
         let Some((generation, action)) = key.split_once(':') else { return };
-        if generation.parse::<u64>().ok() != Some(popup.action_generation) {
+        if generation.parse::<u128>().ok() != Some(popup.action_generation) {
             return;
         }
         action
@@ -809,14 +809,7 @@ fn send(note: Note, closed: Option<u32>) {
     let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
     // The daemon may reuse a popup ID. Give each explicit button an identity
     // that stays with the popup that supplied it, even if its signal arrives late.
-    thread_local! {
-        static ACTION_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-    }
-    let action_generation = ACTION_GENERATION.with(|counter| {
-        let next = counter.get().wrapping_add(1);
-        counter.set(next);
-        next
-    });
+    let action_generation = uuid::Uuid::new_v4().as_u128();
     let mut actions = actions(&note);
     for pair in actions.chunks_exact_mut(2).skip(1) {
         pair[0] = format!("{action_generation}:{}", pair[0]);

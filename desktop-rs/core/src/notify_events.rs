@@ -229,7 +229,11 @@ impl AlertOrder {
             return None;
         }
         // The desktop receives SSE, whose components are JSON integers.
-        Some(Self { epoch: epoch.into(), position: (event.get(ms)?.as_u64()?, event.get(seq)?.as_u64()?) })
+        let sequence = event.get(seq)?.as_u64()?;
+        if sequence == 0 {
+            return None;
+        }
+        Some(Self { epoch: epoch.into(), position: (event.get(ms)?.as_u64()?, sequence) })
     }
 }
 
