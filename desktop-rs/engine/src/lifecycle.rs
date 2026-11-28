@@ -384,10 +384,13 @@ impl Engine {
     }
 
     pub fn start_anonymous_agent(&mut self, backend: &str, model: &str, effort: &str) -> bool {
+        if !self.check_launch_backend(backend) {
+            return false;
+        }
         if self.retry_created_agent() {
             return true;
         }
-        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() || !self.check_launch_backend(backend) {
+        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
             return false;
         }
         let body = with_llm(json!({"anonymous": true, "backend": backend}), model, effort);
@@ -398,10 +401,13 @@ impl Engine {
     /// Starts whichever contact the Host's pool has free; an empty pool
     /// answers with [`Change::LaunchPoolEmpty`].
     pub fn start_available_contact(&mut self, backend: &str, model: &str, effort: &str) -> bool {
+        if !self.check_launch_backend(backend) {
+            return false;
+        }
         if self.retry_created_agent() {
             return true;
         }
-        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() || !self.check_launch_backend(backend) {
+        if !self.connected || backend.is_empty() || !self.launch.starting_contact.is_empty() {
             return false;
         }
         let body = with_llm(json!({"auto_contact": true, "backend": backend}), model, effort);

@@ -390,6 +390,11 @@ pub(super) fn launch_check(out: String) {
                 "an explicit ACP launch explains the old Host's limitation");
             check(last_create()["name"] == "Zed" && selected(app) == "zed-new",
                 "an unavailable explicit launch sent no replacement request and left the selected chat alone");
+            {
+                let engine = app.engine.borrow();
+                check(engine.last_backend() == "codex" && engine.settings().string("launch/backend", "") == "codex",
+                    "an unavailable explicit launch leaves the stored harness default alone");
+            }
             hub.invoke_cancel();
             check(control("/__control/catalog", &json!({"providers": {
                 "claude": {"label": "Claude", "sort_index": 1},
