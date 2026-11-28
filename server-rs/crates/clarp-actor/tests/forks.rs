@@ -221,6 +221,7 @@ impl World {
         let marks = Marks {
             coordination: Some("a-boss".to_string()),
             trace_named: true,
+            owner_admission: false,
             user_word: false,
             wait_for_turn: false,
         };
