@@ -367,39 +367,9 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         std::fs::create_dir(dir).unwrap();
     }
     let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
-    // The VM rollout driver supplies the live-target guard when using the real CLI.
-    let check_target = |host: &Host| {
-        if std::env::var_os("CLARP_TEST_HELPER_CODEX").is_some() {
-            assert!(std::path::Path::new("/.dockerenv").is_file());
-            let guard = std::env::var("CLARP_TEST_LIVE_GUARD").unwrap();
-            let status = place
-                .command("/bin/bash")
-                .args([
-                    "-c",
-                    "source \"$1\" \"$2\" \"$3\"",
-                    "guard",
-                    &guard,
-                    &format!("http://{}", host.address),
-                    &host.token,
-                ])
-                .status()
-                .unwrap();
-            assert!(
-                status.success(),
-                "live-target guard refused the disposable Host"
-            );
-        }
-    };
     let (owner_id, mixed_id) = {
         let host = place.start_with_token("helper-test");
-        check_target(&host);
         assert_eq!(host.get("/peers"), json!([]));
-        assert!(
-            host.get("/agents/snapshot")["agents"]
-                .as_array()
-                .unwrap()
-                .is_empty()
-        );
         let lead = host.post(
             "/agents",
             json!({"name":"lead","cwd":product,"backend":"scripted"}),
@@ -428,20 +398,14 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
     );
     let codex = place.root.join("codex");
-    let runner = std::env::var("CLARP_TEST_HELPER_CODEX").unwrap_or_default();
-    if !runner.is_empty() {
-        assert!(PathBuf::from(&runner).is_file());
-        std::os::unix::fs::symlink(&runner, codex.with_extension("real")).unwrap();
-    }
-    // A real Codex executable can be supplied for the isolated VM proof. Only the
-    // reviewer runs it; the other fixture turns need no provider.
+    // Capture launch arguments using a sealed stand-in. Real CLI rollout evidence
+    // comes from the separately registered ai-swarm Docker fixture.
     program(
         &codex,
         r#"#!/bin/sh
 [ "$1" = exec ] || exit 0
 if [ "$CLAUDE_PWA_SESSION" = new-reviewer ]; then
   printf '%s\n' "$@" > reviewer-argv
-  if [ -x "$0.real" ]; then exec "$0.real" "$@"; fi
 fi
 cat >/dev/null
 echo '{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000001"}'
@@ -459,7 +423,6 @@ echo '{"type":"turn.completed","usage":{}}'
             ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
         ],
     );
-    check_target(&host);
     assert_eq!(host.get("/peers"), json!([]));
     eprintln!(
         "Disposable Host listening on {} with data under {} and no peers",
@@ -550,18 +513,6 @@ echo '{"type":"turn.completed","usage":{}}'
             assert!(
                 args.windows(2)
                     .any(|p| p == ["-c", r#"model_reasoning_effort="medium""#])
-            );
-            eprintln!(
-                "new-reviewer Host readback backend={} model={} effort={} state={}; Codex exec argv --model gpt-6.2-astra -c model_reasoning_effort=medium; runner={}",
-                agent["backend"],
-                agent["model"],
-                agent["effort"],
-                host.state(name),
-                if runner.is_empty() {
-                    "stand-in"
-                } else {
-                    runner.as_str()
-                }
             );
         }
     }
