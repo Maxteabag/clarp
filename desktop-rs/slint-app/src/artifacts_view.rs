@@ -12,7 +12,7 @@ use slint::Model;
 
 use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, CardHint};
 
-fn text(value: &Value, key: &str) -> String {
+pub(crate) fn text(value: &Value, key: &str) -> String {
     match value.get(key) {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Number(number)) => number.to_string(),
@@ -20,7 +20,7 @@ fn text(value: &Value, key: &str) -> String {
     }
 }
 
-fn number(value: &Value, key: &str) -> i64 {
+pub(crate) fn number(value: &Value, key: &str) -> i64 {
     value.get(key).and_then(|v| v.as_i64().or_else(|| v.as_f64().map(|f| f as i64))).unwrap_or(0)
 }
 
@@ -698,6 +698,9 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
         item.poster = poster;
         item.has_poster = true;
     }
+    if matches!(item.kind.as_str(), "decision" | "question") {
+        crate::decision_cards::apply(&mut item, artifact, engine);
+    }
     if item.pending {
         let choices = item.options.row_count() + usize::from(item.allow_custom);
         item.chosen = state.choices.get(item.id.as_str()).copied().filter(|c| (*c as usize) < choices).unwrap_or(-1);
@@ -735,30 +738,31 @@ fn card_hints(item: &ArtifactItem, overrides: &crate::keymap::Overrides) -> Vec<
     let key = |action: &str| card_key(action, overrides);
     let mut hints = Vec::new();
     if matches!(item.kind.as_str(), "decision" | "question") {
-        if !item.pending {
+        if !item.pending || item.collapsed {
             return hints;
         }
-        let answers = item.options.row_count() + usize::from(item.allow_custom);
+        // A digit sends its answer at once; the one after the answers opens
+        // the user's own.
+        let answers = item.options.row_count();
         if item.approval {
             for (index, option) in item.options.iter().enumerate() {
-                hints.push(CardHint { chosen: item.chosen == index as i32, ..hint(&(index + 1).to_string(), &option.label, &format!("answer:{index}")) });
+                hints.push(hint(&(index + 1).to_string(), &option.label, &format!("answer:{index}")));
             }
+        } else if answers > 0 {
+            let digits = if answers == 1 { "1".to_owned() } else { format!("1-{}", answers.min(9)) };
+            // i18n: decision card, key hint beside the digits that send an answer (verb)
+            hints.push(hint(&digits, &clarp_core::tr!("card.hint.answer" => "Answer"), ""));
         }
-        // The chosen answer's digit again sends it (Enter is the
-        // composer's); a written answer's field sends on its own Enter.
-        // Before a choice Send is a button with no key (a click says to
-        // choose first).
         if item.editing {
             hints.push(hint("Enter", "Send", "send"));
-        } else if (0..answers as i32).contains(&item.chosen) {
-            hints.push(hint(&format!("{} again", item.chosen + 1), "Send", "send"));
-        } else if answers > 0 {
-            hints.push(hint("", "Send", "send"));
-        }
-        if item.editing {
             hints.push(hint("Esc", "Keep draft", "keep-draft"));
         } else {
-            hints.push(hint(&key("artifact-discard"), "Discard", "discard"));
+            if item.allow_custom && answers < 9 {
+                // i18n: decision card, key hint beside the digit that opens the field for the user's own answer (noun)
+                hints.push(hint(&(answers + 1).to_string(), &clarp_core::tr!("card.hint.own" => "Own answer"), &format!("answer:{answers}")));
+            }
+            // i18n: decision card, key hint beside the key that dismisses the question without answering (verb)
+            hints.push(hint(&key("artifact-discard"), &clarp_core::tr!("card.dismiss" => "Dismiss"), "discard"));
         }
         return hints;
     }
@@ -784,29 +788,42 @@ pub fn update_cards(model: &slint::VecModel<ArtifactItem>, cards: Vec<ArtifactIt
         model.set_vec(cards);
         return;
     }
-    for (index, card) in cards.into_iter().enumerate() {
-        if model.row_data(index).as_ref() != Some(&card) {
+    for (index, mut card) in cards.into_iter().enumerate() {
+        let old = model.row_data(index);
+        if let Some(old) = old.as_ref() {
+            crate::decision_cards::keep_models(old, &mut card);
+        }
+        if old.as_ref() != Some(&card) {
             model.set_row_data(index, card);
         }
     }
 }
 
-/// iOS `DecisionResponseView`: while pending the question, why and how
-/// urgent, and its answers; once answered, how and with what.
+/// A decision's or question's fields from its artifact: the question, why
+/// and how urgent, its answers (letters, an approval's ✓ and ✕) and the
+/// user's own answer row while pending; once settled the one line it folds
+/// to. Which Host features apply is `decision_cards::apply`'s.
 fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
     let Some(decision) = artifact.get("decision").filter(|d| d.is_object()) else { return };
     let status = text(decision, "status");
+    // The card is the question: no summary line beside it.
+    item.summary = Default::default();
     item.question = text(decision, "question").into();
+    if item.question.is_empty() {
+        item.question = item.title.clone();
+    }
     item.context = text(decision, "context").into();
     let response = text(decision, "response_type");
     item.approval = response.is_empty() || response == "approval";
+    let custom_text = decision.get("allow_custom_text").and_then(Value::as_bool);
+    let label = |key: &str, fallback: &str| Some(text(decision, key)).filter(|l| !l.is_empty()).unwrap_or_else(|| fallback.to_owned());
+    let (yes, no) = (label("yes_label", "Yes"), label("no_label", "No"));
     let options: Vec<ArtifactOption> = if item.approval {
-        let label = |key: &str, fallback: &str| Some(text(decision, key)).filter(|l| !l.is_empty()).unwrap_or_else(|| fallback.to_owned());
         vec![
-            ArtifactOption { id: "yes".into(), label: label("yes_label", "Yes").into(), ..ArtifactOption::default() },
-            ArtifactOption { id: "no".into(), label: label("no_label", "No").into(), ..ArtifactOption::default() },
+            ArtifactOption { id: "yes".into(), label: yes.clone().into(), badge: "✓".into(), ..ArtifactOption::default() },
+            ArtifactOption { id: "no".into(), label: no.clone().into(), badge: "✕".into(), ..ArtifactOption::default() },
         ]
-    } else {
+    } else if response == "single_choice" {
         let recommended = text(decision, "recommended_option_id");
         decision
             .get("options")
@@ -814,23 +831,27 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
             .map(|options| {
                 options
                     .iter()
-                    .map(|o| {
+                    .enumerate()
+                    .map(|(index, o)| {
                         let (id, label) = (text(o, "id"), text(o, "label"));
                         let recommended = !recommended.is_empty() && id == recommended && !label.to_lowercase().contains("recommended");
-                        ArtifactOption { id: id.into(), label: label.into(), detail: text(o, "description").into(), recommended }
+                        ArtifactOption { id: id.into(), label: label.into(), detail: text(o, "description").into(), recommended, badge: crate::decision_cards::letter(index).into() }
                     })
                     .collect()
             })
             .unwrap_or_default()
+    } else {
+        Vec::new()
     };
     item.pending = status == "pending";
     item.chosen = -1;
-    item.allow_custom = !item.approval && decision.get("allow_custom_text").and_then(Value::as_bool) == Some(true);
-    // A question keeps its options once answered, the answer marked, so
-    // its card keeps its height.
-    if response == "single_choice" {
-        item.options = slint::ModelRc::new(slint::VecModel::from(options.clone()));
-    }
+    // The own answer row: a question's unless the agent said no, a text
+    // request's always, an approval's where the Host takes words on one.
+    item.allow_custom = match response.as_str() {
+        "single_choice" => custom_text != Some(false),
+        "text_input" => true,
+        _ => custom_text == Some(true),
+    };
     if item.pending {
         let mut meta = Vec::new();
         if !text(decision, "priority_reason").is_empty() {
@@ -847,13 +868,11 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
         } else if text(decision, "urgency") == "time_sensitive" {
             meta.push("Time sensitive".into());
         }
-        if !item.approval && response != "single_choice" {
+        if !item.approval && !matches!(response.as_str(), "single_choice" | "text_input") {
             meta.push("Update Clarp to answer this kind of question".into());
         }
         item.meta = meta.join(" · ").into();
-        if item.approval {
-            item.options = slint::ModelRc::new(slint::VecModel::from(options));
-        }
+        item.options = slint::ModelRc::new(slint::VecModel::from(options));
         return;
     }
     let (resolved, ok) = match status.as_str() {
@@ -873,34 +892,62 @@ fn decision_fields(item: &mut ArtifactItem, artifact: &Value) {
     item.resolved_ok = ok;
     let answer = decision.get("answer").cloned().unwrap_or(Value::Null);
     let chosen = text(&answer, "option_id");
+    let picked = options.iter().position(|o| !chosen.is_empty() && o.id == chosen.as_str());
     item.answer = [text(&answer, "text"), text(&answer, "label")]
         .into_iter()
         .find(|t| !t.is_empty())
-        .or_else(|| options.iter().find(|o| !chosen.is_empty() && o.id == chosen.as_str()).map(|o| o.label.to_string()))
+        .or_else(|| picked.map(|i| options[i].label.to_string()))
         .unwrap_or_default()
         .into();
     if !text(&answer, "text").is_empty() {
         item.chosen = options.len() as i32;
         item.draft = text(&answer, "text").into();
-    } else if let Some(index) = options.iter().position(|o| !chosen.is_empty() && o.id == chosen.as_str()) {
+    } else if let Some(index) = picked {
         item.chosen = index as i32;
     }
     if decision.get("delivery_pending").and_then(Value::as_bool) == Some(true) {
         item.delivery = "Saved. Waiting to deliver to the agent.".into();
     }
+    // Settled, the card is one line.
+    let question = item.question.to_string();
+    let (kind, value, ok) = match status.as_str() {
+        "answered" if !text(&answer, "text").is_empty() => ("answered", text(&answer, "text"), true),
+        "answered" => match picked {
+            Some(index) => ("chose", format!("{} · {}", options[index].badge, options[index].label), true),
+            None => ("chose", item.answer.to_string(), true),
+        },
+        "accepted" => ("chose", yes, true),
+        "rejected" => ("chose", no, true),
+        "cancelled" => match text(decision, "resolved_choice").as_str() {
+            "withdrawn" => ("withdrawn", question, false),
+            "superseded" => ("closed", question, false),
+            _ => ("dismissed", question, false),
+        },
+        "expired" => ("expired", question, false),
+        _ => ("", question, false),
+    };
+    item.collapsed = !kind.is_empty();
+    item.collapsed_kind = kind.into();
+    item.collapsed_value = crate::decision_cards::one_line(&value).into();
+    item.collapsed_ok = ok;
 }
 
-/// 1-9 on a card: the answer the keyboard chose.
+/// 1-9 on a card: the answer with that digit, sent at once; the digit
+/// after the answers opens the user's own answer.
 pub fn choose(app: &App, id: &str, index: i32) {
-    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
+    let Some(card) = crate::decision_cards::current(app, id).filter(|c| c.pending && !c.collapsed) else { return };
     let options = card.options.row_count();
     if index < 0 || index as usize > options || (index as usize == options && !card.allow_custom) {
         return;
     }
+    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    if (index as usize) < options {
+        crate::decision_cards::answer(app, id, index);
+        return;
+    }
     app.artifact_choices.borrow_mut().insert(id.to_owned(), index);
     // The last number is an answer of one's own: its field takes the keyboard.
-    *app.artifact_editing.borrow_mut() = if index as usize == options { id.to_owned() } else { String::new() };
-    *app.artifact_cursor.borrow_mut() = id.to_owned();
+    *app.artifact_editing.borrow_mut() = id.to_owned();
     app.refresh(&[Change::Updates]);
 }
 
@@ -909,45 +956,15 @@ pub fn card_item(app: &App, id: &str) -> Option<ArtifactItem> {
     app.active_messages()?.iter().flat_map(|row| row.artifacts.iter().collect::<Vec<_>>()).find(|a| a.id == id)
 }
 
-/// Sends a decision's chosen answer.
+/// Sends the user's own answer as written.
 pub fn send(app: &App, id: &str) {
-    let Some(artifact) = artifact(app, id) else { return };
-    let Some(card) = card_item(app, id).filter(|c| c.pending) else { return };
-    let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
-    let own = card.allow_custom && card.chosen == card.options.row_count() as i32;
-    if own {
-        // iOS caps an answer of one's own at 4,000 characters.
-        let written: String = app.artifact_drafts.borrow().get(id).map(|d| d.trim().chars().take(4000).collect()).unwrap_or_default();
-        if written.is_empty() {
-            app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first: write one");
-            app.refresh(&[Change::Updates]);
-            return;
-        }
-        app.artifact_editing.borrow_mut().clear();
-        // Sent: the keyboard is back on the chat.
-        app.focus_transcript();
-        app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", serde_json::json!({"answer": {"text": written}}), number(&decision, "revision"));
-        pump();
-        return;
-    }
-    let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
-        app.engine.borrow_mut().set_artifact_status(id, "Choose an answer first (1-9)");
-        app.refresh(&[Change::Updates]);
-        return;
-    };
-    let body = if card.approval {
-        serde_json::json!({"choice": if option.id == "yes" { "accepted" } else { "rejected" }})
-    } else {
-        serde_json::json!({"answer": {"option_id": option.id.as_str()}})
-    };
-    app.engine.borrow_mut().send_decision(id, &text(&decision, "decision_id"), "resolve", body, number(&decision, "revision"));
-    pump();
+    crate::decision_cards::send_own(app, id);
 }
 
-/// Discards a pending decision (iOS "Discard").
+/// Dismisses a pending decision (the card's ×, Delete).
 pub fn discard(app: &App, id: &str) {
-    let Some(artifact) = artifact(app, id) else { return };
-    if !card_item(app, id).is_some_and(|c| c.pending) {
+    let Some(artifact) = crate::decision_cards::decision_artifact(app, id) else { return };
+    if !crate::decision_cards::current(app, id).is_some_and(|c| c.pending) {
         return;
     }
     let decision = artifact.get("decision").cloned().unwrap_or(Value::Null);
@@ -956,7 +973,7 @@ pub fn discard(app: &App, id: &str) {
 }
 
 /// Shows the engine's change at once.
-fn pump() {
+pub(crate) fn pump() {
     if let Some(app) = crate::app() {
         crate::pump_now(&app);
     }
@@ -1596,10 +1613,7 @@ fn hint_clicked(app: &App, window: &AppWindow, id: &str, action: &str) {
             stop(app);
         }
         _ => match action.strip_prefix("answer:").and_then(|i| i.parse::<i32>().ok()) {
-            Some(index) => {
-                choose(app, id, index);
-                send(app, id);
-            }
+            Some(index) => choose(app, id, index),
             None => eprintln!("clarp-slint: no hint action {action}"),
         },
     }
@@ -2248,6 +2262,7 @@ pub fn bind(window: &AppWindow) {
         }
     });
     bridge.on_editing_changed(|id, editing| {
+        crate::decision_cards::field_focus(&id, editing);
         if let Some(app) = crate::app() {
             if !editing && *app.artifact_editing.borrow() == id.as_str() {
                 // Left without sending: the field stays with its draft, but
@@ -2255,6 +2270,27 @@ pub fn bind(window: &AppWindow) {
                 app.artifact_editing.borrow_mut().clear();
                 app.refresh(&[Change::Updates]);
             }
+        }
+    });
+    bridge.on_answer(|id, index| {
+        if let Some(app) = crate::app() {
+            *app.artifact_cursor.borrow_mut() = id.to_string();
+            crate::decision_cards::answer(&app, &id, index);
+        }
+    });
+    bridge.on_undo(|id| {
+        if let Some(app) = crate::app() {
+            crate::decision_cards::undo(&app, &id);
+        }
+    });
+    bridge.on_voice_press(|id| {
+        if let Some(app) = crate::app() {
+            crate::decision_cards::voice_press(&app, &id);
+        }
+    });
+    bridge.on_voice_release(|id| {
+        if let Some(app) = crate::app() {
+            crate::decision_cards::voice_release(&app, &id);
         }
     });
     bridge.on_discard(|id| {

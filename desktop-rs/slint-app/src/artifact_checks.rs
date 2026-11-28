@@ -380,6 +380,25 @@ fn top_shot(out: &str, name: &'static str) -> Vec<Stage> {
     ]
 }
 
+/// The chat as it is, in the light theme, then back to the dark one.
+fn light_shot(out: &str, name: &'static str) -> Vec<Stage> {
+    let out = out.to_owned();
+    vec![
+        ("to the light theme", Box::new(|_, window, _| {
+            crate::view::apply_theme(window, "paper", None);
+            true
+        })),
+        ("light shot", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(800) {
+                return false;
+            }
+            shot(&out, name);
+            crate::view::apply_theme(window, "terminal", None);
+            true
+        })),
+    ]
+}
+
 // ---- decision
 
 fn decision_stages(out: &str) -> Vec<Stage> {
@@ -448,12 +467,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
                 }
                 return false;
             }
-            headless::press("2");
-            let hold = card(window, "dec-deploy").map(|c| c.chosen).unwrap_or(-2);
-            headless::press("1");
-            let ship = card(window, "dec-deploy").map(|c| c.chosen).unwrap_or(-2);
-            check(hold == 1 && ship == 0, &format!("2 chooses Hold, 1 Ship it: {hold} {ship}"));
-            check(posts("/decisions/d-deploy/resolve").is_empty(), "choosing sends nothing yet");
+            // One digit sends its answer at once.
             headless::press("1");
             true
         })),
@@ -464,12 +478,12 @@ fn decision_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(body == json!({"choice": "accepted", "expected_revision": 4}), &format!("1 again approves against the revision seen: {body}"));
+            check(body == json!({"choice": "accepted", "expected_revision": 4, "undo_ms": 6000}), &format!("1 approves at once, held for undo, against the revision seen: {body}"));
             check(shown, &format!("the card shows it approved: {:?}", card(window, "dec-deploy").map(|c| c.resolved)));
+            check(card(window, "dec-deploy").is_some_and(|c| c.collapsed && c.collapsed_kind == "chose" && c.collapsed_value == "Ship it"), "and folds to one line: You chose: Ship it");
             // The other ways in: a refused answer, and discarding.
             let bridge = window.global::<ArtifactBridge>();
-            bridge.invoke_choose("dec-refused".into(), 1);
-            bridge.invoke_send("dec-refused".into());
+            bridge.invoke_answer("dec-refused".into(), 1);
             bridge.invoke_discard("dec-discard".into());
             true
         })),
@@ -480,8 +494,8 @@ fn decision_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let declined = posts("/decisions/d-refused/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(declined == json!({"choice": "rejected", "expected_revision": 2}), &format!("the second answer declines: {declined}"));
-            check(refused.contains("the decision changed since you saw it") && card(window, "dec-refused").is_some_and(|c| c.pending), &format!("a refused answer says why and stays open: {refused:?}"));
+            check(declined == json!({"choice": "rejected", "expected_revision": 2, "undo_ms": 6000}), &format!("the second answer declines: {declined}"));
+            check(refused.contains("the decision changed since you saw it") && card(window, "dec-refused").is_some_and(|c| c.pending && !c.collapsed), &format!("a refused answer says why and the card opens again: {refused:?}"));
             let dismissed = posts("/decisions/d-discard/dismiss").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
             check(dismissed == json!({"expected_revision": 4}) && discarded, &format!("discarding dismisses it: {dismissed}"));
             shot(&out, "artifacts-03-decision");
@@ -496,19 +510,20 @@ fn decision_stages(out: &str) -> Vec<Stage> {
             if elapsed < Duration::from_millis(600) {
                 return false;
             }
-            // A real pointer click on the latest card's first button ("Turn
-            // on"), found from the bottom of the chat up its left edge.
+            // A real pointer click on the latest card's lowest answer ("Not
+            // now"), found from the bottom of the chat up its left edge.
             let hit = (300..=760).rev().step_by(4).find(|y| {
                 super::click_at(window, 440.0, *y as f32);
                 !posts("/decisions/d-click/resolve").is_empty()
             });
             let body = posts("/decisions/d-click/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(hit.is_some() && body == json!({"choice": "accepted", "expected_revision": 4}), &format!("clicking an approval's button sends it at once (at y {hit:?}): {body}"));
+            check(hit.is_some() && body == json!({"choice": "rejected", "expected_revision": 4, "undo_ms": 6000}), &format!("clicking an approval's answer sends it at once (at y {hit:?}): {body}"));
             app_now().focus_transcript();
             true
         })),
     ]);
     stages.extend(top_shot(&out2, "artifacts-03b-decision-top"));
+    stages.extend(light_shot(&out2, "artifacts-03c-decision-top-light"));
     stages
 }
 
@@ -516,6 +531,7 @@ fn decision_stages(out: &str) -> Vec<Stage> {
 
 fn question_stages(out: &str) -> Vec<Stage> {
     let (out, out2, out3) = (out.to_owned(), out.to_owned(), out.to_owned());
+    let out4 = out.clone();
     let ids = ["q-trip", "q-custom", "q-picked", "q-written", "q-ranking", "q-escape", "q-click"];
     let tall: Rc<Cell<f32>> = Rc::default();
     let tall2 = tall.clone();
@@ -580,9 +596,6 @@ fn question_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             headless::press("2");
-            let chosen = card(window, "q-trip").map(|c| c.chosen).unwrap_or(-2);
-            check(chosen == 1 && posts("/decisions/q-trip/resolve").is_empty(), &format!("2 chooses Tromsø and sends nothing yet: {chosen}"));
-            headless::press("2");
             true
         })),
         ("question answered", Box::new(|_, window, elapsed| {
@@ -592,7 +605,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(body == json!({"answer": {"option_id": "tromso"}, "expected_revision": 7}), &format!("2 again sends the chosen option: {body}"));
+            check(body == json!({"answer": {"option_id": "tromso"}, "expected_revision": 7, "undo_ms": 6000}), &format!("2 sends Tromsø at once: {body}"));
             check(shown, "the card shows the answer saved");
             headless::press("j");
             true
@@ -634,7 +647,7 @@ fn question_stages(out: &str) -> Vec<Stage> {
                 return false;
             }
             let body = sent.last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(body == json!({"answer": {"text": "Friday, after lunch"}, "expected_revision": 7}), &format!("Enter in it sends the written answer: {body}"));
+            check(body == json!({"answer": {"text": "Friday, after lunch"}, "expected_revision": 7, "undo_ms": 6000}), &format!("Enter in it sends the written answer: {body}"));
             check(shown, "and the card shows it");
             shot(&out, "artifacts-04-question");
             true
@@ -697,19 +710,15 @@ fn question_stages(out: &str) -> Vec<Stage> {
             if elapsed < Duration::from_millis(600) {
                 return false;
             }
-            // Real pointer clicks on the latest card: an option, then Send
-            // answer (below the options; a click on it first says to choose).
+            // A real pointer click on the latest card's lowest answer
+            // (above its own-answer field) sends it at once.
             let option = (300..=760).rev().step_by(4).find(|y| {
-                super::click_at(window, 440.0, *y as f32);
-                card(window, "q-click").is_some_and(|c| c.chosen >= 0)
-            });
-            let chosen = card(window, "q-click").map(|c| c.chosen).unwrap_or(-1);
-            let send = (300..=760).rev().step_by(4).find(|y| {
                 super::click_at(window, 440.0, *y as f32);
                 !posts("/decisions/q-click/resolve").is_empty()
             });
             let body = posts("/decisions/q-click/resolve").last().map(|e| e["body"].clone()).unwrap_or(Value::Null);
-            check(option.is_some() && send.is_some() && body["answer"]["option_id"].is_string(), &format!("clicking an option and Send answer sends it (option {chosen} at {option:?}, send at {send:?}): {body}"));
+            check(option.is_some() && body["answer"]["option_id"].is_string(), &format!("clicking an option sends it at once (at {option:?}): {body}"));
+            app_now().focus_transcript();
             true
         })),
         ("clicked question answered", Box::new(move |_, window, elapsed| {
@@ -721,6 +730,8 @@ fn question_stages(out: &str) -> Vec<Stage> {
             true
         })),
     ]);
+    stages.extend(top_shot(&out4, "artifacts-04d-questions-answered-top"));
+    stages.extend(light_shot(&out4, "artifacts-04e-questions-answered-top-light"));
     stages
 }
 

@@ -608,6 +608,18 @@ impl Engine {
         }
     }
 
+    /// An artifact a reply carried (an undo's): into the list at once,
+    /// shaped as the list's items are.
+    pub(crate) fn apply_artifact_reply(&mut self, artifact_id: &str, mut item: Value) {
+        if !self.updates.plain_artifacts {
+            update_feeds::flatten(&mut item);
+        }
+        if item.is_object() {
+            let item = self.summarize_item(item);
+            self.patch_artifact(artifact_id, Some(item));
+        }
+    }
+
     fn finish_item(&mut self, artifact_id: &str) {
         self.updates.items_pending.remove(artifact_id);
         if self.updates.items_owed.remove(artifact_id) {

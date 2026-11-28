@@ -307,7 +307,6 @@ export component AppWindow inherits Window {
     in property <string> updates-error;
     out property <bool> updates-focused: updates.focused;
     callback updates-refresh();
-    callback resolve-decision(string, string, int);
     callback cancel-job(string);
     callback open-report(string);
     // Opens a chat from a panel (and goes back to the chats).
@@ -596,7 +595,6 @@ export component AppWindow inherits Window {
                     loading: root.updates-loading;
                     error: root.updates-error;
                     refresh => { root.updates-refresh(); }
-                    resolve(id, choice, revision) => { root.resolve-decision(id, choice, revision); }
                     cancel-job(id) => { root.cancel-job(id); }
                     job-output(id) => { root.job-output(id); }
                     open-report(id) => { root.open-report(id); }

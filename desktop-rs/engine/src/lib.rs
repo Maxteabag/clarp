@@ -48,6 +48,7 @@ mod roster_rows;
 mod teams;
 pub mod transit;
 mod updates;
+pub mod cards;
 pub use updates::{TranscriptImageReply, TranscriptImageRequest};
 mod viewport;
 mod artifact_summary;
@@ -344,6 +345,7 @@ pub struct Engine {
 
     // panels
     updates: updates::Updates,
+    cards: cards::Cards,
     artifact_summary: artifact_summary::ArtifactSummary,
     render_specs: render_spec::RenderSpecs,
     teams: teams::Teams,
@@ -495,6 +497,7 @@ impl Engine {
             send_while_working: send_while_working::SendWhileWorking::default(),
             // panels
             updates: Default::default(),
+            cards: Default::default(),
             artifact_summary: Default::default(),
             render_specs: Default::default(),
             teams: Default::default(),
@@ -1733,6 +1736,7 @@ impl Engine {
             self.queue_server_info(object);
             self.send_while_working_server_info(object);
             self.artifact_summary_server_info(object);
+            self.cards_server_info(object);
             self.live_rewatch();
             self.sse.start();
         } else if let Some(generation) = tag.strip_prefix("snapshot:") {

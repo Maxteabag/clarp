@@ -229,6 +229,12 @@ message_search = {"on": False, "partial": False, "page": 0}
 # until /__control/queue-steer turns it on. Then GET /turn-queue items carry
 # `steerable` (a `waiting` item of the user's while its agent works).
 queue_steer = {"on": False}
+# Decision cards (features decision_undo, approval_custom_text,
+# decision_voice_match): on unless /__control/cards turns them off before
+# the app connects. `too_late` makes every undo come too late.
+cards = {"on": True, "too_late": False, "resolve_delay": 0.0}
+# Attention items an answer took off the list, put back by its undo.
+answered_attention = {}
 # Send while working (#920, feature send_while_busy): off until
 # /__control/send-while-working turns it on. Then GET /send-settings says
 # {while_busy}, POST /send-settings {while_busy} changes it and sends
@@ -1389,6 +1395,10 @@ def artifact_fixtures(kind, session, now_ms):
             {"artifact_id": "dec-waiting", "type": "decision", "status": "completed", "session": s, "title": "Merge the docs PR",
              "decision": decision("d-waiting", "accepted", question="Merge it?", delivery_pending=True)},
             {"artifact_id": "dec-missing", "type": "decision", "status": "active", "session": s, "title": "A decision without its question"},
+            {"artifact_id": "dec-owed", "type": "decision", "status": "active", "session": s, "title": "Pause the nightly import",
+             "decision": decision("d-owed", "pending",
+                                  question="Pause the nightly import for the weekend while the warehouse team moves the customer tables to the new cluster, and start it again on Monday morning?",
+                                  context="The import reads from the old cluster. If it runs during the move it reads half-moved tables and Monday's numbers come out wrong. " * 3)},
             {"artifact_id": "dec-click", "type": "decision", "status": "active", "session": s, "title": "Turn on the nightly backups",
              "decision": decision("d-click", "pending", question="Back up every night at 03:00?", yes_label="Turn on", no_label="Not now")},
         ]
@@ -1791,6 +1801,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("message_search")
             if queue_steer["on"]:
                 features.append("queue_steer")
+            if cards["on"]:
+                features.extend(["decision_undo", "approval_custom_text", "decision_voice_match"])
             if send_while_working["on"]:
                 features.append("send_while_busy")
             if chat_view.get("grows"):
@@ -2679,6 +2691,9 @@ class Handler(BaseHTTPRequestHandler):
             global spoken_when_asked
             spoken_when_asked = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/cards":
+            cards.update({k: (float(v) if k == "resolve_delay" else bool(v)) for k, v in body.items() if k in cards})
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/queue-steer":
             queue_steer["on"] = bool(body.get("on", True))
             return self.reply(200, {"ok": True})
@@ -3150,7 +3165,10 @@ class Handler(BaseHTTPRequestHandler):
             decision = url.path.split("/")[2]
             owner = None
             with state_lock:
-                attention[:] = [a for a in attention if a.get("id") != decision]
+                for a in attention:
+                    if decision in (a.get("id"), a.get("decision_id")):
+                        answered_attention[decision] = a
+                attention[:] = [a for a in attention if decision not in (a.get("id"), a.get("decision_id"))]
                 for artifact in artifacts:
                     held = artifact.get("decision") or {}
                     if held.get("decision_id") == decision:
@@ -3170,12 +3188,70 @@ class Handler(BaseHTTPRequestHandler):
                     else:
                         held["status"] = body.get("choice")
                         held["resolved_choice"] = body.get("choice")
+                    if cards["on"] and int(body.get("undo_ms") or 0) > 0 and not url.path.endswith("/dismiss"):
+                        held["undoable"] = True
+                        held["undo_until"] = int(time.time() * 1000) + int(body["undo_ms"])
                     held["revision"] += 1
                     owner["status"] = "completed"
                     owner["updated_at"] = int(time.time() * 1000)
+            if cards["resolve_delay"] > 0:
+                time.sleep(cards["resolve_delay"])
             if owner is not None:
                 announce([owner.get("artifact_id", "")], owner.get("session", ""))
+                # The Host's answer: the artifact as it is now.
+                return self.reply(200, {"artifact": owner, "changed": True, "delivery_pending": False})
             return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
+        if cards["on"] and url.path.startswith("/decisions/") and url.path.endswith("/undo"):
+            # Takes a held answer back: the decision is open again at the
+            # next revision, its attention item listed again.
+            decision = url.path.split("/")[2]
+            now = int(time.time() * 1000)
+            owner = None
+            with state_lock:
+                for artifact in artifacts:
+                    if (artifact.get("decision") or {}).get("decision_id") == decision:
+                        owner = artifact
+                if owner is None:
+                    return self.reply(404, {"error": "not found"})
+                held = owner["decision"]
+                if held.get("status") == "pending":
+                    return self.reply(200, {"artifact": owner, "undone": False})
+                if body.get("expected_revision") != held.get("revision"):
+                    return self.reply(409, {"error": "the decision changed since you saw it"})
+                if cards["too_late"] or not held.get("undoable") or held.get("undo_until", 0) <= now:
+                    return self.reply(409, {"error": "too_late"})
+                held["status"] = "pending"
+                for key in ("answer", "resolved_choice", "undoable", "undo_until"):
+                    held.pop(key, None)
+                held["revision"] += 1
+                owner["status"] = "active"
+                owner["updated_at"] = now
+                if decision in answered_attention:
+                    attention.append(answered_attention.pop(decision))
+            announce([owner.get("artifact_id", "")], owner.get("session", ""))
+            broadcast({"type": "attention-updated"})
+            return self.reply(200, {"artifact": owner, "undone": True})
+        if cards["on"] and url.path.startswith("/decisions/") and url.path.endswith("/match"):
+            # A spoken answer, matched as the Host does in its simplest
+            # cases: a letter, yes or no, a command word; else the words.
+            decision = url.path.split("/")[2]
+            said = str(body.get("text", "")).strip().lower().strip(".!?")
+            words = said.removeprefix("option ").removeprefix("velg ").strip()
+            for command, spoken in (body.get("commands") or {}).items():
+                if words in [w.lower() for w in spoken]:
+                    return self.reply(200, {"kind": "command", "command": command})
+            with state_lock:
+                held = next(((a.get("decision") or {}) for a in artifacts if (a.get("decision") or {}).get("decision_id") == decision), {})
+            options = held.get("options") or []
+            if held.get("response_type") in (None, "", "approval"):
+                if words in ("yes", "ja", "ok"):
+                    return self.reply(200, {"kind": "approval", "choice": "accepted"})
+                if words in ("no", "nei"):
+                    return self.reply(200, {"kind": "approval", "choice": "rejected"})
+            elif len(words) == 1 and "a" <= words <= "z" and ord(words) - ord("a") < len(options):
+                option = options[ord(words) - ord("a")]
+                return self.reply(200, {"kind": "option", "option_id": option["id"], "label": option["label"]})
+            return self.reply(200, {"kind": "custom", "text": str(body.get("text", "")).strip()})
         if url.path.startswith("/artifacts/") and url.path.endswith("/submit"):
             # A form's answers: a receipt echoing the submission, or 409
             # when the form changed since it was opened.

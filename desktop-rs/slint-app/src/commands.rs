@@ -418,13 +418,8 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
     if action == "artifact-choose" {
         let Some(id) = crate::artifacts_view::selected(&app) else { return false };
         let index = chord.parse::<i32>().map_or(-1, |n| n - 1);
-        // The chosen answer's digit again sends it.
-        let chosen = crate::artifacts_view::card_item(&app, &id).is_some_and(|c| c.pending && c.chosen == index && !c.editing);
-        if chosen {
-            crate::artifacts_view::send(&app, &id);
-        } else {
-            crate::artifacts_view::choose(&app, &id, index);
-        }
+        // It sends that answer at once (the last opens one's own).
+        crate::artifacts_view::choose(&app, &id, index);
         show_hints(&app, &window);
         return true;
     }

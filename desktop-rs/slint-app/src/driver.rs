@@ -3235,7 +3235,9 @@ fn updates_check(out: String) {
             }
             let decision = |id: &str, title: &str, question: &str, context: &str, yes: &str, no: &str, revision: i64| serde_json::json!({
                 "id": id, "decision_id": id, "session": "mike", "agent_name": "Mike", "kind": "decision", "title": title,
-                "question": question, "context": context, "yes_label": yes, "no_label": no, "revision": revision});
+                "question": question, "context": context, "yes_label": yes, "no_label": no, "revision": revision,
+                // As a Host with approval_custom_text lists its approvals.
+                "allow_custom_text": true});
             let items = serde_json::json!({"items": [
                 decision("d1", "Deploy to production?", "The release branch is green. Ship it to production now?",
                          "All 214 tests pass; the canary has run for 30 minutes.", "Deploy", "Hold", 3),
@@ -3393,18 +3395,23 @@ fn updates_check(out: String) {
             true
         })),
         ("drawn", Box::new(move |_, window, _| {
+            let own: Vec<bool> = window.get_update_attention().iter().map(|d| d.card.allow_custom).collect();
+            check(own == [true, true], &format!("an approval ends with its own-answer row on a Host that takes words on one: {own:?}"));
             shot(&out2, "updates-02-panel");
-            window.invoke_resolve_decision("d1".into(), "yes".into(), 3);
-            check(window.get_update_attention().row_data(0).is_some_and(|d| d.pending), "a decision being resolved shows it");
+            use slint::ComponentHandle;
+            window.global::<crate::ArtifactBridge>().invoke_answer("d1".into(), 0);
             true
         })),
         ("resolved", Box::new(|_, window, _| {
-            if window.get_update_attention().row_count() != 1 || window.get_attention() != 1 {
+            // The answered card folds once its row has shown filled (150 ms)
+            // and stays in Updates, folded with Undo, for its window.
+            let folded = window.get_update_attention().iter().any(|d| d.card.id == "d1" && d.card.collapsed && d.card.undo_end > 0);
+            if window.get_attention() != 1 || !folded {
                 return false;
             }
             let posted = posts("/decisions/d1/resolve");
             check(
-                posted.len() == 1 && posted[0]["body"] == serde_json::json!({"choice": "accepted", "expected_revision": 3}),
+                posted.len() == 1 && posted[0]["body"] == serde_json::json!({"choice": "accepted", "expected_revision": 3, "undo_ms": 6000}),
                 &format!("Deploy accepts the decision at the revision shown: {posted:?}"),
             );
             window.invoke_cancel_job("j1".into());

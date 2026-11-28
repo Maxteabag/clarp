@@ -43,6 +43,12 @@ pub struct FormView {
     /// The action of the button last pressed (a version 2 button form):
     /// the one being sent while `sending`.
     pub pressed: Option<String>,
+    /// While the Host holds the answer back from the agent: until when
+    /// (epoch ms, 0 for no undo); "too-late" or why an undo failed.
+    pub undo_until: i64,
+    pub undo_note: String,
+    /// When the note was set (epoch ms): it shows for a moment.
+    pub undo_note_at: i64,
 }
 
 struct Entry {
@@ -57,7 +63,18 @@ struct Entry {
 impl Entry {
     fn new() -> Self {
         Entry {
-            view: FormView { state: FormState::Loading, values: Values::new(), accepted: None, sending: false, note: String::new(), closed: false, pressed: None },
+            view: FormView {
+                state: FormState::Loading,
+                values: Values::new(),
+                accepted: None,
+                sending: false,
+                note: String::new(),
+                closed: false,
+                pressed: None,
+                undo_until: 0,
+                undo_note: String::new(),
+                undo_note_at: 0,
+            },
             asked_for: i64::MIN,
             reading: None,
             submission_id: new_submission_id(),
@@ -77,6 +94,13 @@ pub(crate) struct RenderSpecs {
 
 const READ: &str = "render-spec-read:";
 const SUBMIT: &str = "render-spec-submit:";
+const UNDO: &str = "render-spec-undo:";
+
+/// The hold-for-undo fields of a receipt or a row, while the Host holds
+/// the answer (`decision_undo`).
+fn undo_until(object: &Value) -> i64 {
+    if object.get("undoable").and_then(Value::as_bool) == Some(true) { object.get("undo_until").and_then(Value::as_i64).unwrap_or(0) } else { 0 }
+}
 
 impl Engine {
     /// The form as the card draws it; None before its card asked for it.
@@ -160,6 +184,7 @@ impl Engine {
     }
 
     fn submit_render_spec(&mut self, artifact_id: &str, pressing: Option<&str>) {
+        let undo = self.cards_undo();
         let Some(entry) = self.render_specs.entries.get_mut(artifact_id) else { return };
         let view = &mut entry.view;
         let FormState::Form(form) = &view.state else { return };
@@ -169,7 +194,12 @@ impl Engine {
             return;
         }
         let Submission::Ready(answers) = form.submission(&view.values, pressing) else { return };
-        let body = json!({"submission_id": entry.submission_id, "version": form.version, "answers": answers});
+        let mut body = json!({"submission_id": entry.submission_id, "version": form.version, "answers": answers});
+        // A form answered with one click can be taken back for a moment.
+        if undo && form.one_tap() {
+            body["undo_ms"] = json!(crate::cards::UNDO_MS);
+        }
+        view.undo_note.clear();
         view.pressed = pressing.map(str::to_owned);
         view.sending = true;
         view.note.clear();
@@ -177,6 +207,19 @@ impl Engine {
         self.changes.push(Change::Updates);
         let path = format!("/artifacts/{}/submit", clarp_core::endpoint::percent_encode_segment(artifact_id));
         self.api.post_json(&tag, &path, body, None);
+    }
+
+    /// Takes a held answer back (`decision_undo`): the form opens again.
+    pub fn undo_render_spec(&mut self, artifact_id: &str) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.undo_render_spec(artifact_id));
+        let Some(entry) = self.render_specs.entries.get(artifact_id) else { return };
+        let Some(accepted) = entry.view.accepted.as_ref() else { return };
+        let path = format!(
+            "/artifacts/{}/submissions/{}/undo",
+            clarp_core::endpoint::percent_encode_segment(artifact_id),
+            clarp_core::endpoint::percent_encode_segment(&accepted.submission_id)
+        );
+        self.api.post_json(&format!("{UNDO}{artifact_id}|{}", accepted.submission_id), &path, json!({}), None);
     }
 
     /// Forgets every form read (another Host, or a check's reload): each
@@ -199,7 +242,23 @@ impl Engine {
             }
             entry.reading = None;
             apply_read(entry, Read::of(&item).filter(|r| r.artifact_id == artifact_id));
+            entry.view.undo_until = if entry.view.accepted.is_some() { undo_until(&item) } else { 0 };
             self.changes.push(Change::Updates);
+            return true;
+        }
+        if let Some(rest) = tag.strip_prefix(UNDO) {
+            let (artifact_id, _) = split(rest);
+            let artifact_id = artifact_id.to_owned();
+            let Some(entry) = self.render_specs.entries.get_mut(&artifact_id) else { return true };
+            // Open again (or it was): a new attempt needs a new id, and
+            // the form is read as the Host has it now.
+            entry.submission_id = new_submission_id();
+            entry.view.accepted = None;
+            entry.view.undo_until = 0;
+            entry.view.undo_note.clear();
+            self.changes.push(Change::Updates);
+            self.read_render_spec(&artifact_id);
+            self.fetch_artifact(&artifact_id);
             return true;
         }
         if let Some(rest) = tag.strip_prefix(SUBMIT) {
@@ -223,6 +282,7 @@ impl Engine {
                         "delivery_status": Some(json::string(object, "delivery_status")).filter(|s| !s.is_empty()).unwrap_or_else(|| "pending".into()),
                     })));
                     view.note.clear();
+                    view.undo_until = undo_until(&Value::Object(object.clone()));
                 }
                 _ => {
                     view.note = "Could not send. Check the connection and try again.".into();
@@ -238,6 +298,16 @@ impl Engine {
     }
 
     pub(crate) fn render_spec_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
+        if let Some(rest) = tag.strip_prefix(UNDO) {
+            let (artifact_id, _) = split(rest);
+            if let Some(entry) = self.render_specs.entries.get_mut(artifact_id) {
+                entry.view.undo_note = if status == 409 && message.contains("too_late") { "too-late".into() } else { message.to_owned() };
+                entry.view.undo_note_at = chrono::Utc::now().timestamp_millis();
+                entry.view.undo_until = 0;
+                self.changes.push(Change::Updates);
+            }
+            return true;
+        }
         if let Some(rest) = tag.strip_prefix(READ) {
             let (artifact_id, generation) = split(rest);
             let Some(entry) = self.render_specs.entries.get_mut(artifact_id) else { return true };

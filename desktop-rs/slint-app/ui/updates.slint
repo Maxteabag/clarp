@@ -1,18 +1,18 @@
 import { Button, ScrollView, Spinner, ProgressIndicator } from "std-widgets.slint";
 import { Palette, Look } from "theme.slint";
 import { ProcessSpinner } from "processes.slint";
+import { ArtifactItem, DecisionCard } from "artifacts.slint";
 
-// A decision waiting on the user (UpdatesPanel.qml's attention cards).
+// A decision waiting on the user: its card (the chat's decision card, with
+// the microphone), who asks and where, and whether it listens now.
 export struct AttentionView {
-    id: string,
-    title: string,
-    question: string,
-    context: string,
+    card: ArtifactItem,
     meta: string,
-    no-label: string,
-    yes-label: string,
-    revision: int,
-    pending: bool,
+    session: string,
+    listening: bool,
+    // Its microphone answers it (the Host matches the words, or the card
+    // takes them as the user's own answer).
+    voice: bool,
 }
 
 export struct JobView {
@@ -136,7 +136,6 @@ export component Updates inherits Rectangle {
     in property <bool> loading;
     in property <string> error;
     callback refresh();
-    callback resolve(string, string, int);
     callback cancel-job(string);
     // A job's output (its log tail) in the processes panel.
     callback job-output(string);
@@ -196,43 +195,27 @@ export component Updates inherits Rectangle {
                 // i18n: Updates page, section heading over the items waiting for the user (written in capitals where the script has them)
                 if root.attention.length > 0: SectionTitle { text: @tr("NEEDS ATTENTION"); }
                 for item in root.attention: Rectangle {
-                    background: Palette.control;
-                    border-radius: 3px;
+                    background: Palette.raised;
+                    border-radius: 20px;
+                    border-width: item.card.voice-focus ? 2px : 1px;
+                    border-color: item.card.voice-focus ? Palette.accent : Palette.rule;
+                    accessible-role: groupbox;
+                    accessible-label: item.card.question;
                     VerticalLayout {
-                        padding: 10px;
-                        spacing: 7px;
-                        Text { text: item.title; color: Palette.text; font-size: 14 * Look.unit; font-weight: 600; overflow: elide; }
-                        if item.question != "": Text { text: item.question; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
-                        if item.context != "": Text {
-                            text: item.context;
+                        padding: item.card.collapsed ? 12px : 16px;
+                        padding-left: 16px;
+                        padding-right: item.card.collapsed ? 12px : 14px;
+                        spacing: 8px;
+                        if item.meta != "": Text {
+                            text: item.meta;
                             color: Palette.muted;
                             font-size: 11 * Look.unit;
-                            wrap: word-wrap;
                             overflow: elide;
-                            max-height: 60px;
                         }
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text {
-                                text: item.meta;
-                                color: Palette.muted;
-                                font-size: 11 * Look.unit;
-                                overflow: elide;
-                                vertical-alignment: center;
-                                horizontal-stretch: 1;
-                            }
-                            Button {
-                                text: item.no-label;
-                                enabled: !item.pending;
-                                clicked => { root.resolve(item.id, "no", item.revision); }
-                            }
-                            Button {
-                                // i18n: Updates page, decision item, the yes button while the answer is being sent (a state: the decision is being resolved)
-                                text: item.pending ? @tr("Resolving…") : item.yes-label;
-                                primary: true;
-                                enabled: !item.pending;
-                                clicked => { root.resolve(item.id, "yes", item.revision); }
-                            }
+                        DecisionCard {
+                            artifact: item.card;
+                            voice: item.voice;
+                            listening: item.listening;
                         }
                     }
                 }

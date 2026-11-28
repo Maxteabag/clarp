@@ -534,6 +534,22 @@ pub struct Form {
 }
 
 impl Form {
+    /// The key of the form's one input when that is a choice (headings and
+    /// text around it allowed, no button, no other field): a click on an
+    /// option answers it.
+    pub fn one_choice(&self) -> Option<&str> {
+        if !self.buttons.is_empty() || self.fields.len() != 1 {
+            return None;
+        }
+        self.fields.iter().find(|(_, field)| matches!(field, Field::Choice(_))).map(|(key, _)| key.as_str())
+    }
+
+    /// One click answers the form: its one input is a choice, or it is a
+    /// form of buttons with no input at all.
+    pub fn one_tap(&self) -> bool {
+        self.one_choice().is_some() || (!self.buttons.is_empty() && self.fields.is_empty())
+    }
+
     /// The answers exactly as the form path takes them: `{intent, state}`
     /// with only keys that have a value. An empty text and an unselected
     /// choice are left out; a toggle is always there. A button form is sent
@@ -1417,6 +1433,23 @@ mod tests {
             Reading::Form(form) => *form,
             other => panic!("not a form: {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_form_whose_one_input_is_a_choice_answers_on_the_click() {
+        let one = json!({
+          "version": "preview-1", "catalog": "clarp.form", "catalog_version": 1,
+          "spec": {"root": "root", "elements": {
+            "root": {"type": "stack", "props": {}, "children": ["title", "pick"]},
+            "title": {"type": "heading", "props": {"text": "Lunch", "level": 1}},
+            "pick": {"type": "choice", "props": {"label": "Where", "value": {"$bindState": "/pick"}, "options": [
+              {"value": "inn", "label": "The inn"}, {"value": "boat", "label": "The boat"}]}}}},
+          "submit": {"intent": "lunch", "label": "Send"},
+          "answer_schema": {"type": "object", "required": ["pick"], "properties": {"pick": {"type": "string", "enum": ["inn", "boat"]}}}
+        });
+        assert_eq!(form(&one).one_choice(), Some("pick"));
+        assert_eq!(form(&release_check()).one_choice(), None, "a form with more inputs keeps its Send");
+        assert!(form(&one).one_tap() && !form(&release_check()).one_tap());
     }
 
     #[test]

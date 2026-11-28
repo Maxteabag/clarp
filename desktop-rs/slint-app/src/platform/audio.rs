@@ -560,7 +560,8 @@ impl Audio {
             Err(error) => self.notices.push(Notice::Error(error)),
             Ok(object) => {
                 let text = json::string(&object, "text").trim().to_owned();
-                if text.is_empty() {
+                // A card's microphone says when it heard nothing.
+                if text.is_empty() && !session.starts_with("decision:") {
                     return;
                 }
                 let returned = json::string(&object, "transcription_id");

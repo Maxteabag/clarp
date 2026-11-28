@@ -9,7 +9,7 @@ use crate::Engine;
 impl Engine {
     /// True when a panel owned the reply.
     pub(crate) fn panels_json(&mut self, tag: &str, object: &Object) -> bool {
-        self.artifact_summary_json(tag, object) || self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object) || self.publications_json(tag, object)
+        self.artifact_summary_json(tag, object) || self.cards_json(tag, object) || self.updates_json(tag, object) || self.teams_json(tag, object) || self.profile_json(tag, object) || self.publications_json(tag, object)
     }
 
     /// True when a panel owned the failure; the rest become the engine's error.
@@ -18,7 +18,7 @@ impl Engine {
         if self.artifact_summary_failure(tag, message, status) {
             return true;
         }
-        self.updates_failure(tag, &detail, status) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
+        self.cards_failure(tag, &detail, status) || self.updates_failure(tag, &detail, status) || self.teams_failure(tag, &detail) || self.avatar_failure(tag, &detail) || self.profile_failure(tag, message, status, &detail)
             || self.publications_failure(tag, message, status, &detail)
     }
 

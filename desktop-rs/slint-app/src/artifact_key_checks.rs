@@ -448,41 +448,73 @@ fn decision_stages(out: &str) -> Vec<Stage> {
     let out = out.to_owned();
     let mut stages: Vec<Stage> = Vec::new();
     stages.extend(reach("dec-deploy-k"));
+    let first = out.clone();
     stages.extend::<Vec<Stage>>(vec![
-        ("approval chosen", Box::new(move |_, _, _| {
-            headless::press("2");
-            let hold = card("dec-deploy-k").map(|c| c.chosen).unwrap_or(-2);
-            headless::press("1");
-            let ship = card("dec-deploy-k").map(|c| c.chosen).unwrap_or(-2);
-            check(hold == 1 && ship == 0 && posts("/decisions/d-deploy-k/resolve").is_empty(), &format!("2 chooses Hold, 1 Ship it, nothing sent yet: {hold} {ship}"));
-            true
-        })),
-        ("approval shown chosen", Box::new(move |_, _, elapsed| {
+        ("approval open", Box::new(move |_, _, elapsed| {
             if elapsed < Duration::from_millis(400) {
                 return false;
             }
-            shot(&out, "keys-10-decision-chosen");
-            check(hints("dec-deploy-k").contains(&"1 again Send".to_owned()), &format!("the chosen answer's digit again sends it: {:?}", hints("dec-deploy-k")));
-            headless::press(Key::Return);
-            true
-        })),
-        ("Enter sends nothing", Box::new(|_, _, elapsed| {
-            if elapsed < Duration::from_millis(400) {
-                return false;
-            }
-            check(posts("/decisions/d-deploy-k/resolve").is_empty(), "Enter on a decision sends nothing (it is no card key)");
+            shot(&first, "keys-10-decision-open");
+            check(hints("dec-deploy-k").starts_with(&["1 Ship it".to_owned(), "2 Hold".to_owned()]), &format!("an approval's digits are its answers: {:?}", hints("dec-deploy-k")));
             headless::press("1");
             true
         })),
-        wait_for("approval sent", Duration::from_secs(4), |_, _| last_post("/decisions/d-deploy-k/resolve") == json!({"choice": "accepted", "expected_revision": 4}),
-            "1 again sends the chosen answer: approved against the revision seen"),
+        wait_for("approval sent", Duration::from_secs(4), |_, _| last_post("/decisions/d-deploy-k/resolve") == json!({"choice": "accepted", "expected_revision": 4, "undo_ms": 6000}),
+            "1 sends Ship it at once, held for undo, against the revision seen"),
     ]);
+    let folded = out.clone();
+    stages.push(("approval folded", Box::new(move |_, _, elapsed| {
+        let line = card("dec-deploy-k").filter(|c| c.collapsed).map(|c| (c.collapsed_kind.to_string(), c.collapsed_value.to_string(), c.undo_end > 0));
+        if line.is_none() || elapsed < Duration::from_millis(300) {
+            return elapsed > Duration::from_secs(3) && { check(false, "the answered card folds to one line"); true };
+        }
+        shot(&folded, "keys-11-decision-folded");
+        check(line == Some(("chose".into(), "Ship it".into(), true)), &format!("it reads You chose: Ship it, with Undo: {line:?}"));
+        crate::window().expect("window").global::<crate::ArtifactBridge>().invoke_undo("dec-deploy-k".into());
+        true
+    })));
+    stages.push(wait_for("approval undone", Duration::from_secs(4), |_, _| {
+        last_post("/decisions/d-deploy-k/undo") == json!({"expected_revision": 5}) && card("dec-deploy-k").is_some_and(|c| c.pending && !c.collapsed)
+    }, "Undo takes the answer back and the card opens again"));
+    // Approved again (a later stage reads it Approved).
+    stages.push(keys("approval answered again", vec![c("1")]));
+    stages.push(wait_for("approval sent again", Duration::from_secs(4), |_, _| last_post("/decisions/d-deploy-k/resolve") == json!({"choice": "accepted", "expected_revision": 6, "undo_ms": 6000}),
+        "opened again, it answers again at the next revision"));
+    // Undo while the answer is still on its way: it follows the answer,
+    // against the revision the answer left.
+    stages.extend(reach("dec-owed-k"));
+    stages.push(("undo before the reply", Box::new(|_, _, _| {
+        check(control("/__control/cards", &json!({"resolve_delay": 1.0})).is_ok(), "the fake Host answers resolves a second late");
+        headless::press("1");
+        crate::window().expect("window").global::<crate::ArtifactBridge>().invoke_undo("dec-owed-k".into());
+        true
+    })));
+    stages.push(wait_for("owed undo sent", Duration::from_secs(5), |_, _| {
+        last_post("/decisions/d-owed-k/undo") == json!({"expected_revision": 5}) && card("dec-owed-k").is_some_and(|c| c.pending && !c.collapsed)
+    }, "an Undo pressed before the answer's reply goes out after it, at the answer's revision, and the card opens again"));
+    stages.push(("resolves on time again", Box::new(|_, _, _| {
+        let _ = control("/__control/cards", &json!({"resolve_delay": 0.0}));
+        true
+    })));
     stages.extend(reach("dec-discard-k"));
     stages.push(keys("discard", vec![k(Key::Delete)]));
     stages.push(wait_for("discarded", Duration::from_secs(4), |_, _| last_post("/decisions/d-discard-k/dismiss") == json!({"expected_revision": 4}), "Delete discards a pending decision"));
     stages.extend(reach("q-trip-k"));
-    stages.push(keys("question option", vec![c("2"), c("2")]));
-    stages.push(wait_for("question answered", Duration::from_secs(4), |_, _| last_post("/decisions/q-trip-k/resolve")["answer"]["option_id"] == "tromso", "2 then 2 again answers a question with its second option"));
+    stages.push(keys("question option", vec![c("2")]));
+    stages.push(wait_for("question answered", Duration::from_secs(4), |_, _| last_post("/decisions/q-trip-k/resolve")["answer"]["option_id"] == "tromso", "2 answers a question with its second option at once"));
+    stages.push(("too late to undo", Box::new(|_, _, _| {
+        check(control("/__control/cards", &json!({"too_late": true})).is_ok(), "the fake Host makes undos come too late");
+        crate::window().expect("window").global::<crate::ArtifactBridge>().invoke_undo("q-trip-k".into());
+        true
+    })));
+    let late = out.clone();
+    stages.push(wait_for("too late shown", Duration::from_secs(4), |_, _| card("q-trip-k").is_some_and(|c| c.collapsed && c.undo_note == "too-late"),
+        "an undo after the agent started says it is too late; the line stays"));
+    stages.push(("too late drawn", Box::new(move |_, _, _| {
+        shot(&late, "keys-12-decision-too-late");
+        let _ = control("/__control/cards", &json!({"too_late": false}));
+        true
+    })));
     stages.extend(reach("q-custom-k"));
     stages.push(keys("own answer", vec![c("3")]));
     stages.push(("own answer typed", Box::new(|app, window, elapsed| {
@@ -495,6 +527,16 @@ fn decision_stages(out: &str) -> Vec<Stage> {
         true
     })));
     stages.push(wait_for("own answer sent", Duration::from_secs(4), |_, _| last_post("/decisions/q-custom-k/resolve")["answer"]["text"] == "Friday, after lunch", "Enter in it sends the written answer"));
+    let own = out.clone();
+    stages.push(("own answer folded", Box::new(move |_, _, elapsed| {
+        let line = card("q-custom-k").filter(|c| c.collapsed).map(|c| (c.collapsed_kind.to_string(), c.collapsed_value.to_string()));
+        if line.is_none() || elapsed < Duration::from_millis(300) {
+            return elapsed > Duration::from_secs(3) && { check(false, "the own answer folds the card"); true };
+        }
+        shot(&own, "keys-13-own-answer-folded");
+        check(line == Some(("answered".into(), "Friday, after lunch".into())), &format!("it reads You answered: …: {line:?}"));
+        true
+    })));
     stages.extend(reach("q-escape-k"));
     stages.push(keys("own answer kept", vec![c("3")]));
     stages.push(("own answer escaped", Box::new(|_, window, elapsed| {
@@ -769,8 +811,9 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         let ids: Vec<String> = reachable(app).into_iter().filter(|i| !i.starts_with("img:")).collect();
         let bare: Vec<String> = ids.iter().filter(|id| card(id).is_some_and(|c| !c.action.is_empty() && c.hints.row_count() == 0)).cloned().collect();
         check(!ids.is_empty() && bare.is_empty(), &format!("every card with an action shows its keys as hints: without {bare:?}"));
-        check(hints("dec-click-k") == ["1 Turn on", "2 Not now", "Send", "Del Discard"], &format!("an approval (Send has no key before a choice): {:?}", hints("dec-click-k")));
-        check(hints("q-click-k") == ["Send", "Del Discard"], &format!("a question (its options are numbered): {:?}", hints("q-click-k")));
+        check(hints("dec-click-k") == ["1 Turn on", "2 Not now", "Del Dismiss"], &format!("an approval's digits send its answers: {:?}", hints("dec-click-k")));
+        let question = hints("q-click-k");
+        check(question.first().is_some_and(|h| h.starts_with("1-") && h.ends_with(" Answer")) && question.last().is_some_and(|h| h == "Del Dismiss"), &format!("a question's digits send its options: {question:?}"));
         check(hints("plan-ship-k") == ["O Open plan"], &format!("a plan: {:?}", hints("plan-ship-k")));
         check(hints("aud-gone-k") == ["O Play", "←/→ Seek", "S Stop"], &format!("audio: {:?}", hints("aud-gone-k")));
         check(hints("vid-none-k").is_empty() && hints("cd-past-k").is_empty(), "a card with nothing to do has none");
@@ -781,7 +824,7 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         if elapsed < Duration::from_millis(400) {
             return false;
         }
-        for hint in ["1 Turn on", "2 Not now", "Del Discard"] {
+        for hint in ["1 Turn on", "2 Not now", "Del Dismiss"] {
             check(bar(window).iter().any(|h| h == hint), &format!("the shortcut bar shows the card's {hint:?}: {:?}", bar(window)));
         }
         shot(&out, "keys-60-decision-hints");
@@ -792,17 +835,17 @@ fn hint_stages(out: &str) -> Vec<Stage> {
         if crate::artifacts_view::card_rect(app, "dec-click-k").is_none() && elapsed < Duration::from_secs(3) {
             return false;
         }
-        // A real click on the card's first hint, "1 Turn on", at the
+        // A real click on the card's lowest answer, "Not now", at the
         // left of its bottom row.
         let Some((x, y, _, height)) = crate::artifacts_view::card_rect(app, "dec-click-k") else {
             check(false, "the decision is on screen");
             return true;
         };
-        super::click_at(window, x + 24.0, y + height - 19.0);
+        super::click_at(window, x + 24.0, y + height - 40.0);
         true
     })));
-    stages.push(wait_for("hint clicked", Duration::from_secs(3), |_, _| last_post("/decisions/d-click-k/resolve") == json!({"choice": "accepted", "expected_revision": 4}),
-        "a click on a hint does what its key does: 1 Turn on approves"));
+    stages.push(wait_for("answer clicked", Duration::from_secs(3), |_, _| last_post("/decisions/d-click-k/resolve") == json!({"choice": "rejected", "expected_revision": 4, "undo_ms": 6000}),
+        "a click on an answer row sends it: Not now declines"));
     stages.extend(reach("plan-ship-k"));
     stages.push(("click open", Box::new(|app, window, elapsed| {
         // Its place, once it has reported it since the keyboard landed.

@@ -33,23 +33,50 @@ fn active_job(status: &str) -> bool {
     matches!(status, "queued" | "running" | "active")
 }
 
-fn attention_view(engine: &clarp_engine::Engine, item: &Object) -> AttentionView {
-    let id = text(item, "decision_id");
-    AttentionView {
-        pending: engine.update_action_pending("decision", &id),
-        title: first(item, &["title"], "Decision").into(),
-        question: first(item, &["question", "summary"], "").into(),
-        context: text(item, "context").into(),
-        meta: match text(item, "host") {
-            host if host.is_empty() && clarp_core::all_hosts::is_peer_session(&text(item, "session")) => text(item, "agent_name"),
-            host if host.is_empty() => format!("{}  ·  {}", text(item, "agent_name"), text(item, "session")),
-            host => format!("{}  ·  {host}", text(item, "agent_name")),
+fn attention_view(app: &App, card: crate::ArtifactItem, item: &Value) -> AttentionView {
+    let item = item.as_object().cloned().unwrap_or_default();
+    let listening = card.voice_note == "listening";
+    let voice = crate::decision_cards::voice_usable(app, &card);
+    let agent = text(&item, "agent_name");
+    let meta = match text(&item, "host") {
+        host if host.is_empty() && clarp_core::all_hosts::is_peer_session(&text(&item, "session")) => agent,
+        host if host.is_empty() && agent.is_empty() => String::new(),
+        host if host.is_empty() => format!("{agent}  ·  {}", text(&item, "session")),
+        host => format!("{agent}  ·  {host}"),
+    };
+    AttentionView { card, meta: meta.into(), session: text(&item, "session").into(), listening, voice }
+}
+
+thread_local! {
+    /// The Updates' cards: one model for the window, changed row by row, so
+    /// a card being typed in or held (its microphone) is never rebuilt.
+    static ATTENTION: RefCell<Option<Rc<VecModel<AttentionView>>>> = const { RefCell::new(None) };
+}
+
+/// Brings `model` to `rows` by card id: a row still listed keeps its place
+/// in the window (only its fields change), the rest come and go.
+fn reconcile(model: &VecModel<AttentionView>, rows: Vec<AttentionView>) {
+    use slint::Model;
+    for (index, row) in rows.iter().enumerate() {
+        let at = (index..model.row_count()).find(|i| model.row_data(*i).is_some_and(|m| m.card.id == row.card.id));
+        match at {
+            Some(found) => {
+                for _ in index..found {
+                    model.remove(index);
+                }
+                let mut row = row.clone();
+                if let Some(old) = model.row_data(index) {
+                    crate::decision_cards::keep_models(&old.card, &mut row.card);
+                }
+                if model.row_data(index).as_ref() != Some(&row) {
+                    model.set_row_data(index, row);
+                }
+            }
+            None => model.insert(index, row.clone()),
         }
-        .into(),
-        no_label: first(item, &["no_label"], "No").into(),
-        yes_label: first(item, &["yes_label"], "Yes").into(),
-        revision: json::js_number(item.get("revision")) as i32,
-        id: id.into(),
+    }
+    while model.row_count() > rows.len() {
+        model.remove(rows.len());
     }
 }
 
@@ -120,8 +147,19 @@ fn updates_listed(values: &[Value]) -> impl Iterator<Item = &Object> {
 
 /// Rebuilds the surface's lists from the engine.
 pub fn show(app: &App, window: &AppWindow) {
+    let cards = crate::decision_cards::updates_cards(app);
+    let rows: Vec<AttentionView> = cards.into_iter().map(|(card, item)| attention_view(app, card, &item)).collect();
+    let attention = ATTENTION.with(|a| {
+        a.borrow_mut()
+            .get_or_insert_with(|| {
+                let model = Rc::new(VecModel::default());
+                window.set_update_attention(ModelRc::from(model.clone()));
+                model
+            })
+            .clone()
+    });
+    reconcile(&attention, rows);
     let engine = app.engine.borrow();
-    window.set_update_attention(model(objects(engine.attention_items()).map(|i| attention_view(&engine, i)).collect()));
     window.set_update_jobs(model(objects(engine.background_jobs()).map(|j| job_view(&engine, j)).collect()));
     window.set_update_artifacts(model(updates_listed(engine.update_artifacts()).map(|a| artifact_view(&engine, a)).collect()));
     window.set_updates_loading(engine.updates_loading());
@@ -152,6 +190,7 @@ pub fn open(app: &App, window: &AppWindow) {
 /// open report and an open processes panel.
 pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     if changes.contains(&Change::Updates) {
+        crate::decision_cards::settle(app);
         show(app, window);
         crate::artifacts_view::settle_hydration(app);
         if *app.overlay.borrow() == "report" {

@@ -315,7 +315,7 @@ fn form_table(table: &TableLeaf) -> FormTable {
 
 fn form_leaf(leaf: &Leaf) -> FormLeaf {
     let options: Vec<ArtifactOption> =
-        leaf.options.iter().map(|(value, label)| ArtifactOption { id: value.into(), label: label.into(), ..ArtifactOption::default() }).collect();
+        leaf.options.iter().enumerate().map(|(index, (value, label))| ArtifactOption { id: value.into(), label: label.into(), badge: crate::decision_cards::letter(index).into(), ..ArtifactOption::default() }).collect();
     FormLeaf {
         id: leaf.id.clone().into(),
         kind: leaf.kind.into(),
@@ -426,11 +426,64 @@ pub fn spec_fields(item: &mut ArtifactItem, view: Option<FormView>, answered_lab
     item.spec_can_send = !read_only && !view.sending && !view.closed && gaps.is_empty();
     let when = view.accepted.as_ref().map(answered_when).unwrap_or_default();
     item.spec_footnote = footnote(form, &view.values, view.accepted.as_ref(), &view.note, view.closed, &captions, &when).into();
+    // A form whose one input is a choice sends on the click (no Send), and
+    // answered it folds to one line naming the choice.
+    item.spec_one_tap = form.one_tap();
+    if read_only && item.spec_one_tap {
+        let label = match form.one_choice() {
+            Some(key) => rows_label(&item.spec_rows, key, values.get(key)),
+            // A form of buttons: the button pressed.
+            None => form.chosen_button(view.accepted.as_ref()).map(|b| b.label.clone()).unwrap_or_default(),
+        };
+        if !label.is_empty() {
+            item.collapsed = true;
+            item.collapsed_kind = "chose".into();
+            item.collapsed_value = label.into();
+            item.collapsed_ok = true;
+            let now = chrono::Utc::now().timestamp_millis();
+            // Never longer than this window asked for, whatever the clocks say.
+            let left = (view.undo_until - now).min(clarp_engine::cards::UNDO_MS);
+            if left > 0 {
+                item.undo_end = crate::artifacts_view::clock_now() + ((left + 999) / 1000) as i32;
+            }
+            // "Too late to undo" shows for two seconds.
+            let note_left = view.undo_note_at + 2000 - now;
+            if note_left > 0 {
+                item.undo_note = view.undo_note.clone().into();
+                crate::decision_cards::refresh_in(std::time::Duration::from_millis(note_left as u64 + 50));
+            }
+        }
+    }
     if read_only {
         // An answered form is no longer an open question; a button form's
         // badge names the button (the read's answer, else the row's).
         let label = form.chosen_button(view.accepted.as_ref()).map(|b| b.label.as_str()).or(answered_label);
         item.badge = answered_word(label).into();
+    }
+}
+
+/// The letter and label of the option `value` names in the form's choice
+/// `key` ("B · Tromsø"), "" when none.
+fn rows_label(rows: &ModelRc<FormRow>, key: &str, value: Option<&Answer>) -> String {
+    let Some(Answer::Str(value)) = value else { return String::new() };
+    rows.iter()
+        .flat_map(|row| std::iter::once(row.leaf.clone()).chain(row.cells.iter()).collect::<Vec<_>>())
+        .filter(|leaf| leaf.kind == "choice" && leaf.key == key)
+        .flat_map(|leaf| leaf.options.iter().collect::<Vec<_>>())
+        .find(|option| option.id.as_str() == value)
+        .map(|option| format!("{} · {}", option.badge, option.label))
+        .unwrap_or_default()
+}
+
+/// A choice clicked: set, and sent at once when it is the form's one input.
+fn choose(id: &str, key: &str, value: &str) {
+    with_engine(|e| e.set_render_spec_value(id, key, Answer::Str(value.to_owned())));
+    let one_tap = crate::app().is_some_and(|app| {
+        let engine = app.engine.borrow();
+        engine.render_spec(id).is_some_and(|view| matches!(&view.state, FormState::Form(form) if form.one_choice() == Some(key)) && view.accepted.is_none() && !view.sending)
+    });
+    if one_tap {
+        with_engine(|e| e.send_render_spec(id));
     }
 }
 
@@ -512,7 +565,7 @@ pub fn bind(window: &AppWindow) {
     let bridge = window.global::<ArtifactBridge>();
     bridge.on_form_text(|id, key, text| with_engine(|e| e.set_render_spec_value(&id, &key, Answer::Str(text.to_string()))));
     bridge.on_form_toggle(|id, key, on| with_engine(|e| e.set_render_spec_value(&id, &key, Answer::Bool(on))));
-    bridge.on_form_choose(|id, key, value| with_engine(|e| e.set_render_spec_value(&id, &key, Answer::Str(value.to_string()))));
+    bridge.on_form_choose(|id, key, value| choose(&id, &key, &value));
     bridge.on_form_send(|id| with_engine(|e| e.send_render_spec(&id)));
     bridge.on_form_rows(|id| model_of(&id));
     bridge.on_form_retry(|id| with_engine(|e| e.retry_render_spec(&id)));

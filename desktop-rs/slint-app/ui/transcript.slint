@@ -1,7 +1,7 @@
 import { Palette, Focus, ChatLook, Look, VimBridge, ChatText, SendFlight, RevealText, Motion } from "theme.slint";
 import { ListView } from "std-widgets.slint";
 import { DisplayCell, DisplayCellCard } from "cells.slint";
-import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
+import { ArtifactItem, ArtifactCard, DecisionArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
 import { AgentAvatar } from "avatar.slint";
 
 // i18n-screen: chat
@@ -1154,9 +1154,20 @@ component TranscriptRow inherits HorizontalLayout {
                 // Measured at the width the card is drawn at.
                 preferred-width: Math.min(640px * Look.zoom, content-width);
                 alignment: start;
-                ArtifactCard {
+                // Each kind of card sits in a conditional, which Slint
+                // measures at its preferred width: that is the width it is
+                // drawn at.
+                if artifact.kind != "decision" && artifact.kind != "question": ArtifactCard {
                     artifact: artifact;
-                    preferred-width: 640px * Look.zoom;
+                    preferred-width: Math.min(640px * Look.zoom, content-width);
+                    max-width: 640px * Look.zoom;
+                    view-top: root.view-top;
+                    view-bottom: root.view-bottom;
+                    measuring: root.measuring;
+                }
+                if artifact.kind == "decision" || artifact.kind == "question": DecisionArtifactCard {
+                    artifact: artifact;
+                    preferred-width: Math.min(640px * Look.zoom, content-width);
                     max-width: 640px * Look.zoom;
                     view-top: root.view-top;
                     view-bottom: root.view-bottom;

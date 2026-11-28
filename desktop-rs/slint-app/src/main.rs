@@ -54,6 +54,7 @@ mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
 mod artifacts_view;
+mod decision_cards;
 mod form_chart;
 mod form_view;
 mod form_server;
@@ -673,10 +674,16 @@ pub fn audio_notices(notices: Vec<platform::audio::Notice>) {
             }
             Notice::Error(message) => app.engine.borrow_mut().report_error(&message),
             Notice::Transcribed { text, trace, transcription, hands_free, target } => {
-                app.engine.borrow_mut().send_dictation(&text, &trace, &transcription, hands_free, &target);
+                // A card's microphone: the words answer that card.
+                if !decision_cards::heard(&app, &target, &text) {
+                    app.engine.borrow_mut().send_dictation(&text, &trace, &transcription, hands_free, &target);
+                }
             }
             Notice::Changed => {
                 app.voice_state();
+                if let Some(window) = window().filter(|w| w.get_surface() == "updates") {
+                    updates_view::show(&app, &window);
+                }
                 artifacts_view::media_changed(&app);
                 platform::publish_playback();
             }
@@ -1169,10 +1176,6 @@ fn main() {
     // ---- updates and teams
     window.on_updates_refresh(|| with_window(|app, _| {
         app.engine.borrow_mut().load_updates();
-        pump_now(app);
-    }));
-    window.on_resolve_decision(|id, choice, revision| with_window(|app, _| {
-        app.engine.borrow_mut().resolve_decision(&id, &choice, i64::from(revision));
         pump_now(app);
     }));
     // Updates' Cancel asks first, in the processes panel on that job.

@@ -7,6 +7,8 @@ export struct ArtifactOption {
     label: string,
     detail: string,
     recommended: bool,
+    // On a decision card: its letter (A, B, C), an approval's ✓ or ✕.
+    badge: string,
 }
 
 // One of a card's key hints: the key, what it does, the action a click on
@@ -175,6 +177,23 @@ export struct ArtifactItem {
     allow-custom: bool,
     draft: string,
     editing: bool,
+    // Folded to one line (answered, sent just now, expired or closed):
+    // what the line says (chose, answered, expired, dismissed, withdrawn,
+    // closed) with what, and whether it went through (a check).
+    collapsed: bool,
+    collapsed-kind: string,
+    collapsed-value: string,
+    collapsed-ok: bool,
+    // Undo shows until this second of ArtifactBridge.now (0: no undo);
+    // why an undo did not work ("too-late", or the Host's words).
+    undo-end: int,
+    undo-note: string,
+    // A spoken answer's words, under the line; what the card's voice is
+    // doing (listening, transcribing, hold, nothing, or why it failed); the
+    // card the voice moved on to.
+    heard: string,
+    voice-note: string,
+    voice-focus: bool,
     // plan / workflow_run: how far along (0-1, -1 for unknown, -2 for
     // under way without a count), "done/total", and the step under way.
     progress-value: float,
@@ -231,6 +250,8 @@ export struct ArtifactItem {
     spec-sending: bool,
     spec-read-only: bool,
     spec-footnote: string,
+    // Its one input is a choice: a click sends it (no Send).
+    spec-one-tap: bool,
 }
 
 // What the cards share: the clock countdowns read, and their actions.
@@ -254,6 +275,13 @@ export global ArtifactBridge {
     callback choose(string, int);
     callback send(string);
     callback discard(string);
+    // A click on an answer: sends it at once (the card folds to one line).
+    callback answer(string, int);
+    // Undo on a folded card: the answer back, the card open again.
+    callback undo(string);
+    // The microphone on an Updates card, held and let go.
+    callback voice-press(string);
+    callback voice-release(string);
     // The answer of one's own as typed, and whether a card's field has the
     // keyboard (letters then type, they are not shortcuts).
     callback draft-edited(string, string);
@@ -439,213 +467,546 @@ component CountdownBody inherits VerticalLayout {
     }
 }
 
-// One of a question's answers (iOS's radio rows): a fixed height, so
-// choosing never moves the chat.
+// i18n-screen: decision card
+// A decision card's text sizes: the question 17, the context and the
+// answers 16 and 15, an answer's description 14 (at the default 15px).
+global CardText {
+    out property <length> question: ChatText.body * 17 / 15;
+    out property <length> answer: ChatText.body * 16 / 15;
+    out property <length> context: ChatText.body;
+    out property <length> detail: ChatText.body * 14 / 15;
+    out property <length> row: 52px * ChatText.scale;
+}
+
+// A small round icon button on a card (dismiss, the microphone).
+component CardIcon inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <color> tint: Palette.muted;
+    in property <bool> lit;
+    callback clicked();
+    width: 32px * ChatText.scale;
+    height: self.width;
+    border-radius: self.width / 2;
+    background: root.lit ? Palette.accent : area.has-hover ? Palette.control : transparent;
+    accessible-role: button;
+    accessible-label: root.label;
+    accessible-action-default => { root.clicked(); }
+    Image {
+        source: root.icon;
+        width: parent.width * 0.5;
+        height: parent.height * 0.5;
+        colorize: root.lit ? Palette.accent-text : root.tint;
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One answer on a decision card: its letter (an approval's ✓ or ✕) in a
+// badge, the label, its description and Recommended. A click sends it; the
+// row fills with the accent and a check for a moment first.
 component OptionRow inherits Rectangle {
-    in property <int> number;
+    in property <string> badge;
     in property <string> label;
     in property <string> detail;
     in property <bool> recommended;
-    in property <bool> chosen;
+    in property <bool> approval;
     in property <bool> enabled;
-    in property <bool> show-number;
-    in property <bool> emphasised;
+    // The keyboard's digit for it while it works ("" otherwise).
+    in property <string> key;
+    in property <bool> flashing;
     callback clicked();
-    height: root.detail != "" ? 38px : 26px;
-    border-radius: 6px;
-    background: root.chosen ? Palette.accent.with-alpha(0.14) : area.has-hover && root.enabled ? Palette.hover : transparent;
-    accessible-role: radio-button;
-    accessible-checked: root.chosen;
-    accessible-label: root.label;
+    min-height: CardText.row;
+    border-radius: 14px;
+    background: root.flashing ? Palette.accent : Palette.control;
+    animate background { duration: 120ms; }
+    accessible-role: button;
+    // i18n: decision card, accessibility label of an answer button; {0} is its letter (A, B, C), {1} its text
+    accessible-label: root.approval ? root.label : @tr("card.option_a11y" => "Option {0}, {1}", root.badge, root.label);
+    accessible-description: root.detail;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    // Hover and press over the fill, in either theme.
+    Rectangle {
+        border-radius: parent.border-radius;
+        background: root.flashing || !root.enabled ? transparent : area.pressed ? Palette.accent.with-alpha(0.22) : area.has-hover ? Palette.accent.with-alpha(0.1) : transparent;
+    }
     area := TouchArea {
         enabled: root.enabled;
         mouse-cursor: self.enabled ? pointer : default;
         clicked => { root.clicked(); }
     }
     HorizontalLayout {
-        padding-left: 6px;
-        padding-right: 6px;
-        spacing: 8px;
-        Text {
-            width: 14px * ChatText.scale;
-            text: root.chosen ? (root.enabled ? "●" : "✓") : "○";
-            color: root.chosen ? Palette.accent : Palette.faint;
-            font-size: ChatText.detail;
-            vertical-alignment: center;
+        padding-left: 12px;
+        padding-right: 14px;
+        padding-top: 8px;
+        padding-bottom: 8px;
+        spacing: 12px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 24px * ChatText.scale;
+                height: 24px * ChatText.scale;
+                border-radius: 6px;
+                background: root.flashing ? Palette.accent-text.with-alpha(0.18) : Palette.border.with-alpha(0.45);
+                Text {
+                    text: root.badge;
+                    color: root.flashing ? Palette.accent-text : Palette.muted;
+                    font-size: ChatText.label;
+                    font-weight: 600;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
         }
         VerticalLayout {
             alignment: center;
             horizontal-stretch: 1;
-            HorizontalLayout {
-                alignment: start;
-                spacing: 8px;
-                // Its key, only while it works.
-                if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
-                Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: ChatText.detail; font-weight: root.chosen ? 600 : 400; overflow: elide; }
-                // i18n: decision card in the chat, small tag after the answer option the agent recommends (adjective)
-                if root.recommended: Text { text: @tr("Recommended"); color: Palette.success; font-size: ChatText.caption; vertical-alignment: center; }
+            spacing: 2px;
+            // Boxes as tall as the text wraps at its drawn width (see
+            // DecisionCard).
+            Rectangle {
+                height: label-text.preferred-height;
+                label-text := Text {
+                    width: parent.width;
+                    text: root.label;
+                    color: root.flashing ? Palette.accent-text : root.enabled ? Palette.text : Palette.muted;
+                    font-size: CardText.answer;
+                    wrap: word-wrap;
+                }
             }
-            if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: ChatText.note; overflow: elide; }
+            if root.detail != "": Rectangle {
+                height: detail-text.preferred-height;
+                detail-text := Text {
+                    width: parent.width;
+                    text: root.detail;
+                    color: root.flashing ? Palette.accent-text : Palette.muted;
+                    font-size: CardText.detail;
+                    wrap: word-wrap;
+                }
+            }
         }
+        if root.key != "" && !root.flashing: Text { text: root.key; color: Palette.accent; font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
+        if root.recommended && !root.flashing: VerticalLayout {
+            alignment: center;
+            Rectangle {
+                height: 20px * ChatText.scale;
+                width: pill.preferred-width + 14px;
+                border-radius: self.height / 2;
+                background: Palette.success.with-alpha(0.16);
+                pill := Text {
+                    // i18n: decision card, small pill on the answer the agent recommends (adjective)
+                    text: @tr("card.recommended" => "Recommended");
+                    color: Palette.success;
+                    font-size: ChatText.note;
+                    font-weight: 600;
+                }
+            }
+        }
+        if root.flashing: Text { text: "✓"; color: Palette.accent-text; font-size: CardText.answer; font-weight: 700; vertical-alignment: center; }
     }
 }
 
-// "Write my own answer": the last numbered answer, its field typing like
-// the composer (Enter sends, Escape goes back to the chat).
-component OwnAnswer inherits HorizontalLayout {
+// The last row: the user's own answer, a field as tall and round as an
+// answer. A round send button shows once there is text; Enter sends,
+// Shift+Enter starts a new line, and it grows to four lines.
+component OwnAnswer inherits Rectangle {
     in property <ArtifactItem> artifact;
     // A copy measured off screen never takes the keyboard.
     in property <bool> measuring;
-    in property <int> number;
-    property <bool> chosen: root.artifact.chosen == root.artifact.options.length;
-    height: 30px * ChatText.scale;
-    padding-left: 6px;
-    spacing: 8px;
-    Text {
-        width: 14px * ChatText.scale;
-        text: root.chosen ? (root.artifact.pending ? "●" : "✓") : "○";
-        color: root.chosen ? Palette.accent : Palette.faint;
-        font-size: ChatText.detail;
-        vertical-alignment: center;
-    }
-    // Its key, only while it works.
-    if root.artifact.pending && root.artifact.selected && Focus.mode == "pane": Text { text: root.number; color: Palette.accent; font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
+    in property <bool> enabled;
     // Asked once, after the row is in the window (focus during its
     // creation is ignored); Escape gives the keyboard back for good.
     property <bool> asked;
-    if root.artifact.pending: HorizontalLayout {
-        horizontal-stretch: 1;
-        Rectangle {
+    property <length> line: CardText.answer * 1.35;
+    min-height: CardText.row;
+    border-radius: 14px;
+    background: Palette.control;
+    border-width: 1px;
+    border-color: field.has-focus ? Palette.accent : transparent;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 8px;
+        spacing: 8px;
+        VerticalLayout {
             horizontal-stretch: 1;
-            height: 26px * ChatText.scale;
-            border-radius: 4px;
-            border-width: 1px;
-            border-color: field.has-focus ? Palette.accent : Palette.border;
-            background: Palette.sunken;
-            if field.text == "": Text {
-                x: 8px;
-                height: parent.height;
-                // i18n: decision card in the chat, placeholder of the last option's text field, where the user types an answer of their own instead of picking one
-                text: @tr("Write my own answer");
-                color: Palette.faint;
-                font-size: ChatText.detail;
-                vertical-alignment: center;
-            }
-            field := TextInput {
-                x: 8px;
-                width: parent.width - 16px;
-                height: parent.height;
-                text: root.artifact.draft;
-                color: Palette.text;
-                font-size: ChatText.detail;
-                single-line: true;
-                vertical-alignment: center;
-                // i18n: decision card in the chat, accessibility label of the text field for an answer of the user's own
-                accessible-label: @tr("Write my own answer");
-                edited => {
-                    ArtifactBridge.draft-edited(root.artifact.id, self.text);
-                    if (!root.chosen) {
-                        ArtifactBridge.choose(root.artifact.id, root.artifact.options.length);
+            alignment: center;
+            padding-top: 12px;
+            padding-bottom: 12px;
+            keys := FocusScope {
+                height: Math.clamp(field.preferred-height, root.line, root.line * 4);
+                capture-key-pressed(event) => {
+                    if (event.text == Key.Return && !event.modifiers.shift) {
+                        if (field.text != "") {
+                            // The keyboard leaves the field before sending: the
+                            // answered card has no field, and a focused one must
+                            // not be destroyed.
+                            field.clear-focus();
+                            ArtifactBridge.send(root.artifact.id);
+                        }
+                        return accept;
                     }
+                    return reject;
                 }
-                // The keyboard leaves the field before sending: the answered
-                // card has no field, and a focused one must not be destroyed.
-                accepted => {
-                    self.clear-focus();
-                    ArtifactBridge.send(root.artifact.id);
+                if field.text == "": Text {
+                    width: parent.width;
+                    height: root.line;
+                    // i18n: decision card, placeholder of the field where the user writes their own answer
+                    text: @tr("card.write_own" => "Write your own answer");
+                    color: Palette.faint;
+                    font-size: CardText.answer;
+                    vertical-alignment: center;
                 }
-                changed has-focus => {
-                    ArtifactBridge.editing = self.has-focus;
-                    ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+                field := TextInput {
+                    y: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    enabled: root.enabled;
+                    text: root.artifact.draft;
+                    color: Palette.text;
+                    font-size: CardText.answer;
+                    single-line: false;
+                    wrap: word-wrap;
+                    vertical-alignment: top;
+                    // i18n: decision card, accessibility label of the own-answer field (same words as its placeholder)
+                    accessible-label: @tr("card.write_own" => "Write your own answer");
+                    edited => { ArtifactBridge.draft-edited(root.artifact.id, self.text); }
+                    changed has-focus => {
+                        ArtifactBridge.editing = self.has-focus;
+                        ArtifactBridge.editing-changed(root.artifact.id, self.has-focus);
+                    }
                 }
             }
         }
-        Timer {
-            interval: 30ms;
-            running: root.artifact.editing && !root.asked && !root.measuring;
-            triggered => {
-                root.asked = true;
-                field.focus();
+        if field.text != "": VerticalLayout {
+            alignment: end;
+            padding-bottom: (CardText.row - 36px * ChatText.scale) / 2;
+            Rectangle {
+                width: 36px * ChatText.scale;
+                height: self.width;
+                border-radius: self.width / 2;
+                background: send-area.has-hover ? Palette.accent.brighter(0.15) : Palette.accent;
+                accessible-role: button;
+                // i18n: decision card, accessibility label of the round button that sends the written answer (verb)
+                accessible-label: @tr("card.send" => "Send");
+                accessible-action-default => { field.clear-focus(); ArtifactBridge.send(root.artifact.id); }
+                Image {
+                    source: @image-url("icons/send.svg");
+                    width: parent.width * 0.5;
+                    height: parent.height * 0.5;
+                    colorize: Palette.accent-text;
+                }
+                send-area := TouchArea {
+                    enabled: root.enabled;
+                    mouse-cursor: pointer;
+                    clicked => {
+                        field.clear-focus();
+                        ArtifactBridge.send(root.artifact.id);
+                    }
+                }
             }
         }
     }
-    if !root.artifact.pending: Text {
-        text: root.chosen ? root.artifact.draft
-            // i18n: answered decision card in the chat, the last option (not chosen): an answer of the user's own
-            : @tr("Write my own answer");
-        color: root.chosen ? Palette.text : Palette.faint;
-        font-size: ChatText.detail;
-        overflow: elide;
-        vertical-alignment: center;
-        horizontal-stretch: 1;
+    Timer {
+        interval: 30ms;
+        running: root.artifact.editing && !root.asked && !root.measuring;
+        triggered => {
+            root.asked = true;
+            field.focus();
+        }
     }
 }
 
-// A decision's or question's body (iOS DecisionResponseView). Its height
-// is the same pending and answered, so a decision answered above a reader
-// who scrolled up does not move what they read: one line for why and how
-// urgent (then whether it was delivered), one row for the buttons (then
-// how it was answered), with the send's status beside them.
-component DecisionBody inherits VerticalLayout {
+// An answered, expired or closed card as one line: "✓ You chose: B ·
+// Pebble" and Undo while the Host still lets it be taken back (it fades as
+// the window ends), or "Too late to undo" for a moment; a spoken answer's
+// words under it.
+component AnsweredLine inherits VerticalLayout {
+    in property <ArtifactItem> artifact;
+    property <int> left: root.artifact.undo-end - ArtifactBridge.now;
+    property <bool> undoable: root.artifact.undo-end > 0 && root.left > 0 && root.artifact.undo-note == "";
+    property <string> line:
+        // i18n: decision card folded after a click on an answer; {} is the answer ("B · Pebble")
+        root.artifact.collapsed-kind == "chose" ? @tr("card.you_chose" => "You chose: {}", root.artifact.collapsed-value)
+        // i18n: decision card folded after the user sent their own words; {} is what they wrote
+        : root.artifact.collapsed-kind == "answered" ? @tr("card.you_answered" => "You answered: “{}”", root.artifact.collapsed-value)
+        // i18n: decision card folded, before the question's title: the question ran out of time (adjective)
+        : root.artifact.collapsed-kind == "expired" ? @tr("card.expired" => "Expired") + " · " + root.artifact.collapsed-value
+        // i18n: decision card folded, before the question's title: the user closed it without answering (adjective)
+        : root.artifact.collapsed-kind == "dismissed" ? @tr("card.dismissed" => "Dismissed") + " · " + root.artifact.collapsed-value
+        // i18n: decision card folded, before the question's title: the agent took the question back (adjective)
+        : root.artifact.collapsed-kind == "withdrawn" ? @tr("card.withdrawn" => "Withdrawn") + " · " + root.artifact.collapsed-value
+        // i18n: decision card folded, before the question's title: a message the user wrote closed the question
+        : root.artifact.collapsed-kind == "closed" ? @tr("card.closed" => "Closed by your reply") + " · " + root.artifact.collapsed-value
+        : root.artifact.collapsed-value;
+    spacing: 2px;
+    HorizontalLayout {
+        min-height: 28px * ChatText.scale;
+        spacing: 8px;
+        Text {
+            text: root.artifact.collapsed-ok ? "✓" : "–";
+            color: root.artifact.collapsed-ok ? Palette.success : Palette.muted;
+            font-size: CardText.answer;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+        Text {
+            text: root.line;
+            accessible-label: (root.artifact.collapsed-ok ? "✓ " : "") + root.line;
+            color: root.artifact.collapsed-ok ? Palette.text : Palette.muted;
+            font-size: CardText.answer;
+            overflow: elide;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+            min-width: 0px;
+        }
+        if root.undoable: Rectangle {
+            width: undo-label.preferred-width + 20px;
+            min-height: 28px * ChatText.scale;
+            border-radius: 8px;
+            // Fades over the window's last three seconds.
+            opacity: Math.min(1, root.left / 3);
+            animate opacity { duration: 900ms; }
+            background: undo-area.has-hover ? Palette.accent.with-alpha(0.12) : transparent;
+            accessible-role: button;
+            // i18n: decision card, accessibility label of Undo: takes the answer just sent back (verb phrase)
+            accessible-label: @tr("card.undo_a11y" => "Undo the answer");
+            accessible-action-default => { ArtifactBridge.undo(root.artifact.id); }
+            undo-label := Text {
+                // i18n: decision card, text button after an answer was sent: takes it back (verb)
+                text: @tr("card.undo" => "Undo");
+                color: Palette.accent;
+                font-size: CardText.answer;
+                font-weight: 600;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            undo-area := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { ArtifactBridge.undo(root.artifact.id); }
+            }
+        }
+        if root.artifact.undo-note != "": Text {
+            text: root.artifact.undo-note == "too-late"
+                // i18n: decision card, short note when Undo came after the agent started on the answer
+                ? @tr("card.too_late" => "Too late to undo")
+                : root.artifact.undo-note;
+            color: Palette.muted;
+            font-size: ChatText.detail;
+            vertical-alignment: center;
+        }
+    }
+    if root.artifact.heard != "": HorizontalLayout {
+        padding-left: 24px * ChatText.scale;
+        Text {
+            text: root.artifact.heard;
+            color: Palette.muted;
+            font-size: ChatText.detail;
+            overflow: elide;
+            min-width: 0px;
+        }
+    }
+}
+
+// The microphone on an Updates card: hold to say the answer, release to
+// send it. It pulses while it listens.
+component MicButton inherits Rectangle {
+    in property <ArtifactItem> artifact;
+    in property <bool> listening;
+    width: 32px * ChatText.scale;
+    height: self.width;
+    border-radius: self.width / 2;
+    background: root.listening ? Palette.accent : area.has-hover ? Palette.control : transparent;
+    accessible-role: button;
+    // i18n: Updates, accessibility label of the microphone on a decision card: hold it and say the answer
+    accessible-label: @tr("card.voice.hold" => "Hold to answer");
+    // While it listens a ring breathes round it.
+    property <float> pulse: root.listening ? (1 + Math.sin(animation-tick() / 400ms * 1rad)) / 2 : 0;
+    if root.listening: Rectangle {
+        width: parent.width + 4px + 8px * root.pulse;
+        height: self.width;
+        border-radius: self.width / 2;
+        border-width: 2px;
+        border-color: Palette.accent.with-alpha(0.25 + 0.35 * root.pulse);
+    }
+    Image {
+        source: @image-url("icons/mic.svg");
+        width: parent.width * 0.5;
+        height: parent.height * 0.5;
+        colorize: root.listening ? Palette.accent-text : Palette.muted;
+    }
+    area := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(event) => {
+            if (event.button != PointerEventButton.left) { return; }
+            if (event.kind == PointerEventKind.down) { ArtifactBridge.voice-press(root.artifact.id); }
+            if (event.kind == PointerEventKind.up || event.kind == PointerEventKind.cancel) { ArtifactBridge.voice-release(root.artifact.id); }
+        }
+    }
+}
+
+// A decision, question or text request (the same card in the chat and in
+// Updates). Pending: the question, its context (four lines, a click opens
+// the rest), the answers as rows, the user's own answer, × to dismiss. A
+// click on an answer sends it at once and the card folds to one line.
+export component DecisionCard inherits VerticalLayout {
     in property <ArtifactItem> artifact;
     in property <bool> measuring;
-    property <bool> question: !root.artifact.approval;
+    // Updates: the microphone, and whether it listens now.
+    in property <bool> voice;
+    in property <bool> listening;
     // Its digits work while it is selected and the chat has the keyboard.
     property <bool> live: root.artifact.selected && Focus.mode == "pane";
-    spacing: 5px;
-    if root.artifact.question != "": Text { text: root.artifact.question; color: Palette.text; font-size: ChatText.label; font-weight: 600; wrap: word-wrap; }
-    if root.artifact.context != "": Text { text: root.artifact.context; color: Palette.muted; font-size: ChatText.detail; wrap: word-wrap; }
-    // Settled with nothing to say, a decision has no line to keep.
-    if root.artifact.keep-line: Text {
-        height: 15px * ChatText.scale;
-        text: root.artifact.pending ? root.artifact.meta : root.artifact.delivery;
-        color: root.artifact.pending ? Palette.warning : Palette.muted;
-        font-size: ChatText.note;
-        overflow: elide;
+    property <bool> sending: root.artifact.status-text == "Sending…";
+    // The answer clicked, flashing before it is sent (-1: none).
+    property <int> flash: -1;
+    property <bool> expanded;
+    spacing: 12px;
+    // The clicked row's accent fades once the card has folded.
+    Timer {
+        interval: 600ms;
+        running: root.flash >= 0;
+        triggered => { root.flash = -1; }
     }
-    // A question's options, pending and answered alike (the answer marked).
-    if root.question: VerticalLayout {
+    if root.artifact.collapsed: AnsweredLine { artifact: root.artifact; }
+    // Wrapped text is as tall as it wraps at the width it is drawn at
+    // (in a conditional, Slint measures a layout at its preferred width:
+    // a wrapped line came out lines short). Hence the boxes with heights.
+    if !root.artifact.collapsed: HorizontalLayout {
+        spacing: 6px;
+        Rectangle {
+            horizontal-stretch: 1;
+            height: question.preferred-height;
+            question := Text {
+                width: parent.width;
+                text: root.artifact.question != "" ? root.artifact.question : root.artifact.title;
+                color: Palette.text;
+                font-size: CardText.question;
+                font-weight: 600;
+                wrap: word-wrap;
+            }
+        }
+        if root.voice && root.artifact.pending: VerticalLayout {
+            alignment: start;
+            MicButton { artifact: root.artifact; listening: root.listening; }
+        }
+        if root.artifact.pending: VerticalLayout {
+            alignment: start;
+            CardIcon {
+                icon: @image-url("icons/close.svg");
+                // i18n: decision card, accessibility label of the × that dismisses the question without answering (verb)
+                label: @tr("card.dismiss" => "Dismiss");
+                clicked => { ArtifactBridge.discard(root.artifact.id); }
+            }
+        }
+    }
+    if !root.artifact.collapsed && root.artifact.voice-note != "" && root.artifact.voice-note != "transcribing": Rectangle {
+      height: voice-line.preferred-height;
+      voice-line := Text {
+        width: parent.width;
+        text: root.artifact.voice-note == "listening"
+            // i18n: Updates, decision card, line under the question while the microphone records (verb, ongoing)
+            ? @tr("card.voice.listening" => "Listening")
+            // i18n: Updates, decision card, line after a click on the microphone instead of holding it
+            : root.artifact.voice-note == "hold" ? @tr("card.voice.hold" => "Hold to answer")
+            // i18n: Updates, decision card, line when a spoken answer had no words in it
+            : root.artifact.voice-note == "nothing" ? @tr("card.voice.heard_nothing" => "Heard nothing")
+            : root.artifact.voice-note;
+        color: root.artifact.voice-note == "listening" ? Palette.accent : Palette.muted;
+        font-size: ChatText.detail;
+        wrap: word-wrap;
+      }
+    }
+    // The context: at most four lines, then Show more opens the rest.
+    if !root.artifact.collapsed && root.artifact.context != "": context-box := VerticalLayout {
         spacing: 2px;
+        property <length> four: CardText.context * 1.35 * 4;
+        property <bool> long: ctx.preferred-height > self.four + 1px;
+        Rectangle {
+            height: root.expanded || !context-box.long ? ctx.preferred-height : min(ctx.preferred-height, context-box.four);
+            clip: true;
+            // Its whole height, cut to four lines by the box (clip).
+            ctx := Text {
+                y: 0;
+                width: parent.width;
+                height: self.preferred-height;
+                text: root.artifact.context;
+                color: Palette.muted;
+                font-size: CardText.context;
+                wrap: word-wrap;
+            }
+            TouchArea {
+                enabled: context-box.long;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => { root.expanded = !root.expanded; }
+            }
+        }
+        // Always in the layout (no width of its own: whether it shows
+        // depends on the width), as tall as its line only when it shows.
+        Rectangle {
+            height: context-box.long ? more.preferred-height + 2px : 0px;
+            visible: context-box.long;
+            more := Text {
+                x: 0;
+                y: 2px;
+                text: root.expanded
+                    // i18n: decision card, link under a long context: shows four lines again (card.less)
+                    ? @tr("card.less" => "Show less")
+                    // i18n: decision card, link under a long context: shows all of it (card.more)
+                    : @tr("card.more" => "Show more");
+                color: Palette.accent;
+                font-size: ChatText.detail;
+                font-weight: 600;
+                accessible-role: button;
+                accessible-action-default => { root.expanded = !root.expanded; }
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.expanded = !root.expanded; }
+                }
+            }
+        }
+    }
+    if !root.artifact.collapsed && root.artifact.pending && root.artifact.meta != "": Rectangle {
+        height: meta-line.preferred-height;
+        meta-line := Text {
+            width: parent.width;
+            text: root.artifact.meta;
+            color: Palette.warning;
+            font-size: ChatText.detail;
+            wrap: word-wrap;
+        }
+    }
+    if !root.artifact.collapsed && (root.artifact.options.length > 0 || (root.artifact.pending && root.artifact.allow-custom)): VerticalLayout {
+        spacing: 8px;
         for option[index] in root.artifact.options: OptionRow {
-            number: index + 1;
+            badge: option.badge;
             label: option.label;
             detail: option.detail;
             recommended: option.recommended;
-            chosen: root.artifact.chosen == index;
-            enabled: root.artifact.pending;
-            show-number: root.artifact.pending && root.live;
-            emphasised: root.artifact.selected;
-            clicked => { ArtifactBridge.choose(root.artifact.id, index); }
+            approval: root.artifact.approval;
+            enabled: root.artifact.pending && root.flash < 0 && !root.sending;
+            key: root.live && root.artifact.pending && index < 9 ? "" + (index + 1) : "";
+            flashing: root.flash == index || (root.artifact.chosen == index && root.sending);
+            clicked => {
+                root.flash = index;
+                ArtifactBridge.answer(root.artifact.id, index);
+            }
         }
-        if root.artifact.allow-custom: OwnAnswer {
+        if root.artifact.pending && root.artifact.allow-custom: OwnAnswer {
             artifact: root.artifact;
-            number: root.artifact.options.length + 1;
             measuring: root.measuring;
+            enabled: !root.sending;
         }
     }
-    if root.artifact.question != "" || root.artifact.resolved != "": HorizontalLayout {
-        height: 28px * ChatText.scale;
-        alignment: start;
-        spacing: 8px;
-        // Its keys: an approval's answers, send and discard.
-        if root.artifact.pending: HintRow { artifact: root.artifact; }
-        if !root.artifact.pending && root.artifact.resolved != "": HorizontalLayout {
-            spacing: 6px;
-            Text {
-                text: root.artifact.resolved-ok ? "✓" : "–";
-                color: root.artifact.resolved-ok ? Palette.success : Palette.muted;
-                font-size: ChatText.label;
-                vertical-alignment: center;
-            }
-            Text { text: root.artifact.resolved; color: root.artifact.resolved-ok ? Palette.success : Palette.muted; font-size: ChatText.detail; font-weight: 600; vertical-alignment: center; }
-            if root.artifact.answer != "": Text { text: "· " + root.artifact.answer; color: Palette.text; font-size: ChatText.detail; overflow: elide; vertical-alignment: center; }
-        }
-        if root.artifact.status-text != "": Text {
+    if !root.artifact.collapsed && root.artifact.status-text != "" && !root.sending: Rectangle {
+        height: status-line.preferred-height;
+        status-line := Text {
+            width: parent.width;
             text: root.artifact.status-text;
-            color: root.artifact.status-text.starts-with("Not ") || root.artifact.status-text.starts-with("Choose") ? Palette.danger : Palette.muted;
+            color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : Palette.muted;
             font-size: ChatText.detail;
-            overflow: elide;
-            vertical-alignment: center;
+            wrap: word-wrap;
         }
     }
 }
@@ -1139,15 +1500,12 @@ component FormLeafView inherits VerticalLayout {
         }
     }
     if root.leaf.kind == "choice": Rectangle {
-        border-radius: 6px;
-        background: Palette.sunken;
         VerticalLayout {
-            padding: 2px;
-            spacing: 0px;
+            spacing: 8px;
             for option[index] in root.leaf.options: OptionRow {
-                number: index + 1;
+                badge: option.badge;
                 label: option.label;
-                chosen: root.leaf.chosen == index;
+                flashing: root.leaf.chosen == index;
                 enabled: !root.read-only;
                 clicked => { ArtifactBridge.form-choose(root.card, root.leaf.key, option.id); }
             }
@@ -1235,7 +1593,8 @@ component FormBody inherits VerticalLayout {
         // i18n: form card in the chat, button after "The form could not be loaded.": loads the form again (verb)
         KeyHint { chat: true; label: @tr("Try again"); emphasised: true; clicked => { ArtifactBridge.form-retry(root.artifact.id); } }
     }
-    if root.artifact.spec-state == "form": VerticalLayout {
+    if root.artifact.collapsed: AnsweredLine { artifact: root.artifact; }
+    if root.artifact.spec-state == "form" && !root.artifact.collapsed: VerticalLayout {
         spacing: 0px;
         for row in ArtifactBridge.form-rows(root.card): Rectangle {
             background: row.in-card ? Palette.raised : transparent;
@@ -1266,21 +1625,23 @@ component FormBody inherits VerticalLayout {
             }
         }
     }
-    if root.artifact.spec-state == "form": HorizontalLayout {
-        spacing: 10px;
-        Text {
-            horizontal-stretch: 1;
-            text: root.artifact.spec-footnote;
-            color: root.artifact.spec-read-only ? Palette.success : Palette.muted;
-            font-size: ChatText.note;
-            wrap: word-wrap;
-            vertical-alignment: center;
+    if root.artifact.spec-state == "form" && !root.artifact.collapsed: VerticalLayout {
+        spacing: 8px;
+        if root.artifact.spec-footnote != "": Rectangle {
+            height: footnote.preferred-height;
+            footnote := Text {
+                width: parent.width;
+                text: root.artifact.spec-footnote;
+                color: root.artifact.spec-read-only ? Palette.success : Palette.muted;
+                font-size: ChatText.note;
+                wrap: word-wrap;
+            }
         }
-        // A form with buttons has no footer submit: each button sends it.
-        if !root.artifact.spec-read-only && root.artifact.spec-send != "": Rectangle {
-            height: 28px * ChatText.scale;
-            width: send-label.preferred-width + 28px;
-            border-radius: 6px;
+        // A form with buttons has no footer submit (each button sends it),
+        // nor one whose single choice sends on the click.
+        if !root.artifact.spec-read-only && root.artifact.spec-send != "" && !root.artifact.spec-one-tap: Rectangle {
+            height: 44px * ChatText.scale;
+            border-radius: 14px;
             background: root.artifact.spec-can-send && !root.artifact.spec-sending
                 ? (send-area.has-hover ? Palette.accent.brighter(0.15) : Palette.accent) : Palette.control;
             accessible-role: button;
@@ -1291,8 +1652,8 @@ component FormBody inherits VerticalLayout {
                     // i18n: form card in the chat, text of the form's send button while the answers are being sent to the agent (in progress)
                     ? @tr("Sending…")
                     : root.artifact.spec-send;
-                color: root.artifact.spec-can-send && !root.artifact.spec-sending ? Palette.window : Palette.faint;
-                font-size: ChatText.detail;
+                color: root.artifact.spec-can-send && !root.artifact.spec-sending ? Palette.accent-text : Palette.faint;
+                font-size: CardText.answer;
                 font-weight: 600;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -1374,7 +1735,6 @@ export component ArtifactCard inherits Rectangle {
             }
         }
         if root.artifact.kind == "countdown": CountdownBody { artifact: root.artifact; }
-        if root.artifact.kind == "decision" || root.artifact.kind == "question": DecisionBody { artifact: root.artifact; measuring: root.measuring; }
         if root.artifact.spec-state != "": FormBody { artifact: root.artifact; measuring: root.measuring; }
         // The body's first lines (iOS shows four), always four lines tall.
         // The body's first lines (iOS: four for a document, five for
@@ -1481,5 +1841,32 @@ export component ArtifactCard inherits Rectangle {
                 horizontal-stretch: 1;
             }
         }
+    }
+}
+
+// A decision or question in the chat: the rounded answer card, a surface a
+// step off the chat's, a hairline, no kind line. Its width is set by the
+// row (it is measured at the width it is drawn at).
+export component DecisionArtifactCard inherits Rectangle {
+    in property <ArtifactItem> artifact;
+    in property <bool> measuring;
+    in property <length> view-top;
+    in property <length> view-bottom;
+    Timer {
+        interval: 150ms;
+        running: !root.measuring;
+        triggered => { ArtifactBridge.card-shown(root.artifact.id, root.absolute-position.x, root.absolute-position.y, root.width, root.height, root.view-top, root.view-bottom); }
+    }
+    background: Palette.raised;
+    border-width: root.artifact.selected ? 2px : 1px;
+    border-color: root.artifact.selected ? Palette.accent : Palette.rule;
+    border-radius: 20px;
+    accessible-role: groupbox;
+    accessible-label: root.artifact.question != "" ? root.artifact.question : root.artifact.title;
+    VerticalLayout {
+        padding: root.artifact.collapsed ? 12px : 16px;
+        padding-left: 16px;
+        padding-right: root.artifact.collapsed ? 12px : 14px;
+        DecisionCard { artifact: root.artifact; measuring: root.measuring; }
     }
 }
