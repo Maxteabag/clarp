@@ -162,7 +162,13 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
     .collect();
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
     if let Some(queue) = rows.iter_mut().find(|c| c.target == "toggle-queue") {
-        queue.label = if toggles.queue_shown { "Hide queue" } else { "Show queue" }.into();
+        queue.label = if toggles.queue_shown {
+            // i18n: command palette: hide the waiting messages (imperative)
+            clarp_core::tr!("Hide queue")
+        } else {
+            // i18n: command palette: show the waiting messages (imperative)
+            clarp_core::tr!("Show queue")
+        };
     }
     rows
 }
@@ -182,7 +188,13 @@ pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
             continue;
         }
         let (target, value) = match kind.as_str() {
-            "toggle" => (format!("settingrow:{id}:1"), if *on { "On" } else { "Off" }.to_owned()),
+            "toggle" => (format!("settingrow:{id}:1"), if *on {
+                // i18n: command palette, a switch setting's value (adjective)
+                clarp_core::tr!("switch" => "On")
+            } else {
+                // i18n: command palette, a switch setting's value (adjective)
+                clarp_core::tr!("switch" => "Off")
+            }),
             "choice" | "number" => (format!("settingpicker:{id}"), detail.clone()),
             "action" => (format!("settingrow:{id}:1"), String::new()),
             _ => continue,
@@ -216,7 +228,8 @@ pub fn picker(id: &str, options: &[(String, String, String, bool)], query: &str)
                 group: "settings",
                 description: description.clone(),
                 aliases: &[],
-                value: if *current { "Current".into() } else { String::new() },
+                // i18n: command palette, settings picker: marks the value in use (adjective)
+                value: if *current { clarp_core::tr!("setting" => "Current") } else { String::new() },
                 entry: "",
             };
             Some((score, item))

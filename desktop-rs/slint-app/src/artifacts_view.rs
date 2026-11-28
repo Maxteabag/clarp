@@ -472,7 +472,8 @@ fn download(app: &App, artifact: &Value, purpose: &str) {
     }
     let name = [text(artifact, "file_name"), text(artifact, "title")].into_iter().find(|n| !n.is_empty()).unwrap_or_default();
     FETCHING.with(|f| f.borrow_mut().insert(key, name));
-    app.engine.borrow_mut().set_artifact_status(&id, "Downloading…");
+    // i18n: artifact card status while its file downloads from the Host
+    app.engine.borrow_mut().set_artifact_status(&id, &tr!("Downloading…"));
     app.engine.borrow_mut().fetch_artifact_bytes(&id, purpose, path);
 }
 
@@ -2336,7 +2337,8 @@ fn await_whole(app: &App, id: &str, then: Then) {
         app.engine.borrow_mut().set_artifact_status(&previous, "");
     }
     if matches!(state, clarp_engine::Hydration::Loading | clarp_engine::Hydration::Omitted) {
-        app.engine.borrow_mut().set_artifact_status(id, "Loading…");
+        // i18n: artifacts gallery footer while it loads
+        app.engine.borrow_mut().set_artifact_status(id, &tr!("Loading…"));
     }
 }
 
