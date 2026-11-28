@@ -11,10 +11,11 @@
   import { isOpen, toggle } from './expanded.svelte.js';
   import { t } from '../../stores/i18n.svelte.js';
   import { formatDuration } from '../i18n/format.js';
-  import { turnErrorText } from '../turn-error.js';
 
   // `last`: this part is the one the turn ends in (a turn split at a steer draws its
   // fold button and error once, there); an unsplit turn is its own last part.
+  import { errorPlanFor, sessionOfLive } from '../../stores/turn-errors.svelte.js';
+
   let { liveState, items, explanations = true, last = true } = $props();
 
   let running = $derived(items.some(i => i.status === 'running' || i.status === 'pending'));
@@ -41,6 +42,10 @@
   let foldId = $derived(`fold:${liveState.turn ? liveState.turn.turn_id : ''}`);
   let foldOpen = $derived(isOpen(foldId));
   let shown = $derived(!fold || foldOpen ? rows : fold.visible);
+  // An explained failure (docs/turn-errors.md): the chat's cards, so the live card counts the
+  // repeats before it and offers a retry only while it is the newest.
+  let session = $derived(fold && fold.error && fold.error.explained ? sessionOfLive(liveState) : '');
+  let errorPlan = $derived(session ? errorPlanFor(session) : null);
 </script>
 
 <div class="live-turn" class:settled={!!fold}>
@@ -98,6 +103,7 @@
     {/if}
   {/each}
   {#if fold && fold.error}
-    <TurnNotice message={turnErrorText(liveState.turn && liveState.turn.error, fold.error.message)} detail={fold.error.detail} />
+    <TurnNotice message={fold.error.message} detail={fold.error.detail} explained={fold.error.explained || null} {session}
+      count={errorPlan ? errorPlan.counts.get('live') || 1 : 1} actionable={!!errorPlan && errorPlan.actionable === 'live'} />
   {/if}
 </div>

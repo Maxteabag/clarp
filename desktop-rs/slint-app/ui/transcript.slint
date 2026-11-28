@@ -112,6 +112,43 @@ export struct PromptRow {
     expanded: bool,
 }
 
+// A failed turn as the Host explains it (docs/turn-errors.md, contract
+// 217): one card with the sentence, its buttons and a closed Details.
+export struct ErrorAction {
+    id: string,
+    label: string,
+    // What ArtifactBridge.open is called with when it is pressed.
+    key: string,
+    primary: bool,
+    // Its request is on its way.
+    busy: bool,
+    // The Host took it (a retry scheduled, details copied): drawn with a
+    // check, and no longer pressed.
+    done: bool,
+}
+
+export struct ErrorCard {
+    // "" for a row that is no failure card.
+    id: string,
+    sentence: string,
+    // error, warning, info.
+    severity: string,
+    // How many failures it stands for (repeats collapse; 1 for one).
+    count: int,
+    // The count as the catalog says it (error.repeat_count, "3×").
+    count-label: string,
+    actions: [ErrorAction],
+    detail: string,
+    // backend · model · trace_id.
+    meta: string,
+    // The key that opens or closes Details.
+    details-key: string,
+    details-open: bool,
+    // A short note under the buttons: a refused retry, "Copied".
+    note: string,
+    note-failed: bool,
+}
+
 export struct MessageRow {
     id: string,
     // user, assistant, activity, system (a line the Host wrote itself)
@@ -152,6 +189,8 @@ export struct MessageRow {
     // opened turn's work is drawn in, as on iOS: "top", "middle", "bottom",
     // "only" (a box of one row), "" for none.
     work-box: string,
+    // A failed turn the Host explains (author "error").
+    error: ErrorCard,
 }
 
 // A row handed to the transcript to measure off screen, and the batch it
@@ -921,6 +960,185 @@ export component Block inherits VerticalLayout {
     }
 }
 
+// A failed turn's card (docs/turn-errors.md): an icon and colour by
+// severity, the Host's sentence, a count for repeats, the buttons (the
+// first the primary one) and a closed Details with the provider's words and
+// where it happened, selectable.
+component TurnErrorCard inherits Rectangle {
+    in property <ErrorCard> card;
+    in property <bool> measuring;
+    property <color> tone: root.card.severity == "warning" ? Palette.warning : root.card.severity == "info" ? Palette.muted : Palette.danger;
+    // The primary button's fill: the tone, but on a quiet info card the
+    // text colour (muted grey under window-coloured words is too faint in
+    // the light theme), nearly opaque.
+    property <color> primary-fill: root.card.severity == "info" ? Palette.text : root.tone;
+    property <float> primary-alpha: root.card.severity == "info" ? 0.9 : 0.7;
+    border-radius: 6px * ChatText.scale;
+    border-width: 1px;
+    border-color: root.tone.with-alpha(root.card.severity == "info" ? 0.25 : 0.45);
+    background: root.card.severity == "info" ? Palette.raised.with-alpha(0.5) : root.tone.with-alpha(0.08);
+    accessible-role: groupbox;
+    accessible-id: root.measuring ? "" : "error-card:" + root.card.id;
+    accessible-label: root.card.sentence;
+    VerticalLayout {
+        padding: 10px * ChatText.scale;
+        padding-left: 12px * ChatText.scale;
+        spacing: 8px * ChatText.scale;
+        HorizontalLayout {
+            spacing: 8px * ChatText.scale;
+            Rectangle {
+                width: 18px * ChatText.scale;
+                height: 18px * ChatText.scale;
+                y: 1px;
+                border-radius: self.width / 2;
+                background: root.tone.with-alpha(root.card.severity == "info" ? 0.25 : 0.9);
+                Text {
+                    text: root.card.severity == "info" ? "i" : "!";
+                    color: root.card.severity == "info" ? Palette.text : Palette.window;
+                    font-size: ChatText.note;
+                    font-weight: 800;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+            Text {
+                text: root.card.sentence;
+                color: root.card.severity == "info" ? Palette.muted : Palette.text;
+                font-size: ChatText.body;
+                font-family: Palette.body-family;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "error-sentence:" + root.card.id;
+                accessible-label: self.text;
+            }
+            if root.card.count > 1: Rectangle {
+                width: count-text.preferred-width + 10px * ChatText.scale;
+                height: 18px * ChatText.scale;
+                border-radius: self.height / 2;
+                background: root.tone.with-alpha(0.2);
+                accessible-role: text;
+                accessible-id: root.measuring ? "" : "error-count:" + root.card.id;
+                accessible-label: count-text.text;
+                count-text := Text {
+                    text: root.card.count-label;
+                    color: root.tone;
+                    font-size: ChatText.note;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        if root.card.actions.length > 0: HorizontalLayout {
+            spacing: 6px * ChatText.scale;
+            alignment: start;
+            for action in root.card.actions: Rectangle {
+                property <bool> enabled: !action.busy && !action.done;
+                height: 26px * ChatText.scale;
+                min-width: action-row.preferred-width;
+                border-radius: 4px * ChatText.scale;
+                border-width: 1px;
+                border-color: action.primary ? root.primary-fill : Palette.border;
+                background: action.primary ? (action-touch.has-hover && self.enabled ? root.primary-fill.with-alpha(Math.min(1, root.primary-alpha + 0.15)) : root.primary-fill.with-alpha(action.done ? 0.35 : root.primary-alpha))
+                    : action-touch.has-hover && self.enabled ? Palette.hover : Palette.control;
+                accessible-role: button;
+                accessible-id: root.measuring ? "" : "error-action:" + action.id + ":" + root.card.id;
+                accessible-label: action.label;
+                accessible-enabled: self.enabled;
+                accessible-action-default => { if (self.enabled) { ArtifactBridge.open(action.key); } }
+                action-row := HorizontalLayout {
+                    padding-left: 10px * ChatText.scale;
+                    padding-right: 10px * ChatText.scale;
+                    spacing: 5px * ChatText.scale;
+                    if action.done: Image {
+                        y: (parent.height - self.height) / 2;
+                        source: @image-url("icons/check.svg");
+                        width: 12px * ChatText.scale;
+                        height: 12px * ChatText.scale;
+                        colorize: action.primary ? Palette.window : Palette.success;
+                    }
+                    if action.busy: Text {
+                        text: "…";
+                        color: action.primary ? Palette.window : Palette.muted;
+                        font-size: ChatText.detail;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: action.label;
+                        color: action.primary ? Palette.window : Palette.chrome-text;
+                        font-size: ChatText.detail;
+                        font-weight: action.primary ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                }
+                action-touch := TouchArea {
+                    enabled: parent.enabled && !root.measuring;
+                    mouse-cursor: parent.enabled ? pointer : default;
+                    clicked => { ArtifactBridge.open(action.key); }
+                }
+            }
+        }
+        if root.card.note != "": Text {
+            text: root.card.note;
+            color: root.card.note-failed ? Palette.danger : Palette.success;
+            font-size: ChatText.detail;
+            wrap: word-wrap;
+            accessible-role: text;
+            accessible-id: root.measuring ? "" : "error-note:" + root.card.id;
+            accessible-label: self.text;
+        }
+        if root.card.detail != "" || root.card.meta != "": Rectangle {
+            height: 18px * ChatText.scale;
+            accessible-role: button;
+            accessible-id: root.measuring ? "" : "error-details:" + root.card.id;
+            // i18n: chat, failed-turn card, accessibility label of the disclosure (noun): opens the provider's raw error text
+            accessible-label: @tr("error.details" => "Details");
+            accessible-expandable: true;
+            accessible-expanded: root.card.details-open;
+            accessible-action-default => { ArtifactBridge.open(root.card.details-key); }
+            HorizontalLayout {
+                alignment: start;
+                spacing: 4px * ChatText.scale;
+                Text { text: root.card.details-open ? "▾" : "▸"; color: Palette.faint; font-size: ChatText.detail; vertical-alignment: center; }
+                // i18n: chat, failed-turn card, disclosure label (noun): opens the provider's raw error text
+                Text { text: @tr("error.details" => "Details"); color: Palette.muted; font-size: ChatText.detail; vertical-alignment: center; }
+            }
+            TouchArea {
+                enabled: !root.measuring;
+                mouse-cursor: pointer;
+                clicked => { ArtifactBridge.open(root.card.details-key); }
+            }
+        }
+        if root.card.details-open: Rectangle {
+            border-radius: 4px * ChatText.scale;
+            background: Palette.sunken.with-alpha(0.6);
+            VerticalLayout {
+                padding: 8px * ChatText.scale;
+                spacing: 6px * ChatText.scale;
+                if root.card.detail != "": TextInput {
+                    text: root.card.detail;
+                    read-only: true;
+                    wrap: word-wrap;
+                    color: Palette.text;
+                    font-family: Palette.code-family;
+                    font-size: ChatText.note;
+                    single-line: false;
+                    accessible-id: root.measuring ? "" : "error-detail:" + root.card.id;
+                }
+                if root.card.meta != "": TextInput {
+                    text: root.card.meta;
+                    read-only: true;
+                    color: Palette.faint;
+                    font-family: Palette.code-family;
+                    font-size: ChatText.note;
+                    accessible-id: root.measuring ? "" : "error-meta:" + root.card.id;
+                }
+            }
+        }
+    }
+}
+
 // One message of the chat as the transcript draws it, and as it is
 // measured off screen (the same component, so a row measured there is as
 // tall as it is drawn).
@@ -961,7 +1179,7 @@ component TranscriptRow inherits HorizontalLayout {
     // A reply's hover buttons (copy, select, work) have their own room at
     // its right, so they never draw over its first line; a sent bubble's
     // sit outside it, to its left.
-    property <bool> has-icons: root.message.author != "activity" && root.message.author != "live" && root.message.receipt.key == "";
+    property <bool> has-icons: root.message.author != "activity" && root.message.author != "live" && root.message.author != "error" && root.message.receipt.key == "";
     property <length> icon-room: root.has-icons && root.message.author != "user" ? (root.message.work-key != "" ? 66px : 44px) * ChatText.scale : 0px;
     property <bool> icons-left: root.message.author == "user";
     // The space round a message's content: its bubble's, sized with its text.
@@ -1091,6 +1309,17 @@ component TranscriptRow inherits HorizontalLayout {
                 view-top: root.view-top;
                 view-bottom: root.view-bottom;
                 measuring: root.measuring;
+            }
+            if root.message.author == "error": HorizontalLayout {
+                // Measured at the width the card is drawn at.
+                preferred-width: Math.min(640px * Look.zoom, content-width);
+                alignment: start;
+                TurnErrorCard {
+                    card: root.message.error;
+                    preferred-width: Math.min(640px * Look.zoom, content-width);
+                    max-width: 640px * Look.zoom;
+                    measuring: root.measuring;
+                }
             }
             if root.message.author == "live": LiveItem {
                 live: root.message.live;

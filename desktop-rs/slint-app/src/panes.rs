@@ -240,6 +240,52 @@ fn boxed_signature(signature: &str, edge: &str) -> String {
     if edge.is_empty() { signature.to_owned() } else { format!("{signature}|box:{edge}") }
 }
 
+/// The live failed turn's card while no `/log` row says it yet
+/// (docs/turn-errors.md): under its prompt, before any newer prompt and
+/// before unsent messages of one's own.
+fn splice_live_error(
+    key: &str,
+    error: &clarp_core::turn_error::TurnError,
+    session: &str,
+    plan: &clarp_core::turn_error::Plan,
+    engine: &clarp_engine::Engine,
+    fresh: &mut Vec<Shown>,
+    rows: &mut Vec<MessageRow>,
+) {
+    let sent = fresh.iter().rposition(|(row, ..)| !(row.message.pending || row.message.delivery_failed)).map_or(0, |i| i + 1);
+    let newer_prompt = fresh.iter().position(|(row, ..)| !error.message_id.is_empty() && row.message.id == error.message_id).and_then(|at| {
+        fresh[at + 1..].iter().position(|(row, ..)| row.message.role == "user").map(|next| at + 1 + next)
+    });
+    let at = newer_prompt.unwrap_or(sent).min(sent);
+    let source = clarp_core::presentation::PresentedRow {
+        source_row: usize::MAX,
+        message: clarp_core::protocol::Message {
+            id: key.to_owned(),
+            role: "assistant".into(),
+            origin: "system".into(),
+            trace_id: error.trace_id.clone(),
+            turn_error: Some(error.clone()),
+            ..Default::default()
+        },
+        body: String::new(),
+        activity: false,
+        tools: Vec::new(),
+        display_cells: Vec::new(),
+        activity_count: 0,
+        group_ids: Vec::new(),
+        group_label: String::new(),
+        group_expanded: false,
+        activity_inline: false,
+        activity_label: String::new(),
+        explanation_repeat: 0,
+    };
+    let mut row = crate::view::message_row(&source, false, &std::collections::HashSet::new(), session, None);
+    row.error = crate::turn_error_view::finish(error, key, session, plan, engine);
+    let signature = format!("turn-error|{}", crate::turn_error_view::signature(&row.error));
+    rows.insert(at, row);
+    fresh.insert(at, (source, false, signature, key.to_owned()));
+}
+
 /// One quiet line under each turn that did not complete, in the Host's
 /// words (`turn_end_reason`, #731): drawn as the Host's own system lines are.
 fn splice_turn_reasons(lines: &[clarp_core::turn_reason::Line], fresh: &mut Vec<Shown>, rows: &mut Vec<MessageRow>) {
@@ -849,20 +895,29 @@ impl App {
         // its tools) the item rows show instead.
         // Finished turns fold the same way (§7.6): their rows show as the
         // fold, their tools as its rows.
-        let (live, history, projection, reasons) = {
+        let (live, history, projection, reasons, errors) = {
             let engine = self.engine.borrow();
             let rows = engine.conversation(&pane.session).map(|c| c.rows().to_vec()).unwrap_or_default();
-            // Why each turn that did not complete ended (`turn_end_reason`, #731).
-            let reasons = if engine.turn_end_reason(&pane.session) { clarp_core::turn_reason::ended(&rows) } else { Vec::new() };
+            // Failed turns the Host explains (`turn_error_explained`): one
+            // card each, repeats as one, the live failure until its notice lands.
+            let live_error = engine.live_view(&pane.session).and_then(|v| v.turn()).and_then(|turn| {
+                Some((clarp_core::json::string(turn, "turn_id"), clarp_core::turn_error::of_live_turn(turn)?))
+            });
+            let errors = clarp_core::turn_error::plan(&rows, live_error.as_ref().map(|(id, error)| (id.as_str(), error.clone())));
+            // Why each turn that did not complete ended (`turn_end_reason`, #731);
+            // a turn its card explains says it once, on the card.
+            let mut reasons = if engine.turn_end_reason(&pane.session) { clarp_core::turn_reason::ended(&rows) } else { Vec::new() };
+            reasons.retain(|line| !errors.traces.contains(&line.turn_id));
             let expanded = self.expanded.borrow();
             let live = crate::live_view::present(&engine, &pane.session, &rows, &expanded);
             let history = crate::live_view::history(&engine, &pane.session, &rows, &expanded, live.as_ref());
             // Conversation view (#702): the rows it leaves out, and each
             // finished turn's Show work on its reply.
             let projection = crate::live_view::conversation_view(&engine, &pane.session, &rows).then(|| clarp_core::chat_view::project(&rows, &expanded));
-            (live, history, projection, reasons)
+            (live, history, projection, reasons, errors)
         };
         let mut hide = history.hidden_rows.clone();
+        hide.extend(errors.hidden.iter().cloned());
         if let Some(projection) = &projection {
             hide.extend(projection.hidden_rows.iter().cloned());
         }
@@ -941,6 +996,10 @@ impl App {
                 if let Some(work) = projection.as_ref().and_then(|p| p.anchors.get(&row.message.id)) {
                     shown.work_key = work.key.clone().into();
                     shown.work_open = work.open;
+                }
+                // A failed turn's card: its count, buttons and Details.
+                if let Some(error) = row.message.turn_error.as_ref().filter(|_| shown.author == "error" && !row.message.automated) {
+                    shown.error = crate::turn_error_view::finish(error, &row.message.id, &pane.session, &errors, &self.engine.borrow());
                 }
                 // A message addressed to this chat's agent by an @-mention.
                 if shown.author == "user" {
@@ -1035,7 +1094,9 @@ impl App {
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
             // An unsent message is drawn again when its status becomes due.
-            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
+            // A failure card is drawn again when its count or buttons change.
+            let error = if row.error.id.is_empty() { String::new() } else { crate::turn_error_view::signature(&row.error) };
+            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}|{error}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented
@@ -1053,6 +1114,9 @@ impl App {
         if let Some(live) = &live {
             self.splice_live(pane, live, &mut fresh, &mut rows);
             kept.extend(live.entries.iter().filter(|e| e.row.is_empty()).map(|e| e.key.clone()));
+        }
+        if let Some((key, error)) = &errors.live {
+            splice_live_error(key, error, &pane.session, &errors, &self.engine.borrow(), &mut fresh, &mut rows);
         }
         splice_turn_reasons(&reasons, &mut fresh, &mut rows);
         self.splice_coordination(pane, &mut fresh, &mut rows, &mut kept);

@@ -232,7 +232,87 @@ export function partFold(turn, rows, { last = true, wholeRows = null, tr = engli
 function turnError(turn, tr) {
   if (turn.status !== 'failed') return null;
   const e = turn.error || {};
-  return { message: String(e.message || tr('live.turn_failed')), detail: String(e.detail || '') };
+  const explained = explainedError(e);
+  return { message: String(e.message || tr('live.turn_failed')), detail: String(e.detail || ''), ...(explained ? { explained } : {}) };
+}
+
+/** The Host's explanation of a failed turn (docs/turn-errors.md, contract
+ * 217): the error object when it carries a sentence, else null (an older
+ * Host), and the notice reads as before. */
+export function explainedError(e) {
+  const text = e && typeof e === 'object' && e.text;
+  return text && typeof text === 'object' && (text.en || text.nb) ? e : null;
+}
+
+const KNOWN_ACTIONS = new Set(['retry', 'fresh_retry', 'retry_at', 'compact_retry', 'copy_details']);
+/** The actions that send the failed message again (`POST /turn-retry`). */
+export const isRetry = id => ['retry', 'fresh_retry', 'retry_at', 'compact_retry'].includes(id);
+
+/** The buttons the web draws for an explained error at `now`: known ids only,
+ * and a `retry_at` whose time has passed as a plain Try again (no `at_ms`). */
+export function errorActions(error, now = Date.now()) {
+  const out = [];
+  for (const a of Array.isArray(error && error.actions) ? error.actions : []) {
+    if (!a || !KNOWN_ACTIONS.has(a.id)) continue;
+    const at = a.at_ms || error.resets_at_ms;
+    // A passed retry_at is a plain retry (its words from the catalog: error.action.retry); one
+    // without its own time takes the reset's.
+    const action = a.id === 'retry_at' && at && at <= now ? { id: 'retry' }
+      : a.id === 'retry_at' && at && !a.at_ms ? { ...a, at_ms: at } : a;
+    if (!out.some(o => o.id === action.id)) out.push(action);
+  }
+  return out;
+}
+
+/** `POST /turn-retry`'s body for `action`, or null when it sends nothing. */
+export function retryBody(error, session, action) {
+  if (!session || !error || !error.message_id || !isRetry(action.id)) return null;
+  const body = { session, message_id: error.message_id };
+  if (action.id === 'fresh_retry') body.fresh = true;
+  if (action.id === 'compact_retry') body.compact = true;
+  if (action.id === 'retry_at') {
+    const at = action.at_ms || error.resets_at_ms;
+    if (!at) return null;
+    body.at_ms = at;
+  }
+  return body;
+}
+
+/**
+ * How a chat draws its explained failures: repeats of one fingerprint with no
+ * reply of the agent's between them collapse to the newest (`hidden`, and
+ * `counts` on the one drawn), and only the newest failure while no reply came
+ * after it offers a retry (`actionable`). `live` is the live failed turn's
+ * explanation and key, drawn last.
+ */
+/** A row the Host marks automated (or the note it leaves an agent after cutting its turn): never
+ * drawn, so it is neither a failure card nor a reply. */
+const automatedRow = row => !!(row && (row.automated || row.is_automated || row.origin === 'made-way'
+  || String(row.id || '').startsWith('u-made-way-')));
+
+export function planTurnErrors(turns, live = null) {
+  const hidden = new Set();
+  const counts = new Map();
+  const open = new Map();
+  let actionable = null;
+  const items = (turns || []).filter(t => !automatedRow(t))
+    .map(t => ({ id: t.id, row: t, error: t.role !== 'user' ? explainedError(t.error) : null }));
+  if (live && live.error) items.push({ id: live.key, row: null, error: live.error });
+  for (const { id, row, error } of items) {
+    const reply = row && row.role === 'assistant' && row.origin !== 'system' && row.kind !== 'notice' && !error
+      && String(row.text || '').trim();
+    if (reply) { open.clear(); actionable = null; continue; }
+    if (!error) continue;
+    const older = error.fingerprint ? open.get(error.fingerprint) : undefined;
+    if (older !== undefined) {
+      hidden.add(older);
+      counts.set(id, (counts.get(older) || 1) + 1);
+      counts.delete(older);
+    }
+    if (error.fingerprint) open.set(error.fingerprint, id);
+    actionable = id;
+  }
+  return { hidden, counts, actionable };
 }
 
 /**
@@ -242,11 +322,15 @@ function turnError(turn, tr) {
  * so replies, prompts and the dream digest render as they always have.
  */
 export function systemNotice(row) {
-  if (!row || row.role !== 'assistant' || row.origin !== 'system') return null;
+  if (!row || row.role === 'user') return null;
+  // The Host's explanation (contract 217), also on a turn-interrupted notice.
+  const explained = explainedError(row.error);
+  if (!explained && (row.role !== 'assistant' || row.origin !== 'system')) return null;
   const text = String(row.text || '').trim();
   const cut = text.indexOf('\n\n');
-  return cut < 0 ? { message: text, detail: '' }
-    : { message: text.slice(0, cut).trim(), detail: text.slice(cut + 2).trim() };
+  const extra = explained ? { explained } : {};
+  return cut < 0 ? { message: text, detail: '', ...extra }
+    : { message: text.slice(0, cut).trim(), detail: text.slice(cut + 2).trim(), ...extra };
 }
 
 /** States with a status line of their own (live.status.<state>). */

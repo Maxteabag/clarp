@@ -140,6 +140,22 @@ fn lookup(tag: &str, context: &str, text: &str) -> Option<&'static [&'static str
     Some(entries[at].2)
 }
 
+/// Whether `tag`'s catalog translates the entry whose context is `context`
+/// (a semantic key used as the context, as the turn-error strings are).
+/// English, the source, always counts. A caller with words of its own for an
+/// untranslated entry (the Host's sentence in the user's language) shows
+/// those instead of the English source.
+pub fn translated(tag: &str, context: &str) -> bool {
+    let Some(index) = LANGUAGES.iter().position(|l| l.tag == tag) else { return false };
+    if index == 0 {
+        return true;
+    }
+    catalog::CATALOG.get(index).is_some_and(|entries| {
+        let at = entries.partition_point(|(c, _, _)| *c < context);
+        entries.get(at).is_some_and(|(c, _, forms)| *c == context && forms.iter().any(|f| !f.is_empty()))
+    })
+}
+
 /// `text` in `tag`'s language (plural: `text` for one, `plural` otherwise,
 /// chosen by `n`), its placeholders filled as Slint's `@tr` fills them: `{}`
 /// takes the next argument, `{0}` a numbered one, `{n}` the count, and `{{`
