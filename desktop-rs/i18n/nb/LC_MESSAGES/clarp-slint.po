@@ -1415,6 +1415,10 @@ msgstr "Kommando for å lagre legitimasjon"
 msgid "Ctrl+A all · Ctrl+C copy · Esc close"
 msgstr "Ctrl+A alt · Ctrl+C kopier · Esc lukk"
 
+#. command palette (Ctrl+K), note under the results pointing to message search; "Ctrl+Shift+F" is a key name
+msgid "Ctrl+Shift+F searches the messages of every chat."
+msgstr "Ctrl+Shift+F søker i meldingene i alle chatter."
+
 #. quick switcher, value pill on a row: this is the one in use now (adjective)
 #. quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
 #. command palette, settings picker: marks the value in use (adjective)
@@ -1920,6 +1924,12 @@ msgid ""
 "Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message."
 msgstr ""
 "Finner ord i meldingene i alle chatter (Hosten søker i alle der den kan, ellers i chattene på denne datamaskinen) og hopper til meldingen."
+
+#. Ctrl+K command palette, the line under the command “Search in chat” saying what it does
+msgid ""
+"Finds words in the open chat: every message holding them is marked, the bar says which match of how many shows, and up and down (Enter, Shift+Enter) go to the older and newer one."
+msgstr ""
+"Finner ord i den åpne chatten og markerer meldingene som inneholder dem. Søkefeltet viser hvilket treff du er på, og hvor mange det er. Bruk pil opp eller Enter for eldre treff og pil ned eller Shift+Enter for nyere treff."
 
 #. preview versions window, warning when agents are still working and the app cannot restart yet
 msgid "Finish active tasks before switching versions."
@@ -4469,10 +4479,18 @@ msgstr "Søk i alle chatter"
 msgid "Search contacts"
 msgstr "Søk i kontakter"
 
+#. Ctrl+K command palette, a command's name (an action). What it does: opens the find bar of the open chat (Ctrl+F) to find words in its messages.
+msgid "Search in chat"
+msgstr "Søk i chatten"
+
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
 msgid "Search messages"
 msgstr "Søk i meldinger"
+
+#. navigation rail, tooltip of the search button (verb phrase): searches every chat; Ctrl+Shift+F is its shortcut, key names left as is
+msgid "Search messages (Ctrl+Shift+F)"
+msgstr "Søk i meldinger (Ctrl+Shift+F)"
 
 #. Settings page, accessibility label of the search field (verb phrase: search the settings)
 msgid "Search settings"
@@ -5176,6 +5194,10 @@ msgstr "Underteam"
 
 #. Settings > Colours, a colour setting's name, the row label (noun). What it colours: Colour of working agents and things that went well
 msgid "Success"
+msgstr "Vellykket"
+
+#. updates, a successful artifact outcome
+msgid "Successful"
 msgstr "Vellykket"
 
 #. agent profile, compact-context confirmation, explanation under the title: what compacting does
@@ -7879,6 +7901,332 @@ msgctxt "model"
 msgid "Default"
 msgstr "Standard"
 
+#. desktop notification, button (verb): marks the chat read without opening it
+#. context: notify.action.mark_read
+msgctxt "notify.action.mark_read"
+msgid "Mark read"
+msgstr "Merk som lest"
+
+#. desktop notification, button (verb): no more notifications from this contact; {} is the contact's name
+#. context: notify.action.mute
+msgctxt "notify.action.mute"
+msgid "Mute {}"
+msgstr "Demp varsler fra {}"
+
+#. desktop notification, button that declines an agent's request when the card names no label
+#. context: notify.action.no
+msgctxt "notify.action.no"
+msgid "No"
+msgstr "Nei"
+
+#. desktop notification, button (verb): opens the chat at the message
+#. context: notify.action.open
+msgctxt "notify.action.open"
+msgid "Open"
+msgstr "Åpne"
+
+#. desktop notification, button (noun): opens Settings > Notifications
+#. context: notify.action.settings
+msgctxt "notify.action.settings"
+msgid "Settings"
+msgstr "Innstillinger"
+
+#. desktop notification, button (verb): takes back the answer just given to an agent's question
+#. context: notify.action.undo
+msgctxt "notify.action.undo"
+msgid "Undo"
+msgstr "Angre"
+
+#. desktop notification, button that approves an agent's request when the card names no label
+#. context: notify.action.yes
+msgctxt "notify.action.yes"
+msgid "Yes"
+msgstr "Ja"
+
+#. desktop notification, title when an agent bound to privacy answered; {} is the agent's name
+#. context: notify.body.answered
+msgctxt "notify.body.answered"
+msgid "{} answered"
+msgstr "{} svarte"
+
+#. desktop notification, title when an agent bound to privacy asks something; {} is the agent's name
+#. context: notify.body.asks
+msgctxt "notify.body.asks"
+msgid "{} asks"
+msgstr "{} spør"
+
+#. desktop notification, title of a call going on; {} is the agent's name
+#. context: notify.body.call_answered
+msgctxt "notify.body.call_answered"
+msgid "Call with {}"
+msgstr "I samtale med {}"
+
+#. desktop notification, title when the calling agent hung up before it was answered; {} is the agent's name
+#. context: notify.body.call_cancelled
+msgctxt "notify.body.call_cancelled"
+msgid "{} hung up"
+msgstr "{} la på"
+
+#. desktop notification, title of a call the user declined; {} is the agent's name
+#. context: notify.body.call_declined
+msgctxt "notify.body.call_declined"
+msgid "Declined call from {}"
+msgstr "Avvist anrop fra {}"
+
+#. desktop notification, title of a call when the caller is not named
+#. context: notify.body.call_incoming
+msgctxt "notify.body.call_incoming"
+msgid "Incoming call"
+msgstr "Innkommende anrop"
+
+#. desktop notification, title of a call not answered; {} is the agent's name
+#. context: notify.body.call_missed
+msgctxt "notify.body.call_missed"
+msgid "Missed call from {}"
+msgstr "Tapt anrop fra {}"
+
+#. desktop notification, title of an agent's call ringing; {} is the agent's name
+#. context: notify.body.call_ringing
+msgctxt "notify.body.call_ringing"
+msgid "{} is calling"
+msgstr "{} ringer"
+
+#. desktop notification, body when an agent finished without words to show
+#. context: notify.body.done
+msgctxt "notify.body.done"
+msgid "Done, your turn"
+msgstr "Ferdig – din tur"
+
+#. desktop notification, body when a failed turn has no text of its own
+#. context: notify.body.failed
+msgctxt "notify.body.failed"
+msgid "The turn failed"
+msgstr "Runden mislyktes"
+
+#. desktop notification, title of a failed turn; {} is the agent's name
+#. context: notify.body.failed_title
+msgctxt "notify.body.failed_title"
+msgid "{} couldn't finish"
+msgstr "{} ble ikke ferdig"
+
+#. desktop notification, body when a helper agent reported to its parent; {} is the helper's name
+#. context: notify.body.helper_reported
+msgctxt "notify.body.helper_reported"
+msgid "{} reported back"
+msgstr "{} har rapportert tilbake"
+
+#. desktop notification, body when an agent's background job failed; {} is the job's title
+#. context: notify.body.job_failed
+msgctxt "notify.body.job_failed"
+msgid "Failed: {}"
+msgstr "Mislyktes: {}"
+
+#. desktop notification, body when an agent's background job succeeded; {} is the job's title
+#. context: notify.body.job_succeeded
+msgctxt "notify.body.job_succeeded"
+msgid "Finished: {}"
+msgstr "Ferdig: {}"
+
+#. desktop notification, body when an agent's question has no text of its own
+#. context: notify.body.needs_you
+msgctxt "notify.body.needs_you"
+msgid "Waiting for your answer"
+msgstr "Venter på svaret ditt"
+
+#. desktop notification, body of a private agent's question: its words are not shown
+#. context: notify.body.open_to_answer
+msgctxt "notify.body.open_to_answer"
+msgid "Open Clarp to answer."
+msgstr "Åpne Clarp for å svare."
+
+#. desktop notification, body when Undo came after the agent got the answer
+#. context: notify.body.too_late
+msgctxt "notify.body.too_late"
+msgid "Too late to undo: the answer was sent"
+msgstr "For sent å angre: Svaret er sendt"
+
+#. desktop notification, body after answering from the notification; {} is the chosen answer's label
+#. context: notify.body.you_answered
+msgctxt "notify.body.you_answered"
+msgid "You answered {}"
+msgstr "Du svarte {}"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): account and usage notices
+#. context: notify.event.account
+msgctxt "notify.event.account"
+msgid "Account notices"
+msgstr "Kontovarsler"
+
+#. Settings > Notifications, line under the Account notices switch
+#. context: notify.event.account.detail
+msgctxt "notify.event.account.detail"
+msgid "Account and usage notices"
+msgstr "Varsler om konto og forbruk"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): an agent rings the user
+#. context: notify.event.call
+msgctxt "notify.event.call"
+msgid "Calls"
+msgstr "Anrop"
+
+#. Settings > Notifications, line under the Calls switch
+#. context: notify.event.call.detail
+msgctxt "notify.event.call.detail"
+msgid "An agent rings you"
+msgstr "En agent ringer deg"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): an agent's turn that failed
+#. context: notify.event.failed
+msgctxt "notify.event.failed"
+msgid "Failed turns"
+msgstr "Mislykkede runder"
+
+#. Settings > Notifications, line under the Failed turns switch
+#. context: notify.event.failed.detail
+msgctxt "notify.event.failed.detail"
+msgid "A turn failed and the Host stopped trying"
+msgstr "En runde mislyktes, og Hosten har sluttet å prøve"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): a helper agent reported to its parent
+#. context: notify.event.helper_report
+msgctxt "notify.event.helper_report"
+msgid "Helper reports"
+msgstr "Rapporter fra hjelpere"
+
+#. Settings > Notifications, line under the Helper reports switch
+#. context: notify.event.helper_report.detail
+msgctxt "notify.event.helper_report.detail"
+msgid "A helper reported to the agent that started it"
+msgstr "En hjelper har rapportert tilbake til agenten som startet den"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): an agent's background job ended
+#. context: notify.event.job_done
+msgctxt "notify.event.job_done"
+msgid "Background jobs done"
+msgstr "Fullførte bakgrunnsjobber"
+
+#. Settings > Notifications, line under the Background jobs done switch
+#. context: notify.event.job_done.detail
+msgctxt "notify.event.job_done.detail"
+msgid "A background job of an agent ended"
+msgstr "En av agentens bakgrunnsjobber er avsluttet"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): an agent asks the user something
+#. context: notify.event.needs_you
+msgctxt "notify.event.needs_you"
+msgid "Questions for you"
+msgstr "Spørsmål til deg"
+
+#. Settings > Notifications, line under the Questions for you switch
+#. context: notify.event.needs_you.detail
+msgctxt "notify.event.needs_you.detail"
+msgid "An agent asks you something or waits for your answer"
+msgstr "En agent spør deg om noe eller venter på svaret ditt"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): an agent's finished reply
+#. context: notify.event.reply
+msgctxt "notify.event.reply"
+msgid "Replies"
+msgstr "Svar"
+
+#. Settings > Notifications, line under the Replies switch
+#. context: notify.event.reply.detail
+msgctxt "notify.event.reply.detail"
+msgid "An agent finished and has something for you"
+msgstr "En agent er ferdig og har noe til deg"
+
+#. Settings > Notifications and a contact's profile, label of a switch (noun): notes agents send the user
+#. context: notify.event.update
+msgctxt "notify.event.update"
+msgid "Updates"
+msgstr "Oppdateringer"
+
+#. Settings > Notifications, line under the Updates switch
+#. context: notify.event.update.detail
+msgctxt "notify.event.update.detail"
+msgid "A note an agent sent you"
+msgstr "En agent har sendt deg en oppdatering"
+
+#. contact profile, row label (noun) of the contact's notification preset
+#. contact profile, accessibility label of the notification preset choice (noun)
+#. context: notify.settings.contact
+msgctxt "notify.settings.contact"
+msgid "Notifications"
+msgstr "Varsler"
+
+#. contact profile, button (verb): shows a notification choice per event
+#. contact profile > Notifications, button (verb): shows a choice per event
+#. context: notify.settings.customize
+msgctxt "notify.settings.customize"
+msgid "Customize"
+msgstr "Tilpass"
+
+#. contact profile > Notifications, choice meaning "as set for everyone", shown as "Default · On"
+#. context: notify.settings.default
+msgctxt "notify.settings.default"
+msgid "Default"
+msgstr "Standard"
+
+#. Settings > Notifications, switch label: this computer's notification popups on or off
+#. context: notify.settings.desktop
+msgctxt "notify.settings.desktop"
+msgid "Desktop notifications"
+msgstr "Skrivebordsvarsler"
+
+#. Settings > Notifications, line under the Desktop notifications switch
+#. context: notify.settings.desktop.detail
+msgctxt "notify.settings.desktop.detail"
+msgid "Show notifications on this computer"
+msgstr "Vis varsler på denne datamaskinen"
+
+#. contact profile > Notifications, choice (adjective): this event stays silent
+#. context: notify.settings.off
+msgctxt "notify.settings.off"
+msgid "Off"
+msgstr "Av"
+
+#. contact profile > Notifications, choice (adjective): this event notifies
+#. context: notify.settings.on
+msgctxt "notify.settings.on"
+msgid "On"
+msgstr "På"
+
+#. contact profile > Notifications, preset choice: every notification as set for everyone
+#. context: notify.settings.preset.all
+msgctxt "notify.settings.preset.all"
+msgid "All"
+msgstr "Alle"
+
+#. contact profile > Notifications, preset choice (adjective): its own choice per event
+#. context: notify.settings.preset.custom
+msgctxt "notify.settings.preset.custom"
+msgid "Custom"
+msgstr "Tilpasset"
+
+#. contact profile > Notifications, preset choice (adjective): nothing from this contact
+#. context: notify.settings.preset.muted
+msgctxt "notify.settings.preset.muted"
+msgid "Muted"
+msgstr "Dempet"
+
+#. contact profile > Notifications, preset choice: only questions and failed turns
+#. context: notify.settings.preset.needs_me
+msgctxt "notify.settings.preset.needs_me"
+msgid "Only when it needs me"
+msgstr "Bare når jeg trengs"
+
+#. Settings > Notifications, switch label (noun): a sound with questions and calls
+#. context: notify.settings.sound
+msgctxt "notify.settings.sound"
+msgid "Sound"
+msgstr "Lyd"
+
+#. Settings > Notifications, line under the Sound switch
+#. context: notify.settings.sound.detail
+msgctxt "notify.settings.sound.detail"
+msgid "Play the desktop's message sound when an agent asks you something or rings"
+msgstr "Spill av datamaskinens meldingslyd når en agent spør deg om noe eller ringer"
+
 #. release card in the chat, state after the revision before it has started: names the card as a release (noun, not the verb)
 #. release viewer, table header over the release's facts (noun: a software release, not the verb)
 #. context: noun
@@ -8096,12 +8444,215 @@ msgctxt "scheduled task"
 msgid "On"
 msgstr "På"
 
+#. search page, note under the results when this computer's saved chats could not be read; {} is the system's reason
+#. context: search.cache_unreadable
+msgctxt "search.cache_unreadable"
+msgid "Cached chats could not be read: {}"
+msgstr "Kunne ikke lese lokalt lagrede chatter: {}"
+
+#. find bar in a chat, accessibility label of the × button (a verb: close the bar)
+#. context: search.close
+msgctxt "search.close"
+msgid "Close search"
+msgstr "Lukk søket"
+
+#. find bar in a chat, the count: {0} is which matching message shows (1 the oldest), {1} how many match
+#. context: search.counter
+msgctxt "search.counter"
+msgid "{0}/{1}"
+msgstr "{0}/{1}"
+
+#. find bar in a chat, the count while the message shown is not among the matches; {0} is how many match
+#. context: search.counter_unplaced
+msgctxt "search.counter_unplaced"
+msgid "–/{0}"
+msgstr "–/{0}"
+
+#. shortcut bar while the find bar has the keyboard: Ctrl+Shift+F searches every chat instead (noun phrase)
+#. context: search.hint.all_chats
+msgctxt "search.hint.all_chats"
+msgid "All chats"
+msgstr "Alle chatter"
+
+#. shortcut bar while the find bar has the keyboard: Esc closes the bar (verb)
+#. context: search.hint.close
+msgctxt "search.hint.close"
+msgid "Close"
+msgstr "Lukk"
+
+#. shortcut bar while the find bar has the keyboard: Shift+Enter goes to the newer match (adjective, "newer one")
+#. context: search.hint.newer
+msgctxt "search.hint.newer"
+msgid "Newer"
+msgstr "Nyere"
+
+#. shortcut bar while the find bar has the keyboard: Enter goes to the older match (adjective, "older one")
+#. context: search.hint.older
+msgctxt "search.hint.older"
+msgid "Older"
+msgstr "Eldre"
+
+#. search page, a found message's line: written by the agent (noun)
+#. context: search.hit_agent
+msgctxt "search.hit_agent"
+msgid "agent"
+msgstr "agent"
+
+#. search page, a found message's line: marks a message found only in this computer's saved copy of the chat (adjective)
+#. context: search.hit_cached
+msgctxt "search.hit_cached"
+msgid "cached"
+msgstr "hurtigbufret"
+
+#. search page, a found message's line: written by the user (pronoun, "you" as in "you wrote it")
+#. context: search.hit_you
+msgctxt "search.hit_you"
+msgid "you"
+msgstr "du"
+
+#. find bar, after "Not searched:": the paired Host holding this chat is not connected
+#. context: search.host_not_read
+msgctxt "search.host_not_read"
+msgid "this chat's Host is not read"
+msgstr "Hosten for denne chatten er ikke tilkoblet"
+
+#. find bar in a chat: the field's placeholder and the bar's accessibility label (an action: search this chat)
+#. the chat's ⋯ menu, item (an action) that opens the find bar to search this chat's messages
+#. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the find bar of the open chat (where no chat shows, it searches every chat).
+#. context: search.in_chat
+msgctxt "search.in_chat"
+msgid "Search in chat"
+msgstr "Søk i chatten"
+
+#. search page, quiet note under the results while the Host still indexes older messages (some are not found yet)
+#. context: search.indexing
+msgctxt "search.indexing"
+msgid "Still indexing…"
+msgstr "Indekserer fortsatt …"
+
+#. search page, last row (an action): loads older matches from every chat
+#. context: search.load_more
+msgctxt "search.load_more"
+msgid "Load more messages"
+msgstr "Last inn flere meldinger"
+
+#. search page, row (an action) that loads the open chat's older messages to search them too; {} is the chat's name
+#. context: search.load_older_of
+msgctxt "search.load_older_of"
+msgid "Load older messages of {}"
+msgstr "Last inn eldre meldinger i {}"
+
+#. find bar in a chat, line under the field: the Host cannot search, so only the messages loaded here were searched
+#. context: search.loaded_only
+msgctxt "search.loaded_only"
+msgid "In the loaded messages"
+msgstr "Bare i innlastede meldinger"
+
+#. find bar in a chat, line under the field while older messages are read to reach a match
+#. context: search.loading
+msgctxt "search.loading"
+msgid "Loading older messages…"
+msgstr "Laster inn eldre meldinger …"
+
+#. search page, last row while older matches from every chat load
+#. context: search.loading_more
+msgctxt "search.loading_more"
+msgid "Loading more messages…"
+msgstr "Laster inn flere meldinger …"
+
+#. search page, row while the open chat's older messages load (to search them too); {} is the chat's name
+#. context: search.loading_older_of
+msgctxt "search.loading_older_of"
+msgid "Loading older messages of {}…"
+msgstr "Laster inn eldre meldinger i {} …"
+
+#. find bar in a chat, accessibility label of the down arrow: go to the newer match
+#. context: search.next
+msgctxt "search.next"
+msgid "Newer match"
+msgstr "Nyere treff"
+
+#. find bar in a chat, line under the field when no message of the chat holds the words
+#. search page and find bar, the line shown when no message or chat matches the words
+#. context: search.no_results
+msgctxt "search.no_results"
+msgid "No results"
+msgstr "Ingen treff"
+
 #. find bar in a chat, line under the field when the Host's search failed; {0} is why
 #. search page, note under the results: a Host whose search failed; {0} is "<Host>: why"
 #. context: search.not_searched
 msgctxt "search.not_searched"
 msgid "Not searched: {0}"
-msgstr "Søket omfatter ikke {0}"
+msgstr "Ikke søkt: {0}"
+
+#. find bar in a chat, accessibility label of the up arrow: go to the older match
+#. context: search.previous
+msgctxt "search.previous"
+msgid "Older match"
+msgstr "Eldre treff"
+
+#. search page, the line shown while the Hosts are asked for the words typed
+#. context: search.searching
+msgctxt "search.searching"
+msgid "Searching…"
+msgstr "Søker …"
+
+#. search page, All tab: the row under the first chats that opens the Chats tab; {n} is how many chats match
+#. context: search.see_all_chats
+msgctxt "search.see_all_chats"
+msgid "See all {n} chat"
+msgid_plural "See all {n} chats"
+msgstr[0] "Vis {n} chat"
+msgstr[1] "Vis alle {n} chatter"
+
+#. search page, the All tab; {0} is how many chats and messages match (a number)
+#. context: search.tab.all
+msgctxt "search.tab.all"
+msgid "All {0}"
+msgstr "Alle {0}"
+
+#. search page, the All tab while more messages can be loaded; {0} is how many match so far (reads "20+")
+#. context: search.tab.all_more
+msgctxt "search.tab.all_more"
+msgid "All {0}+"
+msgstr "Alle {0}+"
+
+#. search page, the Chats tab (chats whose name matches); {0} is how many
+#. context: search.tab.chats
+msgctxt "search.tab.chats"
+msgid "Chats {0}"
+msgstr "Chatter {0}"
+
+#. search page, the Messages tab (messages holding the words); {0} is how many
+#. context: search.tab.messages
+msgctxt "search.tab.messages"
+msgid "Messages {0}"
+msgstr "Meldinger {0}"
+
+#. search page, the Messages tab while more can be loaded; {0} is how many so far (reads "20+")
+#. context: search.tab.messages_more
+msgctxt "search.tab.messages_more"
+msgid "Messages {0}+"
+msgstr "Meldinger {0}+"
+
+#. search page (Ctrl+Shift+F), placeholder of the search field (a verb: type here to search)
+#. context: search.title
+msgctxt "search.title"
+msgid "Search"
+msgstr "Søk"
+
+#. find bar in a chat, line under the field when the match could not be reached in the chat's history
+#. context: search.unreachable
+msgctxt "search.unreachable"
+msgid "Could not reach this message"
+msgstr "Fikk ikke åpnet denne meldingen"
+
+#. find bar, after "Not searched:": the chat's Host did not answer; {} is the network's reason
+#. context: search.unreachable_host
+msgctxt "search.unreachable_host"
+msgid "could not be reached ({})"
+msgstr "kunne ikke nås ({})"
 
 #. select-text page, before each of the user's own messages (pronoun, a colon follows)
 #. context: select text

@@ -121,7 +121,6 @@ component ShortcutBar inherits Rectangle {
         if root.vim-line == "": hint-strip := Flickable {
             horizontal-stretch: 1;
             min-width: 0px;
-            clip: true;
             content-width: Math.max(self.width, hint-row.preferred-width);
             content-height: self.height;
             hint-row := HorizontalLayout {
