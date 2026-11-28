@@ -106,7 +106,7 @@ describe('copy', () => {
     expect(english('host_down.read_only', { host: 'Studio' })).toBe('Showing saved messages. You can send again when Studio is back.');
     expect(english('host_down.banner')).toBe('This device is offline');
     expect(english('host_down.copy_diagnostics')).toBe('Copy diagnostics');
-    expect(reasonTitle('auth_expired', 'Studio')).toBe('Studio needs pairing again');
+    expect(reasonTitle('auth_expired', 'Studio')).toBe('Signed out of Studio');
     expect(reasonBody('auth_expired', 'Studio')).toBe('This device is no longer signed in to Studio.');
     expect(reasonTitle('wrong_address', 'Studio')).toBe('Studio isn\'t at this address');
     expect(reasonBody('wrong_address', 'Studio')).toBe('The address may have changed.');

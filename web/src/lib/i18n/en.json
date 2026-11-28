@@ -12,7 +12,7 @@
   "fullscreen.close": "Close",
   "host_down.device_offline.title": "This device is offline",
   "host_down.device_offline.body": "Clarp will reconnect when the network is back.",
-  "host_down.auth_expired.title": "{host} needs pairing again",
+  "host_down.auth_expired.title": "Signed out of {host}",
   "host_down.auth_expired.body": "This device is no longer signed in to {host}.",
   "host_down.wrong_address.title": "{host} isn't at this address",
   "host_down.wrong_address.body": "The address may have changed.",
