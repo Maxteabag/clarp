@@ -1,5 +1,4 @@
 {
   "settings.language.title": "भाषा",
-  "settings.language.system": "सिस्टम",
-  "settings.language.hint": "जब तक आप कोई भाषा नहीं चुनते, यह इस डिवाइस की भाषा का पालन करता है। यह सेटिंग इसी डिवाइस पर रहती है।"
+  "settings.language.system": "सिस्टम"
 }

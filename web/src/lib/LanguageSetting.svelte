@@ -12,4 +12,3 @@
     {#each LANGUAGES as lang (lang)}<option value={lang} lang={lang}>{ENDONYMS[lang]}</option>{/each}
   </select>
 </label>
-<p class="start-hint">{t('settings.language.hint')}</p>
