@@ -639,6 +639,7 @@ pub fn execution(
             .filter(|given| given.keys().all(|key| keys.contains(&key.as_str())))
             .cloned()
     };
+    let backend = execution_provider(backend);
     let as_run = |executor: &str, provider: &str| {
         let mut run = Map::new();
         run.insert("executor".to_string(), json!(executor));
@@ -667,7 +668,7 @@ pub fn execution(
     let facts = catalogue();
     let provider = match asked.get("provider") {
         None => Some(backend),
-        Some(provider) => provider.as_str(),
+        Some(provider) => provider.as_str().map(execution_provider),
     };
     let isolated = match asked.get("isolated") {
         None => Some(false),
@@ -706,6 +707,14 @@ pub fn execution(
         run.insert("isolated".to_string(), json!(true));
     }
     Ok(run)
+}
+
+/// Antigravity's execution policies name the shared account, regardless of transport.
+pub(super) fn execution_provider(backend: &str) -> &str {
+    match backend {
+        "agy-acp" | "agy_acp" | "antigravity" | "antigravity-acp" => "agy",
+        other => other,
+    }
 }
 
 #[cfg(test)]

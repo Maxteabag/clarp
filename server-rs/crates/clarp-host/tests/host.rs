@@ -559,7 +559,7 @@ fn kept_records(place: &Place, kind: &str) -> std::collections::BTreeMap<String,
     clarp_store_sqlite::SqliteKeyValue
         .open(&place.root.join("data/fleet.db"))
         .unwrap()
-        .list(&clarp_host::fleet::shelf(kind))
+        .list(&fixture_table(kind))
         .unwrap()
         .into_iter()
         .map(|(key, bytes)| (key, serde_json::from_slice(&bytes).unwrap()))
@@ -572,11 +572,20 @@ fn keep_record(place: &Place, kind: &str, key: &str, value: &Value) {
         .open(&place.root.join("data/fleet.db"))
         .unwrap()
         .put(
-            &clarp_host::fleet::shelf(kind),
+            &fixture_table(kind),
             key,
             &serde_json::to_vec(value).unwrap(),
         )
         .unwrap();
+}
+
+fn fixture_table(kind: &str) -> String {
+    // The fleet's own agent roster has its own table alongside the kept shelves.
+    if kind == "agent" {
+        kind.to_string()
+    } else {
+        clarp_host::fleet::shelf(kind)
+    }
 }
 
 struct Host {
@@ -1786,6 +1795,7 @@ fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
             ("HOME", place.root.to_str().unwrap()),
             ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
             ("CLARP_CLAUDE_PROGRAM", janitor.to_str().unwrap()),
+            ("CLARP_OPENCODE_LIVE", "0"),
         ],
     );
     let begin = |name: &str| {
@@ -1799,6 +1809,13 @@ fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
     };
     let (owner, native, mine) = begin("Owner");
     let (peer, _, theirs) = begin("Peer");
+    // This recipient uses the argv transport. The refusal after arming the goal is
+    // deterministic without imposing the retired standalone limit on an ACP turn.
+    let limited = host.post(
+        "/agents",
+        json!({"name":"Argument transport","backend":"opencode"}),
+    );
+    let limited = limited["session"].as_str().unwrap();
     let owner_id = row_id(&host, &owner);
     let peer_id = row_id(&host, &peer);
     let call = |tool: &str, argv: &[&str], token: Option<&str>| {
@@ -1905,16 +1922,16 @@ fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
             );
         };
         let id = create(&owner, None);
-        let send = |id: &str, text: &str| {
+        let send = |to: &str, id: &str, text: &str| {
             call(
                 "clarp-admin",
                 &[
-                    "request", "--to", &peer, "--from", &owner, "--goal", id, "--text", text,
+                    "request", "--to", to, "--from", &owner, "--goal", id, "--text", text,
                 ],
                 token,
             )
         };
-        let sent = send(&id, "answer");
+        let sent = send(&peer, &id, "answer");
         assert_eq!(sent["exit"], 0, "{sent}");
         check("arm", &id, "checkpoint");
         let req: Value = serde_json::from_str(sent["stdout"].as_str().unwrap()).unwrap();
@@ -1945,7 +1962,7 @@ fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
         check("reply", &id, "dependency");
 
         let id = create(&owner, None);
-        let refused = send(&id, &"x".repeat(61 * 1024));
+        let refused = send(limited, &id, &"x".repeat(61 * 1024));
         assert_eq!(refused["exit"], 1, "{refused}");
         assert!(
             refused["stderr"]
@@ -28822,9 +28839,10 @@ fn the_goal_keeper_asks_the_tool_it_is_set_to() {
     let keeper = host.get("/janitors/clarp-goal-keeper")["janitor"].clone();
     assert_eq!(
         (&keeper["backend"], &keeper["model"]),
-        (&json!("agy"), &json!("gemini-4-hydrogen-low")),
+        (&json!("agy-acp"), &json!("gemini-4-hydrogen-low")),
         "{keeper}"
     );
+    assert_eq!(keeper["execution"]["provider"], "agy");
     let (status, set) = post(
         "/janitors/clarp-goal-keeper/configure",
         json!({

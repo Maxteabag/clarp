@@ -277,28 +277,23 @@ impl Shelf {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
-    /// Why a tool has no model of this name, checked against what the tool listed when it
-    /// was last asked, or for Antigravity, where it has not been, against the models it is
-    /// known to have. Codex is not held to a list it never gave. Antigravity over ACP is held
-    /// to what `agy models` listed, the models its ACP agent offers, and takes a model of it
-    /// also named without its effort (`gemini-4-neon`), as ACP offers the model and its
-    /// thinking level apart; where nothing was listed it is not held to the known models,
-    /// and its turn checks the name against what Antigravity offers over ACP. Only what was
-    /// found already is read: [`Shelf::model_error`] asks the tools first.
+    /// Why a tool has no model of this name, checked against its observed list. The
+    /// Antigravity alias shares the ACP catalogue, which takes a base model such as
+    /// `gemini-4-neon` alongside folded model/effort names. Before discovery the ACP
+    /// turn validates the model against what its own session offers.
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
-        if !matches!(tool, "codex" | "agy" | "agy-acp") {
+        let tool = clarp_backend::canonical_id(tool);
+        if !matches!(tool, "codex" | "agy-acp") {
             return None;
         }
         let kept = self
             .kept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let observed = kept
+        let row = kept
             .as_ref()
             .map(|k| &k.told["providers"][tool])
-            .filter(|r| r["source"]["kind"] == "cli_probe");
-        let bundled = catalogue::declared(tool);
-        let row = observed.or_else(|| (tool == "agy").then_some(&bundled))?;
+            .filter(|r| r["source"]["kind"] == "cli_probe")?;
         let mut ids: Vec<_> = row["models"]
             .as_array()
             .into_iter()
@@ -510,12 +505,14 @@ mod tests {
             models: Some(said),
         };
         let at = "2027-01-15T08:00:00Z";
-        let shelf = shelf_with(vec![
-            ("agy".to_string(), catalogue::row("agy", &found, at)),
-            ("agy-acp".to_string(), catalogue::row("agy-acp", &found, at)),
-        ]);
+        let shelf = shelf_with(vec![(
+            "agy-acp".to_string(),
+            catalogue::row("agy-acp", &found, at),
+        )]);
         for tool in ["agy", "agy-acp"] {
             assert_eq!(shelf.policy_model_error(tool, "gemini-5-x-low"), None);
+            assert_eq!(shelf.policy_model_error(tool, "gemini-5-x"), None);
+            assert!(shelf.policy_model_error(tool, "gemini-5").is_some());
             let refused = shelf
                 .policy_model_error(tool, "gemini-4-neon-medium")
                 .unwrap();
@@ -524,23 +521,15 @@ mod tests {
                 "{refused}"
             );
         }
-        // Over ACP a model of the list is also named without its effort, and nothing else.
-        assert_eq!(shelf.policy_model_error("agy-acp", "gemini-5-x"), None);
-        assert!(shelf.policy_model_error("agy", "gemini-5-x").is_some());
-        assert!(shelf.policy_model_error("agy-acp", "gemini-5").is_some());
     }
 
     #[test]
-    fn antigravity_not_yet_asked_is_held_to_the_models_it_is_known_to_have() {
+    fn a_cold_antigravity_catalogue_defers_to_native_session_offers() {
         let shelf = Shelf::default();
-        assert_eq!(
-            shelf.policy_model_error("agy", "gemini-4-neon-medium"),
-            None
-        );
-        let refused = shelf.policy_model_error("agy", "gemini-nothing").unwrap();
-        assert!(refused.contains("gemini-4-neon-medium"), "{refused}");
-        // Over ACP, with nothing listed, the turn checks the model against what is offered.
-        assert_eq!(shelf.policy_model_error("agy-acp", "gemini-nothing"), None);
+        for tool in ["agy", "agy-acp"] {
+            assert_eq!(shelf.policy_model_error(tool, "gemini-4-neon-medium"), None);
+            assert_eq!(shelf.policy_model_error(tool, "gemini-nothing"), None);
+        }
     }
 
     #[test]
