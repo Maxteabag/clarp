@@ -262,7 +262,10 @@ fn one_line(text: &str) -> String {
 /// One line of prose, its marks taken out. Images and links to kept files are counted into
 /// `held`; a line that held nothing else says nothing.
 fn plain_line(line: &str, held: &mut Held) -> String {
-    let mut s = protect(line);
+    // Inline code is words as written: no mark inside it is read, a backslash in it included.
+    // It is taken out of the line as written, before any escape is read, and put back last.
+    let mut kept: Vec<String> = Vec::new();
+    let mut s = protect(&take_inline_code(line, &mut kept));
     if REFERENCE.is_match(&s) || RULE.is_match(&s) || TABLE_DIVIDER.is_match(&s) {
         return String::new();
     }
@@ -291,10 +294,6 @@ fn plain_line(line: &str, held: &mut Held) -> String {
             .collect::<Vec<_>>()
             .join(" · ");
     }
-    // Inline code is words as written: no mark inside it is read. It is taken out first and
-    // put back last, as it was.
-    let mut kept: Vec<String> = Vec::new();
-    s = take_inline_code(&s, &mut kept);
     s = IMAGE
         .replace_all(&s, |caps: &Captures| {
             held.images.push(one_line(&caps[1]));
@@ -358,15 +357,23 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     one_line(&out)
 }
 
-/// A line with each span of inline code (a run of backticks, the code, and a run of as many)
-/// taken out into `kept`, trimmed, and a mark in its place that names it. A run with no run of
-/// as many after it is no code: its backticks stay as they are.
+/// A line as written with each span of inline code (a run of backticks, the code, and a run of
+/// as many) taken out into `kept`, trimmed and as written, and a mark in its place that names it.
+/// A run with no run of as many after it is no code: its backticks stay as they are. A backtick
+/// after a backslash that is not itself escaped opens nothing: it stays, with its backslash, for
+/// the escapes to read.
 fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
     let run_at = |text: &str, at: usize| text[at..].bytes().take_while(|b| *b == b'`').count();
     let mut out = String::with_capacity(line.len());
     let mut at = 0;
     while let Some(found) = line[at..].find('`') {
         let open = at + found;
+        let slashes = line[at..open].bytes().rev().take_while(|b| *b == b'\\').count();
+        if slashes % 2 == 1 {
+            out.push_str(&line[at..=open]);
+            at = open + 1;
+            continue;
+        }
         let width = run_at(line, open);
         let body = open + width;
         // The next run of exactly as many backticks closes it.
@@ -671,6 +678,12 @@ mod tests {
         let made = take_inline_code("a `x` b ``y ` z`` c ` d", &mut kept);
         assert_eq!(kept, ["x", "y ` z"]);
         assert_eq!(made, "a \u{E001}0\u{E002} b \u{E001}1\u{E002} c ` d");
+        // A backslash in code is code; an escaped backtick opens no code.
+        let mut kept = Vec::new();
+        let made = take_inline_code("x \\`y `a\\*b` \\\\`c`", &mut kept);
+        assert_eq!(kept, ["a\\*b", "c"]);
+        assert_eq!(made, "x \\`y \u{E001}0\u{E002} \\\\\u{E001}1\u{E002}");
+        assert_eq!(read("x \\`y `a\\*b` \\\\`c`").unwrap().english(), "x `y a\\*b \\c");
         assert_eq!(
             read("**bold** and __strong__ and `**kept**`")
                 .unwrap()
