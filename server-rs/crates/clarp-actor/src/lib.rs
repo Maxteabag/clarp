@@ -3294,15 +3294,21 @@ impl Actor {
         scope: &clarp_kernel::delivery::Scope,
     ) -> serde_json::Map<String, serde_json::Value> {
         let agent_id = &self.profile.agent_id;
-        let generation = self.recorder.agent().user_stop_generation();
-        let feed = self.deliveries.feed(agent_id, generation);
+        let feed = self.delivery_feed();
         clarp_kernel::delivery::answer(&feed, scope, turns, query, |trace| {
             self.deliveries.receipt(agent_id, trace)
         })
     }
 
+    fn delivery_feed(&self) -> deliveries::Pages<'_> {
+        self.deliveries.feed(
+            &self.profile.agent_id,
+            self.recorder.agent().user_stop_generation(),
+        )
+    }
+
     pub fn delivery_stop_generation(&self) -> i64 {
-        self.recorder.agent().user_stop_generation()
+        clarp_kernel::delivery::Feed::generation(&self.delivery_feed())
     }
 
     /// The serving actor's existing receipt for a trace represented on a log page.
