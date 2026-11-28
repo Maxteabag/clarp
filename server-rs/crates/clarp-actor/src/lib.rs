@@ -3301,6 +3301,15 @@ impl Actor {
         })
     }
 
+    pub fn delivery_stop_generation(&self) -> i64 {
+        self.recorder.agent().user_stop_generation()
+    }
+
+    /// The serving actor's existing receipt for a trace represented on a log page.
+    pub fn delivery_receipt(&self, trace: &str) -> Option<serde_json::Value> {
+        self.deliveries.receipt(&self.profile.agent_id, trace)
+    }
+
     /// How many sends' delivery the actor holds.
     pub fn held_deliveries(&self) -> usize {
         self.deliveries.len()

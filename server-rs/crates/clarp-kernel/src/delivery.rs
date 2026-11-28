@@ -337,28 +337,8 @@ pub fn answer(
     query: &Query,
     receipt: impl Fn(&str) -> Option<Value>,
 ) -> Map<String, Value> {
-    // The user rows are shown on copies, and what is shown is given to the rows of the answer
-    // by their id, as the Python Host merges it.
-    let mut users: Vec<Value> = turns
-        .iter()
-        .filter(|turn| turn["role"] == "user")
-        .cloned()
-        .collect();
-    let epoch = annotate(&scope.agent_id, &mut users, feed.generation(), receipt);
-    let mut shown = Map::new();
-    for user in &users {
-        if let (Some(id), Some(delivery)) = (user["id"].as_str(), user.get("delivery")) {
-            shown.insert(id.to_string(), delivery.clone());
-        }
-    }
-    for turn in turns.iter_mut() {
-        let id = turn["id"].as_str().unwrap_or("").to_string();
-        if turn["role"] == "user"
-            && let Some(delivery) = shown.get(&id)
-        {
-            turn["delivery"] = delivery.clone();
-        }
-    }
+    let epoch = feed.generation();
+    annotate_page(&scope.agent_id, turns, epoch, receipt);
     let mut top = Map::new();
     top.insert(
         "delivery_scope".into(),
@@ -401,6 +381,37 @@ pub fn answer(
         top.insert("delivery_until".into(), json!(page.until));
     }
     top
+}
+
+/// Apply receipts to the rendered page using its captured Stop generation.
+pub fn annotate_page(
+    agent_id: &str,
+    turns: &mut [Value],
+    generation: i64,
+    receipt: impl Fn(&str) -> Option<Value>,
+) {
+    // The user rows are shown on copies, and what is shown is given to the rows of the answer
+    // by their id, as the Python Host merges it.
+    let mut users: Vec<Value> = turns
+        .iter()
+        .filter(|turn| turn["role"] == "user")
+        .cloned()
+        .collect();
+    annotate(agent_id, &mut users, generation, receipt);
+    let mut shown = Map::new();
+    for user in &users {
+        if let (Some(id), Some(delivery)) = (user["id"].as_str(), user.get("delivery")) {
+            shown.insert(id.to_string(), delivery.clone());
+        }
+    }
+    for turn in turns.iter_mut() {
+        let id = turn["id"].as_str().unwrap_or("").to_string();
+        if turn["role"] == "user"
+            && let Some(delivery) = shown.get(&id)
+        {
+            turn["delivery"] = delivery.clone();
+        }
+    }
 }
 
 /// A stored event on its way out (`sse_events._egress`): a `delivery-updated` hint leaves with
