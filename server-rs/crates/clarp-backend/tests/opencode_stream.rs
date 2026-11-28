@@ -4,27 +4,16 @@ use clarp_kernel::{conversation::ToolStatus, turn::RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
-#[test]
-fn cli_replay_of_a_completed_part_preserves_distinct_repeated_words() {
+fn cli_text(id: &str, text: &str) -> Value {
+    json!({"type":"text","sessionID":"ses_1","part":{
+        "type":"text","id":id,"messageID":"msg_1","text":text,"time":{"end":1}
+    }})
+}
+
+fn cli_replies(events: impl IntoIterator<Item = Value>) -> Vec<String> {
     let mut interpreter = by_id("opencode").unwrap().interpreter(1, "replayed-text");
     let mut signals = Vec::new();
-    let words = "<speak>Summary.</speak>";
-    let new = "<speak>New words.</speak>";
-    let text = |id: &str, text: &str| {
-        json!({"type":"text","sessionID":"ses_1","part":{
-            "type":"text","id":id,"messageID":"msg_1","text":text,"time":{"end":1}
-        }})
-    };
-    for event in [
-        json!({"type":"step_start"}),
-        text("prt_1", words),
-        json!({"type":"step_finish"}),
-        json!({"type":"step_start"}),
-        text("prt_2", words),
-        json!({"type":"step_finish"}),
-        text("prt_1", words),
-        text("prt_2", &format!("{words}{new}")),
-    ] {
+    for event in events {
         interpreter.on_record(
             &Record {
                 t: 1,
@@ -43,14 +32,55 @@ fn cli_replay_of_a_completed_part_preserves_distinct_repeated_words() {
         },
         &mut signals,
     );
-    let replies: Vec<_> = signals
-        .iter()
+    signals
+        .into_iter()
         .filter_map(|signal| match signal {
-            Signal::Reply(reply) => Some(reply.text.as_str()),
+            Signal::Reply(reply) => Some(reply.text),
             _ => None,
         })
-        .collect();
+        .collect()
+}
+
+#[test]
+fn cli_replay_of_a_completed_part_preserves_distinct_repeated_words() {
+    let words = "<speak>Summary.</speak>";
+    let new = "<speak>New words.</speak>";
+    let replies = cli_replies([
+        json!({"type":"step_start"}),
+        cli_text("prt_1", words),
+        json!({"type":"step_finish"}),
+        json!({"type":"step_start"}),
+        cli_text("prt_2", words),
+        json!({"type":"step_finish"}),
+        cli_text("prt_1", words),
+        cli_text("prt_2", &format!("{words}{new}")),
+    ]);
     assert_eq!(replies, [words, words, new]);
+}
+
+#[test]
+fn cli_stale_snapshots_keep_the_newest_suffix_before_and_after_a_flush() {
+    let opener = "<speak>Opening.</speak>";
+    let first = "<speak>Details.</speak>";
+    let suffix = format!("{first}<speak>Next.</speak>");
+    let earlier = format!("{opener}{first}");
+    let latest = format!("{opener}{suffix}");
+    let observed = [(false, opener), (false, earlier.as_str()), (true, opener)].map(
+        |(flush_first, replay)| {
+            let mut events = vec![
+                json!({"type":"step_start"}),
+                cli_text("prt_1", opener),
+                json!({"type":"step_finish"}),
+                cli_text("prt_1", &latest),
+            ];
+            if flush_first {
+                events.push(json!({"type":"step_finish"}));
+            }
+            events.push(cli_text("prt_1", replay));
+            cli_replies(events)
+        },
+    );
+    assert_eq!(observed, [[opener, suffix.as_str()]; 3]);
 }
 
 #[test]
