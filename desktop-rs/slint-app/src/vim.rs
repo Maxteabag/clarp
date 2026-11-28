@@ -10,6 +10,8 @@
 //! Keys the vim map leaves alone keep the keyboard map's meaning, and the
 //! user's own bindings win over both.
 
+use clarp_core::tr;
+
 /// Where the keyboard is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Region {
@@ -37,78 +39,152 @@ const fn entry(keys: &'static str, action: &'static str, label: &'static str, pl
 
 /// Normal mode's keys.
 const NORMAL: &[Entry] = &[
-    entry("i", "vim-insert", "Insert", Place::Both),
-    entry("a", "vim-insert", "Insert", Place::Both),
-    entry("o", "vim-insert", "Insert", Place::Both),
-    entry(":", "vim-command", "Command line", Place::Both),
-    entry("g g", "vim-top", "Top", Place::Both),
-    entry("G", "vim-bottom", "Bottom", Place::Both),
-    entry("g t", "next-workspace", "Next tab", Place::Both),
-    entry("g T", "previous-workspace", "Previous tab", Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "i" do in the chat and the explorer: goes to the composer to type (as vim's insert)
+    entry("i", "vim-insert", crate::catalogue::en::tr!("Insert"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "a" do in the chat and the explorer: goes to the composer to type (as vim's insert)
+    entry("a", "vim-insert", crate::catalogue::en::tr!("Insert"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "o" do in the chat and the explorer: goes to the composer to type (as vim's insert)
+    entry("o", "vim-insert", crate::catalogue::en::tr!("Insert"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys ":" do in the chat and the explorer
+    entry(":", "vim-command", crate::catalogue::en::tr!("Command line"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "g g" do in the chat and the explorer: jumps to the top or bottom
+    entry("g g", "vim-top", crate::catalogue::en::tr!("Top"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "G" do in the chat and the explorer: jumps to the top or bottom
+    entry("G", "vim-bottom", crate::catalogue::en::tr!("Bottom"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "g t" do in the chat and the explorer
+    entry("g t", "next-workspace", crate::catalogue::en::tr!("Next tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "g T" do in the chat and the explorer
+    entry("g T", "previous-workspace", crate::catalogue::en::tr!("Previous tab"), Place::Both),
     // The chat.
-    entry("j", "vim-down", "Down", Place::Chat),
-    entry("k", "vim-up", "Up", Place::Chat),
-    entry("d", "vim-half-down", "Half page down", Place::Chat),
-    entry("u", "vim-half-up", "Half page up", Place::Chat),
-    entry("]", "vim-turn-next", "Next turn", Place::Chat),
-    entry("[", "vim-turn-previous", "Previous turn", Place::Chat),
-    entry("/", "vim-search", "Search the chat", Place::Chat),
-    entry("n", "vim-match-next", "Next match", Place::Chat),
-    entry("N", "vim-match-previous", "Previous match", Place::Chat),
-    entry("y", "vim-yank", "Copy the message", Place::Chat),
-    entry("v", "vim-select", "Select text, from the message on", Place::Chat),
-    entry("z o", "vim-fold-open", "Open", Place::Both),
-    entry("z c", "vim-fold-close", "Close", Place::Both),
-    entry("z a", "vim-fold-toggle", "Toggle", Place::Chat),
-    entry("J", "artifact-next", "Next card", Place::Chat),
-    entry("K", "artifact-previous", "Cards", Place::Chat),
-    entry("h", "focus-sidebar", "Explorer", Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "j" do in the chat: scrolls the chat a line down or up
+    entry("j", "vim-down", crate::catalogue::en::tr!("Down"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "k" do in the chat: scrolls the chat a line down or up
+    entry("k", "vim-up", crate::catalogue::en::tr!("Up"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "d" do in the chat
+    entry("d", "vim-half-down", crate::catalogue::en::tr!("Half page down"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "u" do in the chat
+    entry("u", "vim-half-up", crate::catalogue::en::tr!("Half page up"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "]" do in the chat
+    entry("]", "vim-turn-next", crate::catalogue::en::tr!("Next turn"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "[" do in the chat
+    entry("[", "vim-turn-previous", crate::catalogue::en::tr!("Previous turn"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "/" do in the chat
+    entry("/", "vim-search", crate::catalogue::en::tr!("Search the chat"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "n" do in the chat
+    entry("n", "vim-match-next", crate::catalogue::en::tr!("Next match"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "N" do in the chat
+    entry("N", "vim-match-previous", crate::catalogue::en::tr!("Previous match"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "y" do in the chat
+    entry("y", "vim-yank", crate::catalogue::en::tr!("Copy the message"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "v" do in the chat
+    entry("v", "vim-select", crate::catalogue::en::tr!("Select text, from the message on"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "z o" do in the chat and the explorer (verb): opens the fold (tool activity) under the keyboard
+    entry("z o", "vim-fold-open", crate::catalogue::en::tr!("Open"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "z c" do in the chat and the explorer (verb): folds it (tool activity) again
+    entry("z c", "vim-fold-close", crate::catalogue::en::tr!("Close"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "z a" do in the chat (verb): opens or folds the tool activity
+    entry("z a", "vim-fold-toggle", crate::catalogue::en::tr!("Toggle"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "J" do in the chat
+    entry("J", "artifact-next", crate::catalogue::en::tr!("Next card"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "K" do in the chat (noun): goes to or opens it
+    entry("K", "artifact-previous", crate::catalogue::en::tr!("Cards"), Place::Chat),
+    // i18n: Vim mode, the which-key panel: what the keys "h" do in the chat (noun): goes to or opens it
+    entry("h", "focus-sidebar", crate::catalogue::en::tr!("Explorer"), Place::Chat),
     // The explorer.
-    entry("j", "agent-next", "Next", Place::Explorer),
-    entry("k", "agent-previous", "Previous", Place::Explorer),
-    entry("l", "vim-open", "Open", Place::Explorer),
+    // i18n: Vim mode, the which-key panel: what the keys "j" do in the explorer: moves to the next or previous chat in the list
+    entry("j", "agent-next", crate::catalogue::en::tr!("Next"), Place::Explorer),
+    // i18n: Vim mode, the which-key panel: what the keys "k" do in the explorer: moves to the next or previous chat in the list
+    entry("k", "agent-previous", crate::catalogue::en::tr!("Previous"), Place::Explorer),
+    // i18n: Vim mode, the which-key panel: what the keys "l" do in the explorer (verb): opens the chat under the cursor, or unfolds it
+    entry("l", "vim-open", crate::catalogue::en::tr!("Open"), Place::Explorer),
     // The leader: every action of the window, by a mnemonic.
-    entry("<Space> <Space>", "switcher", "Commands", Place::Both),
-    entry("<Space> :", "vim-command", "Command line", Place::Both),
-    entry("<Space> e", "focus-sidebar", "Explorer", Place::Both),
-    entry("<Space> b", "sidebar", "Show/hide explorer", Place::Both),
-    entry("<Space> c", "focus-pane", "Chat", Place::Both),
-    entry("<Space> n", "new", "New agent", Place::Both),
-    entry("<Space> N", "new-contact", "Start contact", Place::Both),
-    entry("<Space> s", "settings", "Settings", Place::Both),
-    entry("<Space> k", "edit-keymap", "Key bindings", Place::Both),
-    entry("<Space> t", "new-workspace", "New tab", Place::Both),
-    entry("<Space> r", "recent-agents", "Recent", Place::Both),
-    entry("<Space> /", "search-messages", "Search all chats", Place::Both),
-    entry("<Space> a", "next-attention", "Next attention", Place::Both),
-    entry("<Space> u", "updates", "Updates", Place::Both),
-    entry("<Space> T", "teams", "Teams", Place::Both),
-    entry("<Space> o", "overview", "Overview", Place::Both),
-    entry("<Space> p", "agent-profile", "Agent profile", Place::Both),
-    entry("<Space> d", "change-directory", "Change directory", Place::Both),
-    entry("<Space> R", "rename-agent", "Rename contact", Place::Both),
-    entry("<Space> m", "mute", "Mute", Place::Both),
-    entry("<Space> x", "stop-agent", "Stop agent", Place::Both),
-    entry("<Space> j", "agent-processes", "Jobs and helpers", Place::Both),
-    entry("<Space> l", "link-hints", "Open a link", Place::Both),
-    entry("<Space> ?", "shortcut-bar", "Show/hide keys", Place::Both),
-    entry("<Space> w n", "new-workspace", "New tab", Place::Both),
-    entry("<Space> w ]", "next-workspace", "Next tab", Place::Both),
-    entry("<Space> w [", "previous-workspace", "Previous tab", Place::Both),
-    entry("<Space> w c", "close-workspace", "Close tab", Place::Both),
-    entry("<Space> w v", "split-right", "Split right", Place::Both),
-    entry("<Space> w s", "split-down", "Split down", Place::Both),
-    entry("<Space> w q", "close-pane", "Close pane", Place::Both),
-    entry("<Space> w z", "zoom", "Zoom pane", Place::Both),
-    entry("<Space> w =", "balance", "Balance panes", Place::Both),
-    entry("<Space> w h", "move-left", "Left pane", Place::Both),
-    entry("<Space> w j", "move-down", "Lower pane", Place::Both),
-    entry("<Space> w k", "move-up", "Upper pane", Place::Both),
-    entry("<Space> w l", "move-right", "Right pane", Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> <Space>" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> <Space>", "switcher", crate::catalogue::en::tr!("Commands"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> :" do in the chat and the explorer
+    entry("<Space> :", "vim-command", crate::catalogue::en::tr!("Command line"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> e" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> e", "focus-sidebar", crate::catalogue::en::tr!("Explorer"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> b" do in the chat and the explorer
+    entry("<Space> b", "sidebar", crate::catalogue::en::tr!("Show/hide explorer"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> c" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> c", "focus-pane", crate::catalogue::en::tr!("Chat"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> n" do in the chat and the explorer
+    entry("<Space> n", "new", crate::catalogue::en::tr!("New agent"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> N" do in the chat and the explorer
+    entry("<Space> N", "new-contact", crate::catalogue::en::tr!("Start contact"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> s" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> s", "settings", crate::catalogue::en::tr!("Settings"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> k" do in the chat and the explorer
+    entry("<Space> k", "edit-keymap", crate::catalogue::en::tr!("Key bindings"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> t" do in the chat and the explorer
+    entry("<Space> t", "new-workspace", crate::catalogue::en::tr!("New tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> r" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> r", "recent-agents", crate::catalogue::en::tr!("Recent"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> /" do in the chat and the explorer
+    entry("<Space> /", "search-messages", crate::catalogue::en::tr!("Search all chats"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> a" do in the chat and the explorer
+    entry("<Space> a", "next-attention", crate::catalogue::en::tr!("Next attention"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> u" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> u", "updates", crate::catalogue::en::tr!("Updates"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> T" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> T", "teams", crate::catalogue::en::tr!("Teams"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> o" do in the chat and the explorer (noun): goes to or opens it
+    entry("<Space> o", "overview", crate::catalogue::en::tr!("Overview"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> p" do in the chat and the explorer
+    entry("<Space> p", "agent-profile", crate::catalogue::en::tr!("Agent profile"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> d" do in the chat and the explorer
+    entry("<Space> d", "change-directory", crate::catalogue::en::tr!("Change directory"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> R" do in the chat and the explorer
+    entry("<Space> R", "rename-agent", crate::catalogue::en::tr!("Rename contact"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> m" do in the chat and the explorer (verb): turns spoken replies off or on
+    entry("<Space> m", "mute", crate::catalogue::en::tr!("Mute"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> x" do in the chat and the explorer
+    entry("<Space> x", "stop-agent", crate::catalogue::en::tr!("Stop agent"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> j" do in the chat and the explorer
+    entry("<Space> j", "agent-processes", crate::catalogue::en::tr!("Jobs and helpers"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> l" do in the chat and the explorer
+    entry("<Space> l", "link-hints", crate::catalogue::en::tr!("Open a link"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> ?" do in the chat and the explorer
+    entry("<Space> ?", "shortcut-bar", crate::catalogue::en::tr!("Show/hide keys"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w n" do in the chat and the explorer
+    entry("<Space> w n", "new-workspace", crate::catalogue::en::tr!("New tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w ]" do in the chat and the explorer
+    entry("<Space> w ]", "next-workspace", crate::catalogue::en::tr!("Next tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w [" do in the chat and the explorer
+    entry("<Space> w [", "previous-workspace", crate::catalogue::en::tr!("Previous tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w c" do in the chat and the explorer
+    entry("<Space> w c", "close-workspace", crate::catalogue::en::tr!("Close tab"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w v" do in the chat and the explorer
+    entry("<Space> w v", "split-right", crate::catalogue::en::tr!("Split right"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w s" do in the chat and the explorer
+    entry("<Space> w s", "split-down", crate::catalogue::en::tr!("Split down"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w q" do in the chat and the explorer
+    entry("<Space> w q", "close-pane", crate::catalogue::en::tr!("Close pane"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w z" do in the chat and the explorer
+    entry("<Space> w z", "zoom", crate::catalogue::en::tr!("Zoom pane"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w =" do in the chat and the explorer
+    entry("<Space> w =", "balance", crate::catalogue::en::tr!("Balance panes"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w h" do in the chat and the explorer
+    entry("<Space> w h", "move-left", crate::catalogue::en::tr!("Left pane"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w j" do in the chat and the explorer
+    entry("<Space> w j", "move-down", crate::catalogue::en::tr!("Lower pane"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w k" do in the chat and the explorer
+    entry("<Space> w k", "move-up", crate::catalogue::en::tr!("Upper pane"), Place::Both),
+    // i18n: Vim mode, the which-key panel: what the keys "<Space> w l" do in the chat and the explorer
+    entry("<Space> w l", "move-right", crate::catalogue::en::tr!("Right pane"), Place::Both),
 ];
 
 /// What the keys before the next one mean, for the which-key panel.
-const GROUPS: &[(&str, &str)] = &[("g", "Go"), ("z", "Fold"), ("<Space>", "Leader"), ("<Space> w", "Tabs and panes")];
+const GROUPS: &[(&str, &str)] = &[
+    // i18n: Vim mode, the which-key panel: the group of keys after g (verb, as in "go to")
+    ("g", crate::catalogue::en::tr!("Go")),
+    // i18n: Vim mode, the which-key panel: the group of keys after z, which open and fold tool activity (verb)
+    ("z", crate::catalogue::en::tr!("Fold")),
+    // i18n: Vim mode, the which-key panel: the group of keys after Space, the leader key (noun, as vim's "leader")
+    ("<Space>", crate::catalogue::en::tr!("Leader")),
+    // i18n: Vim mode, the which-key panel: the group of keys after Space w, for workspace tabs and panes
+    ("<Space> w", crate::catalogue::en::tr!("Tabs and panes")),
+];
 
 /// The keys a card the keyboard is on keeps (open, choose, stop, walk).
 const CARD_KEYS: &[&str] = &["J", "K", "O", "S", "Delete", "Left", "Right", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
@@ -225,11 +301,12 @@ impl Normal {
     }
 
     /// The keys that may follow, with what they do: the which-key panel.
-    pub fn next(&self, region: Region) -> Vec<(String, &'static str)> {
+    /// The labels are in the app's language.
+    pub fn next(&self, region: Region) -> Vec<(String, String)> {
         if self.keys.is_empty() {
             return Vec::new();
         }
-        let mut out: Vec<(String, &'static str)> = Vec::new();
+        let mut out: Vec<(String, String)> = Vec::new();
         for entry in NORMAL.iter().filter(|e| here(e.place, region)) {
             let keys = chords(entry.keys);
             if keys.len() <= self.keys.len() || !keys.starts_with(&self.keys) {
@@ -240,10 +317,11 @@ impl Normal {
                 continue;
             }
             let label = if keys.len() == self.keys.len() + 1 {
-                entry.label
+                crate::catalogue::local(entry.label)
             } else {
                 let prefix: Vec<&str> = entry.keys.split(' ').take(self.keys.len() + 1).collect();
-                GROUPS.iter().find(|(g, _)| *g == prefix.join(" ")).map_or("More", |(_, label)| *label)
+                // i18n: Vim mode, the which-key panel: a key that starts more keys whose group has no name
+                GROUPS.iter().find(|(g, _)| *g == prefix.join(" ")).map_or_else(|| tr!("More"), |(_, label)| crate::catalogue::local(label))
             };
             out.push((key, label));
         }
@@ -351,13 +429,17 @@ fn font(argument: &str) -> Result<Font, String> {
         "+" | "larger" => Ok(Font::Larger),
         "-" | "smaller" => Ok(Font::Smaller),
         "=" | "0" => Ok(Font::Reset),
-        other => other.trim_end_matches('%').parse::<f64>().ok().filter(|f| f.is_finite() && *f > 0.0).map(Font::Zoom).ok_or_else(|| format!("Not a font command: {other} (:font picks one; reset, +, -, = or a zoom such as 120)")),
+        other => other.trim_end_matches('%').parse::<f64>().ok().filter(|f| f.is_finite() && *f > 0.0).map(Font::Zoom).ok_or_else(|| {
+            // i18n: Vim mode, :font error; {} is what was typed; ":font", "reset", "+", "-", "=" are typed as they are
+            tr!("Not a font command: {} (:font picks one; reset, +, -, = or a zoom such as 120)", other)
+        }),
     }
 }
 
 fn set(argument: &str) -> Result<Ex, String> {
     if argument.is_empty() {
-        return Err("Set what? (:set novim, :set fontsize=16, :set theme=night)".into());
+        // i18n: Vim mode, :set without a setting; the examples in brackets are commands typed as they are
+        return Err(tr!("Set what? (:set novim, :set fontsize=16, :set theme=night)"));
     }
     match argument.split_once('=').map(|(name, value)| (name.trim(), value.trim())) {
         Some(("theme" | "colorscheme", value)) => Ok(Ex::Theme(value.to_owned())),
@@ -371,15 +453,20 @@ pub fn parse(line: &str) -> Result<Ex, String> {
     let (word, argument) = line.split_once(char::is_whitespace).map_or((line, ""), |(w, a)| (w, a.trim()));
     let word = word.trim_end_matches('!');
     if word.is_empty() {
-        return Err("No command".into());
+        // i18n: Vim mode, the command line was empty
+        return Err(tr!("No command"));
     }
-    let Some(kind) = command(word) else { return Err(format!("Not a command: {word}")) };
+    let Some(kind) = command(word) else {
+        // i18n: Vim mode, the command line error for an unknown command; {} is the word typed
+        return Err(tr!("Not a command: {}", word));
+    };
     match kind {
         Kind::Run(action) => Ok(Ex::Run(action)),
         Kind::TabNew => Ok(Ex::TabNew(argument.to_owned())),
         Kind::Open if argument.is_empty() => Ok(Ex::Run("switcher")),
         Kind::Open => Ok(Ex::Open(argument.to_owned())),
-        Kind::Theme if argument.is_empty() => Err("Which theme? (Tab lists them)".into()),
+        // i18n: Vim mode, :theme without a name; Tab is the key that lists the themes
+        Kind::Theme if argument.is_empty() => Err(tr!("Which theme? (Tab lists them)")),
         Kind::Theme => Ok(Ex::Theme(argument.to_owned())),
         Kind::Font => font(argument).map(Ex::Font),
         Kind::Set => set(argument),
@@ -595,13 +682,13 @@ mod tests {
         assert_eq!(normal.feed(Region::Chat, "Space", false), Outcome::Pending);
         assert_eq!(normal.typed(), "Space");
         let next = normal.next(Region::Chat);
-        assert!(next.contains(&("e".to_owned(), "Explorer")), "{next:?}");
-        assert!(next.contains(&("w".to_owned(), "Tabs and panes")), "a group says what it holds: {next:?}");
-        assert!(next.contains(&("Space".to_owned(), "Commands")), "{next:?}");
-        assert!(next.contains(&("j".to_owned(), "Jobs and helpers")), "the leader shows the jobs: {next:?}");
+        assert!(next.contains(&("e".to_owned(), "Explorer".to_owned())), "{next:?}");
+        assert!(next.contains(&("w".to_owned(), "Tabs and panes".to_owned())), "a group says what it holds: {next:?}");
+        assert!(next.contains(&("Space".to_owned(), "Commands".to_owned())), "{next:?}");
+        assert!(next.contains(&("j".to_owned(), "Jobs and helpers".to_owned())), "the leader shows the jobs: {next:?}");
         assert_eq!(normal.feed(Region::Chat, "W", false), Outcome::Pending);
         assert_eq!(normal.typed(), "Space w");
-        assert!(normal.next(Region::Chat).contains(&("v".to_owned(), "Split right")));
+        assert!(normal.next(Region::Chat).contains(&("v".to_owned(), "Split right".to_owned())));
         assert_eq!(normal.feed(Region::Chat, "Escape", false), Outcome::Cancelled, "Escape drops the sequence");
         assert!(!normal.pending() && normal.next(Region::Chat).is_empty());
         // A key that continues nothing ends the sequence, and is used up.
