@@ -16,12 +16,7 @@ pub fn healthy_for(now: f64, failed_at: Option<f64>, hold_seconds: f64) -> bool 
     failed_at.is_none_or(|at| now - at >= hold_seconds)
 }
 
-#[derive(Debug)]
-pub enum Effect {
-    Send(Value),
-    Audio(Value),
-    Event(Value),
-}
+pub use super::VoiceEffect as Effect;
 #[derive(Default)]
 struct Request {
     parts: Vec<String>,

@@ -38,3 +38,11 @@ run `clarp-admin oracle connect oracle`. The user can also go back on their
 own by opening Oracle in the app.
 
 The wire contract is `docs/oracle-handoff.md` in the Clarp repository.
+
+Oracle Live calls on a Host advertising `oracle_eleven_realtime` can use Eleven
+Realtime v1 Mini or v1 Max. The user selects the model in Oracle settings on a
+supporting app. The Host offers it when its owner enables `eleven_realtime_enabled`
+under `[oracle]` and the existing ElevenLabs key is present. The choice applies
+to the next call and uses the existing Oracle contact and routing.
+
+When the Host advertises `oracle_eleven_norwegian_transcription`, an app with an explicit Norwegian spoken-language selection can add `transcription_language=no` to that call’s `/oracle/v2` socket URL. Omit it for automatic language detection.

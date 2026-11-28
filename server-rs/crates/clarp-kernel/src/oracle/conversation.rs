@@ -243,10 +243,23 @@ pub struct Admission {
     pub arguments: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum VoiceProtocol {
+    GptLive,
+    Gemini,
+    ElevenLabs,
+}
+
+impl VoiceProtocol {
+    pub(super) fn adapted(self) -> bool {
+        self != Self::GptLive
+    }
+}
+
 /// The conversation of one call.
 #[derive(Debug, Clone)]
 pub struct Conversation {
-    pub(super) gemini: bool,
+    pub(super) voice_protocol: VoiceProtocol,
     usage: super::usage::LiveUsage,
     pub(super) provider_session: String,
     pub(super) principal: String,
@@ -360,7 +373,7 @@ impl Conversation {
             earcons: true,
             progress_interval: 0,
             cues: Vec::new(),
-            gemini: false,
+            voice_protocol: VoiceProtocol::GptLive,
             usage: super::usage::LiveUsage::new(super::usage::Billing::Api),
             owned: BTreeSet::new(),
             background: BTreeSet::new(),
@@ -454,8 +467,12 @@ impl Conversation {
     }
 
     pub fn use_gemini(&mut self) {
-        self.gemini = true;
+        self.voice_protocol = VoiceProtocol::Gemini;
         self.usage = super::usage::LiveUsage::new(super::usage::Billing::Gemini);
+    }
+
+    pub fn use_elevenlabs(&mut self) {
+        self.voice_protocol = VoiceProtocol::ElevenLabs;
     }
 
     pub fn usage(&self) -> Value {
@@ -652,13 +669,13 @@ impl Conversation {
                 Phoned::Taken
             }
             "oracle_v2.interrupt" => {
-                if self.gemini {
+                if self.voice_protocol.adapted() {
                     wire.hook(Hook::LocalInterrupt);
                 }
                 if let Some(relay) = self.active_mut() {
                     relay.held = true;
                 }
-                if !self.held {
+                if !self.held && self.voice_protocol != VoiceProtocol::ElevenLabs {
                     self.append("instructions", STOP_SPEAKING, wire);
                 }
                 Phoned::Taken
@@ -688,7 +705,10 @@ impl Conversation {
 
     /// What the voice sent.
     pub fn voice(&mut self, event: &Value, wire: &mut dyn Wire, now: Now) {
-        if event["type"] != "session.started" && self.usage.observe(event) && self.gemini {
+        if event["type"] != "session.started"
+            && self.usage.observe(event)
+            && self.voice_protocol == VoiceProtocol::Gemini
+        {
             let mut frame = self.usage.snapshot();
             frame["type"] = json!("oracle_v2.usage");
             wire.phone(frame);
