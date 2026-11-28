@@ -1256,7 +1256,7 @@ mod read_tests {
         assert!(reads.due(&read));
         assert!(!reads.opened_since("vera", alert));
 
-        let boundary = payload(&Job::Read(read), "host-1", ("", "")).0;
+        let boundary = payload(&Job::Read(read), "host-1", ("", false)).0;
         let shown = payload(
             &Job::Request(Requested {
                 session: "vera".into(),
@@ -1264,7 +1264,7 @@ mod read_tests {
                 ..Default::default()
             }),
             "host-1",
-            ("", ""),
+            ("", false),
         )
         .0;
         assert_eq!(shown["order_epoch"], boundary["order_epoch"]);
