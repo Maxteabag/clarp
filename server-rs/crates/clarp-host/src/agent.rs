@@ -3108,7 +3108,7 @@ impl Worker {
         self.actor = Some(actor);
         self.stall = Stall::default();
         if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
-            actor.pooled(pool.of(&self.setup.record.agent_id));
+            actor.pooled(pool.of(&self.setup.record.agent_id, None));
             // A turn that waited for an account when the Host last stopped waits on, in
             // the recovery it waited in: the pool asks the selector for it and takes it up.
             if !actor.transit_resume_pending()
@@ -5379,6 +5379,12 @@ impl Worker {
                     }
                     self.held = Some(order);
                     return;
+                }
+                if let (Some(pool), Some(actor)) = (self.setup.pool(), self.actor.as_mut()) {
+                    actor.pooled(pool.of(
+                        &self.setup.record.agent_id,
+                        Some((order.turn, order.attempt)),
+                    ));
                 }
                 Action::Launch(order)
             }

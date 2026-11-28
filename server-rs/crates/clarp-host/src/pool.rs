@@ -163,8 +163,11 @@ impl Service {
     }
 
     /// The pool as one agent's turn sees it.
-    pub fn of(self: &Arc<Self>, agent: &str) -> Arc<dyn Pooled> {
+    pub fn of(self: &Arc<Self>, agent: &str, launch: Option<(TurnId, u32)>) -> Arc<dyn Pooled> {
         Arc::new(OfAgent {
+            membership: launch.filter(|_| self.tool == "codex").and_then(|attempt| {
+                crate::logins::codex_membership().map(|membership| (attempt, membership))
+            }),
             service: self.clone(),
             agent: agent.to_string(),
         })
@@ -445,11 +448,19 @@ fn selected(command: &[String], models: &[String], most: Duration) -> Verdict {
 
 /// The pool, as the turn of one agent tells it things.
 struct OfAgent {
+    membership: Option<((TurnId, u32), [u8; 32])>,
     service: Arc<Service>,
     agent: String,
 }
 
 impl Pooled for OfAgent {
+    fn login_changed_since_dispatch(&self, turn: TurnId, attempt: u32) -> bool {
+        self.membership.is_some_and(|(launched, before)| {
+            launched == (turn, attempt)
+                && crate::logins::codex_membership().is_some_and(|now| before != now)
+        })
+    }
+
     fn failed(&self, turn: TurnId, plan: bool, resets_at_ms: Option<i64>, _now_ms: i64) -> bool {
         self.service.failed(&self.agent, turn, plan, resets_at_ms)
     }

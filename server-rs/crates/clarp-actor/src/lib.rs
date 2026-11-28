@@ -913,6 +913,10 @@ impl LiveTurn {
 /// the pool wants done with this agent's turn comes back to the agent from outside
 /// ([`Actor::stop_for_an_account`], [`Actor::login_changed`]).
 pub trait Pooled: Send + Sync {
+    fn login_changed_since_dispatch(&self, _turn: TurnId, _attempt: u32) -> bool {
+        false
+    }
+
     /// An attempt of the agent's turn failed on its account. Whether the turn waits for
     /// another account: where it does not, it ends on that failure. `plan`: the provider
     /// said that the account does not offer the turn's model. `resets_at_ms`: when the
@@ -7343,6 +7347,22 @@ impl Actor {
                                     // is new, and nothing is known of it yet.
                                     recovery::Next::Network { until_ms, resume } => {
                                         Some(Wait::Network { until_ms, resume })
+                                    }
+                                    recovery::Next::Pool { .. }
+                                        if kind == failures::USAGE_LIMIT
+                                            && self.pool.as_ref().is_some_and(|pool| {
+                                                pool.login_changed_since_dispatch(
+                                                    turn,
+                                                    live.attempt,
+                                                )
+                                            }) =>
+                                    {
+                                        // This attempt crossed a login change. Try its turn on
+                                        // the current login before stopping the rest of the pool.
+                                        Some(Wait::Retry {
+                                            until_ms: t,
+                                            resume: !nothing_done,
+                                        })
                                     }
                                     recovery::Next::Pool { plan } => {
                                         let pool = self.pool.as_ref();
