@@ -11,6 +11,8 @@ import { escapeAttr, escapeHTML } from '@core/html.js';
 import { ActivityStatus } from '@core/protocol.js';
 import { stripVoiceMarkup } from '@core/voice-markup.js';
 import { codeBlockHtml, markedBlockExtensions, tableBlockHtml, tableToMarkdown } from './blocks.js';
+import { i18n, t as tr } from '../stores/i18n.svelte.js';
+import { formatDuration } from './i18n/format.js';
 
 export function pathTail(p) {
   if (!p) return '';
@@ -42,7 +44,7 @@ function renderMediaMarkdownExtensions(text) {
         if (!m) return;
         const src = normalizeMediaReference(m[2]);
         if (!src) return;
-        items.push(`<img src="${escapeAttr(src)}" alt="${escapeAttr(m[1] || 'Image')}" loading="lazy">`);
+        items.push(`<img src="${escapeAttr(src)}" alt="${escapeAttr(m[1] || tr('render.image'))}" loading="lazy">`);
       });
       if (!items.length) return _;
       return `<div class="media-gallery">${items.join('')}</div>`;
@@ -179,7 +181,7 @@ export function renderTool(t) {
            `<pre class="tool-diff new">${escapeHTML(t.new || '')}</pre>` +
            (t.replace_all ? `<div class="tool-flag">replace_all</div>` : '');
   } else if (name === 'MultiEdit') {
-    summary = summary || `${pathTail(t.file_path)} · ${t.edit_count} edits`;
+    summary = summary || `${pathTail(t.file_path)} · ${tr('render.edits', { count: Number(t.edit_count) || 0 })}`;
     body = (t.edits || []).map(e =>
       `<pre class="tool-diff old">${escapeHTML(e.old)}</pre>` +
       `<pre class="tool-diff new">${escapeHTML(e.new)}</pre>`).join('');
@@ -194,11 +196,11 @@ export function renderTool(t) {
            `<pre class="tool-cmd">$ ${escapeHTML(t.command || '')}</pre>`;
   } else if (name === 'Glob' || name === 'Grep') {
     summary = summary || ((t.pattern || '') + (t.path ? ' in ' + pathTail(t.path) : ''));
-    body = `<pre class="tool-cmd">${escapeHTML(t.pattern || '')}${t.path ? ' in ' + escapeHTML(t.path) : ''}</pre>`;
+    body = `<pre class="tool-cmd">${escapeHTML(t.pattern || '')}${t.path ? ' ' + escapeHTML(tr('render.in_path', { path: t.path })) : ''}</pre>`;
   } else if (name === 'TodoWrite') {
     const todos = t.todos || [];
     const inProg = todos.find(td => td.status === 'in_progress');
-    summary = summary || (inProg ? inProg.content : `${todos.length} items`);
+    summary = summary || (inProg ? inProg.content : tr('render.items', { count: todos.length }));
     body = '<ul class="tool-todos">' + todos.map(td =>
       `<li class="todo-${escapeHTML(td.status)}">${escapeHTML(td.content)}</li>`).join('') + '</ul>';
   } else if (t.input) {
@@ -207,9 +209,9 @@ export function renderTool(t) {
     body = '<pre class="tool-cmd">' + escapeHTML(JSON.stringify(t.input, null, 2)) + '</pre>';
   }
   if (t.result) body += `<pre class="tool-cmd tool-result">${escapeHTML(t.result)}</pre>`;
-  const label = status === ActivityStatus.ERROR ? 'failed'
-    : status === ActivityStatus.OK ? 'done'
-      : status === ActivityStatus.RUNNING ? ActivityStatus.RUNNING : 'logged';
+  const label = tr(status === ActivityStatus.ERROR ? 'render.tool.failed'
+    : status === ActivityStatus.OK ? 'render.tool.done'
+      : status === ActivityStatus.RUNNING ? 'render.tool.running' : 'render.tool.logged');
   const openAttr = (name === 'Edit' || name === 'MultiEdit') ? ' open' : '';
   const cls = activityStatusClass(status);
   return `<details${openAttr} class="tool ${cls}"><summary class="tool-head"><span class="tool-status ${cls}"></span><span class="tool-name">${escapeHTML(name)}</span><span class="tool-summary">${escapeHTML(summary)}</span><span class="tool-state">${escapeHTML(label)}</span></summary>${body}</details>`;
@@ -231,12 +233,14 @@ const turnHtml = new Map();
 export function renderTurnBodyCached(t) {
   if (!t || !t.id || t.revision == null) return renderTurnBody(t);
   const hit = turnHtml.get(t.id);
-  if (hit && hit.revision === t.revision && hit.text === t.text && hit.tools === (t.tools || []).length) {
+  // Tool cards hold words in the app's language: a cached body is good for its language only.
+  if (hit && hit.revision === t.revision && hit.text === t.text && hit.tools === (t.tools || []).length
+      && hit.locale === i18n.locale) {
     return hit.html;
   }
   const html = renderTurnBody(t);
   turnHtml.delete(t.id);
-  turnHtml.set(t.id, { revision: t.revision, text: t.text, tools: (t.tools || []).length, html });
+  turnHtml.set(t.id, { revision: t.revision, text: t.text, tools: (t.tools || []).length, locale: i18n.locale, html });
   if (turnHtml.size > TURN_CACHE_MAX) turnHtml.delete(turnHtml.keys().next().value);
   return html;
 }
@@ -245,9 +249,5 @@ export function renderTurnBodyCached(t) {
 
 export function formatElapsed(turnStartedAtSec) {
   if (!turnStartedAtSec) return '';
-  const elapsedSec = Math.max(0, Math.floor(Date.now() / 1000) - turnStartedAtSec);
-  if (elapsedSec < 60) return elapsedSec + 's';
-  const m = Math.floor(elapsedSec / 60);
-  const r = elapsedSec % 60;
-  return `${m}m ${r}s`;
+  return formatDuration(Math.max(0, Date.now() - turnStartedAtSec * 1000));
 }

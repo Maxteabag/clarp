@@ -141,5 +141,5 @@
   .hosts-remove { flex: none; width: 26px; height: 26px; border: 1px solid var(--ink-edge); border-radius: 6px; background: transparent; color: var(--washi-dim); cursor: pointer; }
   .hosts-remove:hover { color: var(--vermillion); border-color: var(--vermillion); }
   .hosts-error { color: var(--vermillion); }
-  .hosts-add code { font-family: var(--font-mono); font-size: 11px; }
+  .hosts-add :global(code) { font-family: var(--font-mono); font-size: 11px; }
 </style>

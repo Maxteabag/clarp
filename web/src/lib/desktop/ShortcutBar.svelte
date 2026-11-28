@@ -4,6 +4,7 @@
   import { visibleShortcuts, contextLabel } from '@core/keymap.js';
   import { input, keyContext } from '../../stores/input.svelte.js';
   import { panesState } from '../../stores/panes.svelte.js';
+  import { t } from '../../stores/i18n.svelte.js';
 
   // Read the reactive state at the top level so @Observable-style tracking
   // sees it; a read buried in a helper would not re-run this.
@@ -12,20 +13,20 @@
     void panesState.tree;
     return keyContext();
   });
-  let shortcuts = $derived(visibleShortcuts(ctx));
-  let label = $derived(contextLabel(ctx));
+  let shortcuts = $derived(visibleShortcuts(ctx, undefined, t));
+  let label = $derived(contextLabel(ctx, t));
   let scope = $derived(ctx.overlay ? 'overlay' : ctx.insert ? 'insert' : 'normal');
 </script>
 
-<footer class="shortcut-bar" aria-label="Keyboard shortcuts">
+<footer class="shortcut-bar" aria-label={t('keys.bar')}>
   <div class="mode-badge" data-scope={scope}>
     <span class="mode-indicator"></span>
     <span class="mode-name">{label}</span>
   </div>
 
   {#if ctx.hovering && !ctx.insert && !ctx.overlay}
-    <span class="target-hint" title="Pane keys act on the pane under the pointer">
-      → hovered pane
+    <span class="target-hint" title={t('keys.hover_hint')}>
+      {t('keys.hovered_pane')}
     </span>
   {/if}
 

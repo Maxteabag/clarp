@@ -11,6 +11,8 @@
 // passes. Nothing else can fire. The same table drives the shortcut bar, so
 // what the footer shows and what the keyboard does cannot drift apart.
 
+import { english } from './i18n-en.js';
+
 // ---- key normalization ---------------------------------------------------
 
 const NAMED = {
@@ -102,29 +104,29 @@ export const GUARDS = {
 // focus, so typing can never trigger a command by accident.
 export const KEYMAP = [
   // insert
-  { key: 'esc', action: 'leave-insert', context: 'insert', label: 'Normal', group: 'mode', allowInInsert: true },
-  { key: 'enter', action: 'send', context: 'insert', label: 'Send', group: 'mode', allowInInsert: true, passive: true },
+  { key: 'esc', action: 'leave-insert', context: 'insert', label: 'keys.normal', group: 'mode', allowInInsert: true },
+  { key: 'enter', action: 'send', context: 'insert', label: 'keys.send', group: 'mode', allowInInsert: true, passive: true },
 
   // overlay
-  { key: 'esc', action: 'close-overlay', context: 'overlay', label: 'Close', group: 'mode', allowInInsert: true },
+  { key: 'esc', action: 'close-overlay', context: 'overlay', label: 'keys.close', group: 'mode', allowInInsert: true },
 
   // entering insert
-  { key: 'i', action: 'focus-composer', context: 'global', label: 'Type', group: 'mode' },
+  { key: 'i', action: 'focus-composer', context: 'global', label: 'keys.type', group: 'mode' },
   { key: 'a', action: 'focus-composer', context: 'global', hidden: true },
   { key: 'enter', action: 'focus-composer', context: 'global', hidden: true },
 
   // pane layout
-  { key: 'v', action: 'split-vertical', context: 'pane', label: 'Split │', group: 'layout' },
+  { key: 'v', action: 'split-vertical', context: 'pane', label: 'keys.split_vertical', group: 'layout' },
   { key: '|', action: 'split-vertical', context: 'pane', hidden: true },
-  { key: 's', action: 'split-horizontal', context: 'pane', label: 'Split ─', group: 'layout' },
+  { key: 's', action: 'split-horizontal', context: 'pane', label: 'keys.split_horizontal', group: 'layout' },
   { key: '-', action: 'split-horizontal', context: 'pane', hidden: true },
-  { key: 'x', action: 'close-pane', context: 'pane.multi', label: 'Close', group: 'layout', when: 'hasMultiplePanes' },
+  { key: 'x', action: 'close-pane', context: 'pane.multi', label: 'keys.close_pane', group: 'layout', when: 'hasMultiplePanes' },
   { key: 'q', action: 'close-pane', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
-  { key: 'z', action: 'toggle-zoom', context: 'pane.multi', label: 'Zoom', group: 'layout', when: 'hasMultiplePanes' },
-  { key: '=', action: 'equalize', context: 'pane.multi', label: 'Balance', group: 'layout', when: 'hasMultiplePanes' },
+  { key: 'z', action: 'toggle-zoom', context: 'pane.multi', label: 'keys.zoom', group: 'layout', when: 'hasMultiplePanes' },
+  { key: '=', action: 'equalize', context: 'pane.multi', label: 'keys.balance', group: 'layout', when: 'hasMultiplePanes' },
 
   // pane navigation
-  { key: 'h', action: 'nav-left', context: 'pane.multi', label: 'Move', displayKey: 'hjkl / ←↓↑→', group: 'nav', when: 'hasMultiplePanes' },
+  { key: 'h', action: 'nav-left', context: 'pane.multi', label: 'keys.move', displayKey: 'hjkl / ←↓↑→', group: 'nav', when: 'hasMultiplePanes' },
   { key: 'j', action: 'nav-down', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'k', action: 'nav-up', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'l', action: 'nav-right', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
@@ -132,32 +134,32 @@ export const KEYMAP = [
   { key: 'down', action: 'nav-down', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'up', action: 'nav-up', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
   { key: 'right', action: 'nav-right', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
-  { key: 'H', action: 'shrink', context: 'pane.multi', label: 'Resize', group: 'nav', when: 'hasMultiplePanes' },
+  { key: 'H', action: 'shrink', context: 'pane.multi', label: 'keys.resize', group: 'nav', when: 'hasMultiplePanes' },
   { key: 'L', action: 'grow', context: 'pane.multi', hidden: true, when: 'hasMultiplePanes' },
 
   // quick switch
-  { key: 'space', action: 'quick-switch', context: 'global', label: 'Go to', group: 'nav' },
+  { key: 'space', action: 'quick-switch', context: 'global', label: 'keys.go_to', group: 'nav' },
 
   // chat rail
-  { key: 'c', action: 'focus-sidebar', context: 'pane', label: 'Chats', group: 'nav' },
-  { key: 'j', action: 'chat-next', context: 'sidebar', label: 'Next', displayKey: 'j / ↓', group: 'nav' },
+  { key: 'c', action: 'focus-sidebar', context: 'pane', label: 'keys.chats', group: 'nav' },
+  { key: 'j', action: 'chat-next', context: 'sidebar', label: 'keys.next', displayKey: 'j / ↓', group: 'nav' },
   { key: 'down', action: 'chat-next', context: 'sidebar', hidden: true },
-  { key: 'k', action: 'chat-prev', context: 'sidebar', label: 'Prev', displayKey: 'k / ↑', group: 'nav' },
+  { key: 'k', action: 'chat-prev', context: 'sidebar', label: 'keys.prev', displayKey: 'k / ↑', group: 'nav' },
   { key: 'up', action: 'chat-prev', context: 'sidebar', hidden: true },
-  { key: 'enter', action: 'chat-open', context: 'sidebar', label: 'Open', group: 'mode' },
+  { key: 'enter', action: 'chat-open', context: 'sidebar', label: 'keys.open', group: 'mode' },
   { key: 'l', action: 'chat-open', context: 'sidebar', hidden: true },
   { key: 'right', action: 'chat-open', context: 'sidebar', hidden: true },
-  { key: 'esc', action: 'leave-sidebar', context: 'sidebar', label: 'Panes', group: 'mode', allowInInsert: true },
+  { key: 'esc', action: 'leave-sidebar', context: 'sidebar', label: 'keys.panes', group: 'mode', allowInInsert: true },
   { key: 'h', action: 'leave-sidebar', context: 'sidebar', hidden: true },
   { key: 'left', action: 'leave-sidebar', context: 'sidebar', hidden: true },
 
   // global
-  { key: 't', action: 'toggle-tools', context: 'global', label: 'Tools', group: 'view' },
-  { key: 'r', action: 'refresh', context: 'global', label: 'Reload', group: 'view' },
-  { key: '/', action: 'search', context: 'global', label: 'Search', group: 'view' },
+  { key: 't', action: 'toggle-tools', context: 'global', label: 'keys.tools', group: 'view' },
+  { key: 'r', action: 'refresh', context: 'global', label: 'keys.reload', group: 'view' },
+  { key: '/', action: 'search', context: 'global', label: 'keys.search', group: 'view' },
   { key: 'f', action: 'search', context: 'global', hidden: true },
-  { key: 'o', action: 'overview', context: 'global', label: 'Overview', group: 'view' },
-  { key: '?', action: 'help', context: 'global', label: 'Keys', group: 'view' },
+  { key: 'o', action: 'overview', context: 'global', label: 'keys.overview', group: 'view' },
+  { key: '?', action: 'help', context: 'global', label: 'keys.keys', group: 'view' },
   { key: 'esc', action: 'blur', context: 'global', hidden: true, allowInInsert: true },
 ];
 
@@ -167,7 +169,7 @@ for (let n = 1; n <= 9; n++) {
     action: `jump-agent-${n}`,
     context: 'global',
     hidden: n > 1,
-    label: n === 1 ? 'Jump' : undefined,
+    label: n === 1 ? 'keys.jump' : undefined,
     displayKey: n === 1 ? '1-9' : undefined,
     group: 'nav',
     when: 'hasSessions',
@@ -207,7 +209,8 @@ export function resolveAction(key, ctx = {}, keymap = KEYMAP) {
 const GROUP_ORDER = ['mode', 'layout', 'nav', 'view'];
 
 // What the footer shows: exactly the bindings that would fire right now.
-export function visibleShortcuts(ctx = {}, keymap = KEYMAP) {
+// A binding's `label` is its catalog key (keys.*); `tr` words it (the app passes t).
+export function visibleShortcuts(ctx = {}, keymap = KEYMAP, tr = english) {
   const contexts = resolveContexts(ctx);
   const out = [];
   const seen = new Set();
@@ -218,7 +221,7 @@ export function visibleShortcuts(ctx = {}, keymap = KEYMAP) {
     seen.add(def.action);
     out.push({
       key: def.displayKey || formatKey(def.key),
-      label: def.label,
+      label: tr(def.label),
       group: def.group || 'view',
       action: def.action,
     });
@@ -228,10 +231,10 @@ export function visibleShortcuts(ctx = {}, keymap = KEYMAP) {
 
 // The label shown in the footer's badge: what the keyboard is currently
 // talking to, so a dead pane focus is visible instead of mysterious.
-export function contextLabel(ctx = {}) {
+export function contextLabel(ctx = {}, tr = english) {
   if (ctx.overlay) return ctx.overlay.toUpperCase();
-  if (ctx.insert) return 'INSERT';
-  if (ctx.desktop && ctx.region === 'sidebar') return 'CHATS';
-  if (ctx.desktop) return 'PANE';
-  return 'NORMAL';
+  if (ctx.insert) return tr('keys.mode.insert');
+  if (ctx.desktop && ctx.region === 'sidebar') return tr('keys.mode.chats');
+  if (ctx.desktop) return tr('keys.mode.pane');
+  return tr('keys.mode.normal');
 }
