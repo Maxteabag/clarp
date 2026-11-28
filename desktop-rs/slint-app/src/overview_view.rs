@@ -45,7 +45,8 @@ fn fill(app: &App, window: &AppWindow) {
                 .iter()
                 .map(|s| OverviewSchedule {
                     id: text(s, "schedule_id").into(),
-                    title: format!("{}  ·  {}", if text(s, "name").is_empty() { "Scheduled task".into() } else { text(s, "name") }, text(s, "cron_expression")).into(),
+                    // i18n: agent profile and overview, a scheduled task without a name (noun)
+                    title: format!("{}  ·  {}", if text(s, "name").is_empty() { clarp_core::tr!("Scheduled task") } else { text(s, "name") }, text(s, "cron_expression")).into(),
                     prompt: text(s, "prompt").into(),
                     on: s.get("enabled").and_then(Value::as_bool).unwrap_or(false),
                 })

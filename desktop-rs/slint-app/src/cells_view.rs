@@ -44,7 +44,8 @@ pub fn display_cell(cell: &Value) -> DisplayCell {
         .unwrap_or_default();
     let count = [number(cell, "detail_count"), number(cell, "detailCount")].into_iter().find(|n| *n > 0).unwrap_or(lines.len() as i64);
     let subagent = cell.get("_subagent").filter(|s| s.is_object());
-    let title = if text(cell, "title").is_empty() { "Activity".to_owned() } else { text(cell, "title") };
+    // i18n: chat, title of an activity cell that has none (noun)
+    let title = if text(cell, "title").is_empty() { clarp_core::tr!("Activity") } else { text(cell, "title") };
     let status = if text(cell, "status").is_empty() { "recorded".to_owned() } else { text(cell, "status") };
     let (title, summary, phase) = match subagent {
         Some(agent) => {

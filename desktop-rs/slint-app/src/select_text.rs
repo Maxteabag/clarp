@@ -52,7 +52,8 @@ fn chat_body(app: &App, session: &str) -> (String, Vec<(String, usize, usize)>) 
         if text.trim().is_empty() {
             continue;
         }
-        let who = if m.role == "user" { "You".to_owned() } else if !m.sender_name.is_empty() { m.sender_name.clone() } else { name.clone() };
+        // i18n: select-text page, before each of the user's own messages (pronoun, a colon follows)
+        let who = if m.role == "user" { clarp_core::tr!("select text" => "You") } else if !m.sender_name.is_empty() { m.sender_name.clone() } else { name.clone() };
         if !body.is_empty() {
             body.push_str("\n\n");
         }
@@ -72,12 +73,14 @@ fn open_chat(app: &App, window: &AppWindow, session: &str, id: Option<&str>) {
     }
     let (body, spans) = chat_body(app, session);
     if body.is_empty() {
-        app.engine.borrow_mut().report_error("Nothing in this chat to select from yet");
+        // i18n: error banner: the chat has no messages to select text from
+        app.engine.borrow_mut().report_error(&clarp_core::tr!("Nothing in this chat to select from yet"));
         return;
     }
     let selected = id.and_then(|id| spans.iter().find(|(m, ..)| m == id)).map_or((body.len(), body.len()), |(_, from, to)| (*from, *to));
     let name = app.engine.borrow().chat_name(session);
-    open(app, window, format!("Select text · {name}"), body, selected);
+    // i18n: select-text page title; {} is the chat's name
+    open(app, window, clarp_core::tr!("Select text · {}", name), body, selected);
 }
 
 /// The chat with one message selected (its icon, or `v` on vim mode's

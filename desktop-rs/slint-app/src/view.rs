@@ -251,7 +251,8 @@ pub(crate) fn stamp(epoch_millis: i64) -> String {
 /// message's time.
 pub(crate) fn row_stamp(busy: bool, turn_started_at: Option<i64>, last_activity: i64) -> String {
     match turn_started_at {
-        Some(started) if busy => format!("working {}", clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started)),
+        // i18n: chat list row stamp while the agent works; {} is how long ("6m 39s") (lowercase)
+        Some(started) if busy => clarp_core::tr!("working {}", clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started)),
         _ => stamp(last_activity),
     }
 }
@@ -503,7 +504,9 @@ pub(crate) fn choose_attachment(session: String) {
         return;
     }
     let spawned = std::thread::Builder::new().name("attach-dialog".into()).spawn(move || {
-        let chosen = rfd::FileDialog::new().set_title("Attach files").pick_files().unwrap_or_default();
+        // i18n: composer, title of the system file dialog for attaching files (imperative)
+        let title = clarp_core::tr!("Attach files");
+        let chosen = rfd::FileDialog::new().set_title(title).pick_files().unwrap_or_default();
         if chosen.is_empty() {
             return;
         }

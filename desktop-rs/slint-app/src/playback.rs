@@ -143,7 +143,16 @@ pub fn open(app: &crate::App, request: Request) {
     let primary = endpoint.is_some() && endpoint == app.engine.borrow().endpoint();
     let missing = mpv::unavailable();
     match (request.kind, missing) {
-        _ if !on_host => bridge.set_message(format!("{} unavailable", if request.kind == Kind::Video { "Video" } else { "Audio" }).into()),
+        _ if !on_host => bridge.set_message(
+            if request.kind == Kind::Video {
+                // i18n: video card, note: the video is not on this computer
+                clarp_core::tr!("Video unavailable")
+            } else {
+                // i18n: audio card, note: the audio is not on this computer
+                clarp_core::tr!("Audio unavailable")
+            }
+            .into(),
+        ),
         (Kind::Audio, Some(_)) if primary => {
             if request.autoplay {
                 let id = request.key.clone();
@@ -174,7 +183,8 @@ pub fn open(app: &crate::App, request: Request) {
                     }
                 }
             } else {
-                bridge.set_message("Not connected to its Host".into());
+                // i18n: media player note: the Host that holds this media is not connected
+                bridge.set_message(clarp_core::tr!("Not connected to its Host").into());
             }
         }
     }

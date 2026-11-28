@@ -12,6 +12,9 @@ use serde_json::Value;
 use slint::{ModelRc, VecModel};
 
 use crate::{App, AppWindow, ArtifactView, AttentionView, JobView, MessageBlock, commands, pump_now};
+use clarp_core::tr;
+
+// i18n-screen: updates
 
 thread_local! {
     /// The artifact the report viewer shows ("" for none).
@@ -37,7 +40,8 @@ fn attention_view(engine: &clarp_engine::Engine, item: &Object) -> AttentionView
     let id = text(item, "decision_id");
     AttentionView {
         pending: engine.update_action_pending("decision", &id),
-        title: first(item, &["title"], "Decision").into(),
+        // i18n: updates, a decision without a title (noun)
+        title: first(item, &["title"], &tr!("Decision")).into(),
         question: first(item, &["question", "summary"], "").into(),
         context: text(item, "context").into(),
         meta: match text(item, "host") {
@@ -46,8 +50,10 @@ fn attention_view(engine: &clarp_engine::Engine, item: &Object) -> AttentionView
             host => format!("{}  ·  {host}", text(item, "agent_name")),
         }
         .into(),
-        no_label: first(item, &["no_label"], "No").into(),
-        yes_label: first(item, &["yes_label"], "Yes").into(),
+        // i18n: decision card, answer button that declines, when the agent names none
+        no_label: first(item, &["no_label"], &tr!("answer" => "No")).into(),
+        // i18n: decision card, answer button that approves, when the agent names none
+        yes_label: first(item, &["yes_label"], &tr!("answer" => "Yes")).into(),
         revision: json::js_number(item.get("revision")) as i32,
         id: id.into(),
     }
@@ -58,7 +64,8 @@ fn job_view(engine: &clarp_engine::Engine, job: &Object) -> JobView {
     let status = text(job, "status");
     JobView {
         pending: engine.update_action_pending("job", &id),
-        title: first(job, &["title", "kind"], "Background job").into(),
+        // i18n: chat list and processes, title of a background job that has none of its own (noun)
+        title: first(job, &["title", "kind"], &tr!("Background job")).into(),
         detail: text(job, "detail").into(),
         active: active_job(&status),
         failed: status == "failed",
@@ -78,23 +85,34 @@ fn artifact_view(engine: &clarp_engine::Engine, artifact: &Object) -> ArtifactVi
     let (total, completed) =
         if kind == "plan" { (count(&plan, "total_count"), count(&plan, "completed_count")) } else { (count(artifact, "total_steps"), count(artifact, "completed_steps")) };
     let progress = match kind.as_str() {
-        "plan" | "workflow_run" if total > 0 => format!("{completed} / {total} completed"),
-        "plan" | "workflow_run" if outcome == "active" => "In progress".to_owned(),
+        // i18n: plan or workflow card: steps finished of all; {0} finished, {1} in all
+        "plan" | "workflow_run" if total > 0 => tr!("{0} / {1} completed", completed, total),
+        // i18n: plan or workflow card: work under way
+        "plan" | "workflow_run" if outcome == "active" => tr!("In progress"),
         _ => String::new(),
     };
     let countdown = if kind == "countdown" {
         let zone = text(artifact, "time_zone");
-        let at = text(artifact, "target_at");
+        let at = match chrono::DateTime::parse_from_rfc3339(&text(artifact, "target_at")) {
+            Ok(target) => {
+                let tag = clarp_core::i18n::current();
+                let (day, time) = (clarp_core::i18n::format::date(tag, target.date_naive()), clarp_core::i18n::format::time(tag, target.time(), clarp_core::i18n::format::Clock::H24));
+                // i18n: countdown card, the target as a date and time ("Nov 26, 2026 at 14:05"); {0} is the date, {1} the time
+                tr!("{0} at {1}", day, time)
+            }
+            Err(_) => text(artifact, "target_at"),
+        };
         if zone.is_empty() { at } else { format!("{at} · {zone}") }
     } else {
         String::new()
     };
     ArtifactView {
         id: text(artifact, "artifact_id").into(),
-        kind: kind.replace('_', " ").to_uppercase().into(),
+        kind: crate::artifacts_view::card_label(&kind).into(),
         failed: matches!(outcome.as_str(), "failed" | "failure" | "timed_out" | "action_required"),
         outcome: outcome.into(),
-        title: first(artifact, &["file_name", "title"], "Artifact").into(),
+        // i18n: artifact card title when it has none (noun: something an agent published)
+        title: first(artifact, &["file_name", "title"], &tr!("Artifact")).into(),
         summary: text(artifact, "summary").into(),
         progress: progress.into(),
         countdown: countdown.into(),
@@ -277,8 +295,10 @@ fn report_body_in(app: &App, window: &AppWindow, id: &str) -> bool {
         return true;
     }
     let said = match state {
-        Hydration::Failed(why) => format!("Not loaded: {why}"),
-        _ => "Loading…".to_owned(),
+        // i18n: artifact card status: its full content did not load; {} is why
+        Hydration::Failed(why) => tr!("Not loaded: {}", why),
+        // i18n: artifacts gallery footer while it loads
+        _ => tr!("Loading…"),
     };
     window.set_report_title(row.get("title").and_then(Value::as_str).unwrap_or_default().into());
     window.set_report_summary(said.into());

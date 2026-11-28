@@ -321,7 +321,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
 
 /// The small capitals over a card: its kind ("CODE CHANGE"), in the app's
 /// language for the kinds the desktop knows.
-fn card_label(kind: &str) -> String {
+pub(crate) fn card_label(kind: &str) -> String {
     // Each line: a card's kind, shown small in capitals above its title (keep it short; capitals where the script has them).
     match kind {
         // i18n: artifact card kind label, small capitals: a plan
