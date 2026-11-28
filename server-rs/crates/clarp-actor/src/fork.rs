@@ -1120,11 +1120,22 @@ impl Actor {
                 let kind = failures::classify_error(reason);
                 let model = self.turn_model().unwrap_or_default();
                 let told = failures::told(kind, reason, &model, failures::Known::default());
-                let error = json!({
+                let mut error = json!({
                     "reason": kind,
                     "message": clarp_kernel::python::first(&told.message, 300),
                     "detail": clarp_kernel::python::first(&told.provider_message, 500),
                 });
+                // A fork's turn answers no message of the user's: nothing to send again.
+                super::explain_into(
+                    &mut error,
+                    &clarp_kernel::turn_error::Failure {
+                        kind,
+                        said: reason,
+                        backend: self.backend.id(),
+                        model: &model,
+                        ..clarp_kernel::turn_error::Failure::default()
+                    },
+                );
                 ("failed", Some(error))
             }
             _ => ("interrupted", None),

@@ -167,6 +167,7 @@ pub fn run(app: &App) {
             tokio::time::sleep(every).await;
             crate::request_tool::settle_failed_waits(&app).await;
             desk.run(&app).await;
+            crate::turn_retry::run_due(&app).await;
         }
     });
 }
