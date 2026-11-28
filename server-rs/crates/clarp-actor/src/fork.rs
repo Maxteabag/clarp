@@ -98,6 +98,10 @@ enum Stage {
 /// One message of the user's that the fork took.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct Asked {
+    /// Unread reservation persisted only in this lane. Older lanes already
+    /// committed an ordinary Joined and keep its original lifecycle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reservation: Option<Join>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     client_msg_id: Option<String>,
     turn: u64,
@@ -308,27 +312,13 @@ fn give_back(
     out: &mut Outputs,
     now_ms: i64,
 ) -> Result<(), ActorError> {
-    let previously_broken = record.broken;
     record.broken = true;
     for asked in &mut record.asked {
-        if asked.read {
+        if asked.read || !matches!(asked.stage, Stage::Waiting | Stage::Running) {
             continue;
         }
-        let turn = TurnId(asked.turn);
-        let reserved = batch.agent().joins().get(&turn).is_some_and(|join| {
-            join.stage == JoinStage::Pending
-                && join.message_seq == asked.message_seq
-                && join.join.into == TurnId(record.from)
-        });
-        if !matches!(asked.stage, Stage::Waiting | Stage::Running)
-            && !(previously_broken && asked.stage == Stage::GivenBack && reserved)
-        {
-            continue;
-        }
-        if reserved {
-            batch
-                .command(Command::ReleaseUnread { turn }, now_ms)
-                .map_err(clarp_kernel::journal::JournalError::Refused)?;
+        if let Some(join) = &asked.reservation {
+            batch.release_fork(TurnId(asked.turn), join);
         }
         if let Some(id) = &asked.client_msg_id {
             batch.item(route_item(id, "waiting", now_ms)?);
@@ -354,6 +344,23 @@ fn read_now(
         return Ok(true);
     }
     let turn = TurnId(asked.turn);
+    // Publish the predecessor's Joined and JoinRead atomically on consumption.
+    // A rollback before that append sees the original untouched mailbox.
+    if let Some(join) = &asked.reservation {
+        if !batch.release_fork(turn, join)
+            || batch
+                .command(
+                    Command::Join {
+                        turn,
+                        join: join.clone(),
+                    },
+                    t,
+                )
+                .is_err()
+        {
+            return Ok(false);
+        }
+    }
     if batch.command(Command::JoinRead { turn }, t).is_err() {
         return Ok(false);
     }
@@ -561,6 +568,7 @@ impl Actor {
             .find(&route_key(message.told_id()))?
             .map(|_| message.told_id().to_owned());
         record.asked.push(Asked {
+            reservation: Some(join.clone()),
             client_msg_id: client_msg_id.clone(),
             turn: turn.0,
             message_seq,
@@ -576,7 +584,7 @@ impl Actor {
             stopped: false,
         });
         let mut batch = self.recorder.batch();
-        if batch.command(Command::Join { turn, join }, now_ms).is_err() {
+        if batch.reserve_fork(turn, message_seq, &join).is_err() {
             return no();
         }
         let mut out = Outputs::default();
@@ -1425,6 +1433,28 @@ impl Actor {
         }))
     }
 
+    pub(super) fn restore_fork_lane(&mut self) -> Result<(), ActorError> {
+        let Some(item) = self.recorder.log().find(kind::FORK_LANE)? else {
+            return Ok(());
+        };
+        let record: Record = serde_json::from_slice(&item.body).map_err(|error| {
+            ActorError::Corrupt(format!("log item {} is not a fork: {error}", item.seq))
+        })?;
+        if !record.broken && record.state == State::Open {
+            for asked in &record.asked {
+                if !asked.read
+                    && matches!(asked.stage, Stage::Waiting | Stage::Running)
+                    && let Some(join) = &asked.reservation
+                {
+                    self.recorder
+                        .restore_fork(TurnId(asked.turn), asked.message_seq, join);
+                }
+            }
+        }
+        self.fork.record = Some(record);
+        Ok(())
+    }
+
     /// Takes the fork up as the log has it, when the actor is opened: a turn of it that ran
     /// on is read up to where the log is and followed again.
     pub(super) fn fork_take_up(
@@ -1432,18 +1462,14 @@ impl Actor {
         out: &mut Outputs,
         now_ms: i64,
     ) -> Result<(), ActorError> {
-        let Some(item) = self.recorder.log().find(kind::FORK_LANE)? else {
+        let Some(record) = self.fork.record.as_ref() else {
             return Ok(());
         };
-        let record: Record = serde_json::from_slice(&item.body).map_err(|error| {
-            ActorError::Corrupt(format!("log item {} is not a fork: {error}", item.seq))
-        })?;
         let running = record
             .asked
             .iter()
             .find(|asked| asked.stage == Stage::Running)
             .map(|asked| (TurnId(asked.turn), asked.message_seq, asked.offset));
-        self.fork.record = Some(record);
         if let Some((turn, message_seq, offset)) = running {
             let message = self.message_at(message_seq)?;
             let name = attempt_of(turn_name(&message.id), FORK_ATTEMPT);
@@ -1515,13 +1541,6 @@ impl Actor {
         out: &mut Outputs,
         now_ms: i64,
     ) -> Result<(), ActorError> {
-        // Older Hosts marked the fork broken but left its unread joins reserved.
-        if let Some(mut record) = self.fork.record.clone().filter(|r| r.broken) {
-            let mut batch = self.recorder.batch();
-            give_back(&mut batch, &mut record, out, now_ms)?;
-            batch.commit()?;
-            self.fork.record = Some(record);
-        }
         self.fork_reconcile(out, now_ms)?;
         self.fork_next(out, now_ms)?;
         self.resume_deferred(out, now_ms)

@@ -1642,6 +1642,7 @@ impl Actor {
         )?;
         // A recovered spool can finish a turn while opening. Fence its next
         // launch before reading that spool, not after the agent is open.
+        actor.restore_fork_lane()?;
         actor.recorder.hold_for_transit(transit_held);
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
@@ -1721,6 +1722,7 @@ impl Actor {
     ) -> Result<Self, ActorError> {
         let (mut actor, _) = Self::read_books(profile, backend, log, now_ms, None, None, phases)?;
         phases.begin("held");
+        actor.restore_fork_lane()?;
         actor.read_held()?;
         phases.begin("notes");
         actor.read_turn_notes()?;

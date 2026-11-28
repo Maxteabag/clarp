@@ -4244,10 +4244,8 @@ async fn send_as(
         && member.record.session == "hazel-74f6"
         && admission == Admission::Queue
         && request.while_busy.as_deref().map(python::strip) != Some("after_turn")
-        && clarp_actor::Actor::fork_answers(&message)
-        && !message.text.trim_start().starts_with('/')
-        // An upload can be an ordinary document of any type.
-        && !message.text.split_whitespace().any(|word| word.contains("/uploads/"))
+        && minted.is_some()
+        && crate::conversation_forks::ordinary(&message)
         && crate::conversation_forks::may_fork(
             &member.record.backend,
             crate::chat_view::preference(&app.fleet.directory(), &member.record.agent_id),

@@ -369,7 +369,6 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
-        | AgentEvent::UnreadReleased { turn }
         | AgentEvent::Joined { turn, .. }
         | AgentEvent::JoinRead { turn, .. }
         | AgentEvent::JoinSettled { turn, .. }
@@ -398,6 +397,11 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
 }
 
 impl Recorder {
+    /// Reconstruct the projection from a committed fork lane at open or glance.
+    pub fn restore_fork(&mut self, turn: TurnId, seq: Seq, join: &crate::steering::Join) {
+        let _ = self.agent.reserve_fork(turn, seq, join);
+    }
+
     /// Opens an agent from its log: the state is whatever its history says.
     pub fn open(log: Box<dyn AgentLog>) -> Result<Self, JournalError> {
         let mut agent = Agent::new();
@@ -912,6 +916,19 @@ pub struct Batch<'a> {
 }
 
 impl Batch<'_> {
+    pub fn reserve_fork(
+        &mut self,
+        turn: TurnId,
+        seq: Seq,
+        join: &crate::steering::Join,
+    ) -> Result<(), Refusal> {
+        self.work.reserve_fork(turn, seq, join)
+    }
+
+    pub fn release_fork(&mut self, turn: TurnId, join: &crate::steering::Join) -> bool {
+        self.work.release_fork(turn, join)
+    }
+
     /// Decides a command against the agent as this batch has moved it, and adds its events.
     /// A command the agent refuses adds nothing: the refusal is returned and the batch stands.
     pub fn command(&mut self, command: Command, now_ms: i64) -> Result<(), Refusal> {

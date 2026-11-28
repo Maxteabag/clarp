@@ -50,6 +50,13 @@ pub(crate) fn may_fork(backend: &str, view: View, agent_id: &str, session: &str)
     backend == "claude" && view == View::Conversation && named(agent_id, session)
 }
 
+/// Ordinary typed or dictated words; all upload kinds stay on the file path.
+pub(crate) fn ordinary(message: &clarp_kernel::conversation::Message) -> bool {
+    clarp_actor::Actor::fork_answers(message)
+        && !message.text.trim_start().starts_with('/')
+        && !message.text.contains("/uploads/")
+}
+
 /// Puts `extra` (Claude Code settings, JSON) into the turn's arguments: into the `--settings`
 /// they have already, hook lists joined event by event, or as a `--settings` of its own. Claude
 /// Code reads one `--settings`: a fork's turn carries its edit guard there, and the Host's own

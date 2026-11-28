@@ -3800,13 +3800,17 @@ impl Worker {
         // conversation fork. A busy-send preference must not steer or cut the work.
         let conversation = matches!(
             &ask,
-            Ask::Send { admission: Admission::Queue, reservation: None, marks, .. } if marks.owner_admission
-        ) && crate::conversation_forks::may_fork(
-            &self.setup.record.backend,
-            chat_view(&self.setup),
-            &self.setup.record.agent_id,
-            &self.setup.record.session,
-        );
+            Ask::Send { message, admission: Admission::Queue, reservation: None, marks, while_busy, .. }
+                if message.origin.is_user_send() && marks.coordination.is_none()
+                    && !matches!(while_busy, Busy::Asked(WhileBusy::AfterTurn))
+                    && crate::conversation_forks::ordinary(message)
+        ) && self.setup.record.session == "hazel-74f6"
+            && crate::conversation_forks::may_fork(
+                &self.setup.record.backend,
+                chat_view(&self.setup),
+                &self.setup.record.agent_id,
+                &self.setup.record.session,
+            );
         // What the owner's send does while the agent works is read against the turn as its
         // spool says it is now (feature `send_while_busy`). A take-over is said direct from
         // here on, so that what holds the turn for the tool's own takeover lets it go first.

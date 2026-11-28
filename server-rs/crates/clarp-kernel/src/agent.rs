@@ -109,10 +109,6 @@ pub enum Command {
         turn: TurnId,
         join: Join,
     },
-    /// Release an unread fork reservation back to its place in the mailbox.
-    ReleaseUnread {
-        turn: TurnId,
-    },
     /// The live process echoed this follow-up.
     JoinRead {
         turn: TurnId,
@@ -339,9 +335,6 @@ pub enum AgentEvent {
     },
     TakeoverCleared {
         from: TurnId,
-    },
-    UnreadReleased {
-        turn: TurnId,
     },
     Joined {
         turn: TurnId,
@@ -1175,6 +1168,51 @@ impl Agent {
         })
     }
 
+    fn check_join(&self, turn: TurnId, join: &Join) -> Result<(), Refusal> {
+        if !self.can_join(turn, join)
+            || self.stop_released.range(..turn).next().is_some()
+            || (!join.together && !self.older_words_waiting(turn).is_empty())
+        {
+            return Err(Refusal::NotWaiting(turn));
+        }
+        Ok(())
+    }
+
+    /// The fork lane owns this reservation until its first read. Project it into
+    /// normal mailbox selection without recording an ordinary Joined event.
+    pub(super) fn reserve_fork(
+        &mut self,
+        turn: TurnId,
+        seq: u64,
+        join: &Join,
+    ) -> Result<(), Refusal> {
+        self.check_join(turn, join)?;
+        if !self.waiting().any(|q| q.id == turn && q.message_seq == seq) {
+            return Err(Refusal::NotWaiting(turn));
+        }
+        self.joins.insert(
+            turn,
+            FollowUp {
+                join: join.clone(),
+                message_seq: seq,
+                stage: Stage::Pending,
+            },
+        );
+        Ok(())
+    }
+
+    pub(super) fn release_fork(&mut self, turn: TurnId, join: &Join) -> bool {
+        if self
+            .joins
+            .get(&turn)
+            .is_some_and(|held| held.stage == Stage::Pending && held.join == *join)
+        {
+            self.joins.remove(&turn);
+            return true;
+        }
+        false
+    }
+
     fn can_join(&self, turn: TurnId, join: &Join) -> bool {
         self.moved.is_none()
             && self
@@ -1412,24 +1450,8 @@ impl Agent {
                 // No newer follow-up can jump a waiting send released by Stop, nor an older
                 // message of the user's that waits (issue 839). This is an admission rule, so
                 // a log that already recorded a join can still replay.
-                if !work.agent.can_join(turn, &join)
-                    || work.agent.stop_released.range(..turn).next().is_some()
-                    || (!join.together && !work.agent.older_words_waiting(turn).is_empty())
-                {
-                    return Err(Refusal::NotWaiting(turn));
-                }
+                work.agent.check_join(turn, &join)?;
                 work.record(AgentEvent::Joined { turn, join });
-            }
-            Command::ReleaseUnread { turn } => {
-                if !work
-                    .agent
-                    .joins
-                    .get(&turn)
-                    .is_some_and(|join| join.stage == Stage::Pending)
-                {
-                    return Err(Refusal::NotWaiting(turn));
-                }
-                work.record(AgentEvent::UnreadReleased { turn });
             }
             Command::JoinRead { turn } => {
                 if !work
@@ -1969,21 +1991,6 @@ impl Agent {
                 self.joins.clear();
                 self.mailbox.push_front(held);
                 self.waited.insert(*turn);
-                self.queue_revision += 1;
-            }
-            AgentEvent::UnreadReleased { turn } => {
-                if !self
-                    .joins
-                    .get(turn)
-                    .is_some_and(|join| join.stage == Stage::Pending)
-                {
-                    return Err(IllegalTransition {
-                        turn: *turn,
-                        state: "unreserved",
-                        event: "unread-released",
-                    });
-                }
-                self.joins.remove(turn);
                 self.queue_revision += 1;
             }
             AgentEvent::Joined { turn, join } => {
