@@ -68,8 +68,10 @@ def _backend_alias(value: str) -> str:
 INLINE_PROMPT_MAX = 60_000
 # helper_state -> the background job's end: reported and done are success. A Rust Host
 # shows a helper that reported mid-turn as running until that turn is over, so the job is
-# held through a progress message and ends with the reporting turn.
-JOB_END = {"reported": "finish", "done": "finish", "failed": "fail", "abandoned": "fail"}
+# held through a progress message and ends with the reporting turn. Archiving a
+# helper before it reports ends the watcher without marking the work complete.
+JOB_END = {"reported": "finish", "done": "finish", "failed": "fail", "abandoned": "fail",
+           "archived": "fail"}
 
 
 def _parent() -> str:
@@ -328,7 +330,7 @@ def fork(a: argparse.Namespace) -> int:
 
 def watch(name: str, helper: str, parent: str, *, poll_sec: float = POLL_SEC,
           sleep=time.sleep) -> int:
-    """Body of the watcher unit: hold the sub-agent job until the helper reports."""
+    """Hold the sub-agent job until the helper reports, ends, or is archived."""
     title = (DIR / f"{name}.title").read_text().strip()
     handle = _bg(parent, "job-upsert", f"sub-agent-{name}", "sub-agent", title, helper)
     if handle:
@@ -336,7 +338,10 @@ def watch(name: str, helper: str, parent: str, *, poll_sec: float = POLL_SEC,
     state, misses = "", 0
     while True:
         try:
-            state = str(_admin("agent", "helper-state", helper).get("helper_state") or "")
+            row = _admin("agent", "helper-state", helper)
+            state = str(row.get("helper_state") or "")
+            if row.get("archived_at") and state not in JOB_END:
+                state = "archived"
             misses = 0
         except AdminError as exc:
             # The Host restarting is normal; a helper that stays gone is not.

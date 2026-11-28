@@ -285,6 +285,9 @@ start, and the command exits 1.
    not say the queue is held. The helper agent stays until you mark it done or
    delete it.
 
+   A watcher exits when the Host says its helper is archived. If the helper
+   was still waiting to report, the job records that it was archived.
+
 ## When the user does not see the turn
 
 A turn another agent's message started is coordination: the user may choose to
