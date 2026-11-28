@@ -55,6 +55,7 @@ export global AgentDialogs {
     callback cancel();
 }
 
+// i18n-screen: rename contact
 // Rename the chat's contact; its session id (and so history and pairings)
 // stays. Enter renames.
 export component RenameAgentDialog inherits Modal {
@@ -64,19 +65,24 @@ export component RenameAgentDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 14px;
-        Text { text: "Rename contact"; color: Palette.text; font-size: 17 * Look.unit; }
+        // i18n: Rename contact dialog, title at the top: the dialog renames the agent contact that runs this chat
+        Text { text: @tr("Rename contact"); color: Palette.text; font-size: 17 * Look.unit; }
         field := Field {
-            placeholder-text: "Name";
+            // i18n: Rename contact dialog, placeholder of the text field where the contact's new name is typed (noun)
+            placeholder-text: @tr("Name");
             text <=> AgentDialogs.rename-name;
             enabled: !AgentDialogs.submitting;
-            accessible-label: "Name";
+            // i18n: Rename contact dialog, accessibility label of the field for the contact's new name (noun)
+            accessible-label: @tr("Name");
             accepted => { AgentDialogs.rename-submit(); }
             property <int> request: AgentDialogs.focus-request;
             changed request => { if (AgentDialogs.focus-target == "rename") { self.focus(); self.select-all(); } }
         }
         if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
             font-size: ChromeText.body;
-            text: AgentDialogs.error != "" ? AgentDialogs.error : "Not connected";
+            text: AgentDialogs.error != "" ? AgentDialogs.error
+                // i18n: Rename contact dialog, warning line shown when the app has no connection to the Host, so renaming cannot be done
+                : @tr("Not connected");
             color: Palette.warning;
             wrap: word-wrap;
         }
@@ -86,11 +92,16 @@ export component RenameAgentDialog inherits Modal {
             alignment: end;
             IconButton {
                 icon: @image-url("icons/rail-close.svg");
-                label: "Cancel";
+                // i18n: Rename contact dialog, label of the icon button that closes the dialog without renaming (verb)
+                label: @tr("Cancel");
                 clicked => { AgentDialogs.cancel(); }
             }
             Button {
-                text: AgentDialogs.submitting ? "Renaming…" : "Rename · Enter";
+                text: AgentDialogs.submitting
+                    // i18n: Rename contact dialog, primary button text while the rename is being saved (in progress)
+                    ? @tr("Renaming…")
+                    // i18n: Rename contact dialog, primary button (verb: rename the contact); "Enter" is the keyboard key that does the same, keep it as the key's name
+                    : @tr("Rename · Enter");
                 primary: true;
                 enabled: !AgentDialogs.submitting && AgentDialogs.connected && AgentDialogs.rename-name != "";
                 clicked => { AgentDialogs.rename-submit(); }
@@ -140,6 +151,7 @@ component Radio inherits Rectangle {
     }
 }
 
+// i18n-screen: assign contact
 // Assign a contact to a chat: automatically, a chosen idle contact, or a
 // new one by name. Up/Down change the choice, Enter assigns.
 export component AssignAgentDialog inherits Modal {
@@ -163,15 +175,18 @@ export component AssignAgentDialog inherits Modal {
         VerticalLayout {
             padding: 20px;
             spacing: 10px;
-            Text { text: "Assign contact"; color: Palette.text; font-size: 18 * Look.unit; }
+            // i18n: Assign contact dialog, title at the top: the dialog picks which agent contact runs this chat (verb phrase)
+            Text { text: @tr("Assign contact"); color: Palette.text; font-size: 18 * Look.unit; }
             Radio {
-                text: "Automatic";
+                // i18n: Assign contact dialog, radio option: Clarp picks a contact by itself
+                text: @tr("Automatic");
                 checked: AgentDialogs.assign-mode == "auto";
                 enabled: !AgentDialogs.submitting;
                 clicked => { AgentDialogs.assign-mode-chosen("auto"); }
             }
             Radio {
-                text: "Choose contact";
+                // i18n: Assign contact dialog, radio option: the user picks an existing contact from a list (verb phrase)
+                text: @tr("Choose contact");
                 checked: AgentDialogs.assign-mode == "choose";
                 enabled: !AgentDialogs.submitting;
                 clicked => { AgentDialogs.assign-mode-chosen("choose"); }
@@ -180,30 +195,37 @@ export component AssignAgentDialog inherits Modal {
                 model: AgentDialogs.assign-contacts;
                 current-index <=> AgentDialogs.assign-contact;
                 enabled: !AgentDialogs.submitting;
-                accessible-label: "Contact";
+                // i18n: Assign contact dialog, accessibility label of the drop-down list of contacts to choose from (noun)
+                accessible-label: @tr("Contact");
             }
             if AgentDialogs.assign-mode == "choose" && AgentDialogs.assign-contacts.length == 0: Text {
                 font-size: ChromeText.body;
-                text: "No contacts available";
+                // i18n: Assign contact dialog, note under "Choose contact" when there is no contact to choose
+                text: @tr("No contacts available");
                 color: Palette.muted;
                 wrap: word-wrap;
             }
             Radio {
-                text: "New contact";
+                // i18n: Assign contact dialog, radio option: create a new contact with a typed name (noun phrase)
+                text: @tr("New contact");
                 checked: AgentDialogs.assign-mode == "create";
                 enabled: !AgentDialogs.submitting;
                 clicked => { AgentDialogs.assign-mode-chosen("create"); }
             }
             if AgentDialogs.assign-mode == "create": Field {
-                placeholder-text: "Name";
+                // i18n: Assign contact dialog, placeholder of the text field for the new contact's name (noun)
+                placeholder-text: @tr("Name");
                 text <=> AgentDialogs.assign-name;
                 enabled: !AgentDialogs.submitting;
-                accessible-label: "New contact name";
+                // i18n: Assign contact dialog, accessibility label of the field for the new contact's name
+                accessible-label: @tr("New contact name");
                 init => { if (AgentDialogs.focus-target == "assign") { self.focus(); } }
             }
             if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
                 font-size: ChromeText.body;
-                text: AgentDialogs.error != "" ? AgentDialogs.error : "Not connected";
+                text: AgentDialogs.error != "" ? AgentDialogs.error
+                    // i18n: Assign contact dialog, warning line shown when the app has no connection to the Host, so assigning cannot be done
+                    : @tr("Not connected");
                 color: Palette.warning;
                 wrap: word-wrap;
             }
@@ -213,12 +235,17 @@ export component AssignAgentDialog inherits Modal {
                 alignment: end;
                 IconButton {
                     icon: @image-url("icons/rail-close.svg");
-                    label: "Cancel";
+                    // i18n: Assign contact dialog, label of the icon button that closes the dialog without assigning (verb)
+                    label: @tr("Cancel");
                     enabled: !AgentDialogs.submitting;
                     clicked => { AgentDialogs.cancel(); }
                 }
                 Button {
-                    text: AgentDialogs.submitting ? "Assigning…" : "Assign";
+                    text: AgentDialogs.submitting
+                        // i18n: Assign contact dialog, primary button text while the contact is being assigned (in progress)
+                        ? @tr("Assigning…")
+                        // i18n: Assign contact dialog, primary button (verb: assign the chosen contact to this chat)
+                        : @tr("Assign");
                     primary: true;
                     enabled: !AgentDialogs.submitting && AgentDialogs.connected
                         && (AgentDialogs.assign-mode == "auto"
@@ -230,6 +257,7 @@ export component AssignAgentDialog inherits Modal {
     }
 }
 
+// i18n-screen: queued messages
 component QueueRow inherits Rectangle {
     in property <QueuedTurn> item;
     in property <bool> loading;
@@ -246,7 +274,8 @@ component QueueRow inherits Rectangle {
             wrap: word-wrap;
             font-size: 12 * Look.unit;
             min-height: 54px;
-            accessible-label: "Queued message";
+            // i18n: Queued messages dialog, accessibility label of the editable text box holding one message waiting to be sent (noun)
+            accessible-label: @tr("Queued message");
         }
         HorizontalLayout {
             spacing: 4px;
@@ -260,20 +289,23 @@ component QueueRow inherits Rectangle {
             }
             IconButton {
                 icon: @image-url("icons/check.svg");
-                label: "Save";
+                // i18n: Queued messages dialog, one message's icon button: saves the edited text of the queued message (verb)
+                label: @tr("Save");
                 enabled: !root.loading && editor.text != "" && editor.text != root.item.text;
                 clicked => { AgentDialogs.queue-save(root.item.id, editor.text); }
             }
             IconButton {
                 icon: @image-url("icons/send.svg");
-                label: "Send now";
+                // i18n: Queued messages dialog, one message's icon button: sends this queued message at once instead of waiting (verb)
+                label: @tr("Send now");
                 tint: Palette.accent;
                 enabled: !root.loading;
                 clicked => { AgentDialogs.queue-send(root.item.id); }
             }
             IconButton {
                 icon: @image-url("icons/trash.svg");
-                label: "Remove queued message";
+                // i18n: Queued messages dialog, one message's icon button: deletes this message from the queue (verb)
+                label: @tr("Remove queued message");
                 tint: Palette.danger;
                 enabled: !root.loading;
                 clicked => { AgentDialogs.queue-delete(root.item.id); }
@@ -301,14 +333,18 @@ export component QueueDialog inherits Modal {
                 spacing: 2px;
                 horizontal-stretch: 1;
                 Text {
-                    text: "QUEUED MESSAGES";
+                    // i18n: Queued messages dialog, title at the top, written in capitals (noun: the messages waiting to be sent to the agent)
+                    text: @tr("QUEUED MESSAGES");
                     color: Palette.text;
                     font-size: 14 * Look.unit;
                     font-weight: 600;
                     letter-spacing: 1.2px;
                 }
                 Text {
-                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? " · paused" : "");
+                    text: AgentDialogs.queue-paused
+                        // i18n: Queued messages dialog, subtitle under the title when the queue is paused; {} is the chat's name
+                        ? @tr("{} · paused", AgentDialogs.queue-title)
+                        : AgentDialogs.queue-title;
                     color: AgentDialogs.queue-paused ? Palette.warning : Palette.muted;
                     font-size: 10 * Look.unit;
                 }
@@ -316,12 +352,14 @@ export component QueueDialog inherits Modal {
             if AgentDialogs.queue-loading: Text { font-size: ChromeText.body; text: "…"; color: Palette.muted; vertical-alignment: center; }
             IconButton {
                 icon: @image-url("icons/refresh.svg");
-                label: "Reload";
+                // i18n: Queued messages dialog, icon button that loads the queue again from the Host (verb)
+                label: @tr("Reload");
                 clicked => { AgentDialogs.queue-refresh(); }
             }
             IconButton {
                 icon: @image-url("icons/rail-close.svg");
-                label: "Close";
+                // i18n: Queued messages dialog, icon button that closes the dialog (verb)
+                label: @tr("Close");
                 clicked => { AgentDialogs.cancel(); }
             }
         }
@@ -340,7 +378,8 @@ export component QueueDialog inherits Modal {
                 }
             }
             if AgentDialogs.queue-items.length == 0 && !AgentDialogs.queue-loading: Text {
-                text: "No queued messages";
+                // i18n: Queued messages dialog, empty state when no message is waiting
+                text: @tr("No queued messages");
                 color: Palette.faint;
                 font-size: 11 * Look.unit;
             }

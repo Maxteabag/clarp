@@ -12,6 +12,8 @@
 
 import { ACTION_KEY, footnote, formatScaled, held, submission, words } from '@core/render-spec.js';
 import { drawChart } from './render-spec-chart.js';
+import { t } from '../stores/i18n.svelte.js';
+import { formatDateTime } from './i18n/format.js';
 
 function el(tag, cls, text) {
   const node = document.createElement(tag);
@@ -24,7 +26,7 @@ function caption(text, key, ctx) {
   ctx.captions[key] = text;
   const label = el('div', 'rs-caption', text);
   if (ctx.form.required.has(key) && !ctx.readOnly) {
-    label.append(el('span', 'rs-required', 'Required'));
+    label.append(el('span', 'rs-required', t('form.required')));
   }
   return label;
 }
@@ -35,7 +37,7 @@ function answer(label, value, ctx, key, cls = '') {
   const group = el('div', 'rs-field rs-answer ' + cls);
   const shown = el('div', 'rs-value');
   shown.dataset.rsKey = key;
-  if (value === '' || value == null) { shown.textContent = 'No answer'; shown.classList.add('rs-empty'); }
+  if (value === '' || value == null) { shown.textContent = t('form.no_answer'); shown.classList.add('rs-empty'); }
   else shown.textContent = value;
   group.append(caption(label, key, ctx), shown);
   return group;
@@ -61,7 +63,7 @@ const DRAW = {
     const node = el('p', 'rs-text');
     if (element.props.stateKey) {
       const key = element.props.stateKey;
-      ctx.syncs.push(() => { node.textContent = words(ctx.values[key]); });
+      ctx.syncs.push(() => { node.textContent = words(ctx.values[key], t); });
     } else {
       node.textContent = element.props.text;
     }
@@ -100,7 +102,7 @@ const DRAW = {
     const { label, key } = element.props;
     if (ctx.readOnly) {
       const v = ctx.values[key];
-      return answer(label, typeof v === 'boolean' ? (v ? 'Yes' : 'No') : '', ctx, key, 'rs-toggle-answer');
+      return answer(label, typeof v === 'boolean' ? t(v ? 'form.yes' : 'form.no') : '', ctx, key, 'rs-toggle-answer');
     }
     const row = el('label', 'rs-toggle');
     const input = el('input', 'rs-switch');
@@ -138,7 +140,7 @@ const DRAW = {
     });
     group.append(caption(label, key, ctx), list);
     if (ctx.readOnly && !options.some(o => o.value === ctx.values[key])) {
-      group.append(el('div', 'rs-value rs-empty', 'No answer'));
+      group.append(el('div', 'rs-value rs-empty', t('form.no_answer')));
     }
     return group;
   },
@@ -169,7 +171,7 @@ const DRAW = {
         const td = el('td', column.align === 'end' ? 'rs-end' : '');
         if (typeof value === 'boolean') {
           td.textContent = value ? '✓' : '–';
-          td.setAttribute('aria-label', value ? 'Yes' : 'No');
+          td.setAttribute('aria-label', t(value ? 'form.yes' : 'form.no'));
           td.classList.add('rs-bool');
         } else if (typeof value === 'number') {
           td.textContent = formatScaled(value, column.decimals);
@@ -248,9 +250,9 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
   confirmBar.setAttribute('role', 'alertdialog');
   confirmBar.hidden = true;
   const confirmText = el('div', 'rs-confirm-text');
-  const confirmCancel = el('button', 'rs-action rs-secondary', 'Cancel');
+  const confirmCancel = el('button', 'rs-action rs-secondary', t('form.cancel'));
   confirmCancel.type = 'button';
-  const confirmOk = el('button', 'rs-action', 'OK');
+  const confirmOk = el('button', 'rs-action', t('form.ok'));
   confirmOk.type = 'button';
   const confirmRow = el('div', 'rs-confirm-row');
   confirmRow.append(confirmCancel, confirmOk);
@@ -306,7 +308,7 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
     if (!result.ready) for (const g of result.gaps) if (g.gap === 'too_short') short[g.key] = g.limit;
     for (const [key, node] of Object.entries(ctx.fieldNotes)) {
       node.hidden = !(key in short) || ctx.readOnly;
-      if (key in short) node.textContent = `At least ${short[key]} characters.`;
+      if (key in short) node.textContent = t('form.at_least', { count: short[key] });
     }
     submit.hidden = ctx.readOnly;
     submit.disabled = !result.ready || sending || ctx.readOnly || closed;
@@ -321,7 +323,8 @@ export function mountForm(host, { form, values, accepted = null, onSubmit, onVal
       button.classList.toggle('not-chosen', ctx.readOnly && !was);
       if (ctx.readOnly) button.setAttribute('aria-pressed', was ? 'true' : 'false');
     }
-    line.textContent = footnote({ form, values: ctx.values, accepted, note, closed, captions: ctx.captions });
+    line.textContent = footnote({ form, values: ctx.values, accepted, note, closed, captions: ctx.captions,
+      tr: t, formatWhen: ms => formatDateTime(ms) });
     line.hidden = !line.textContent;
   }
 

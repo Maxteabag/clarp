@@ -2988,6 +2988,7 @@ impl Worker {
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
         let telling = self.setup.telling.clone();
+        let legacy_agy = self.setup.record.backend == clarp_backend::LEGACY_AGY;
         let (mut actor, mut out) = Actor::open_with_teams(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
@@ -3004,6 +3005,7 @@ impl Worker {
             } else {
                 None
             },
+            legacy_agy,
         )
         .map_err(|error| error.to_string())?;
         // The agent's log changed its tool, and its record still says the tool it changed
@@ -3033,7 +3035,8 @@ impl Worker {
         }
         // A re-open in this process must keep an active Transit fenced. Otherwise the
         // journal's waiting messages can safely go on using the recorded backend.
-        let doing_transit = crate::agent_transit::holds_mailbox(&self.setup.record.agent_id);
+        let doing_transit =
+            legacy_agy || crate::agent_transit::holds_mailbox(&self.setup.record.agent_id);
         out.absorb(
             actor
                 .hold_for_transit(doing_transit, self.now_ms())
@@ -3369,6 +3372,22 @@ impl Worker {
             let _ = answer.send(Err(unavailable(&why)));
             return Ok(());
         }
+        if actor.backend_id() != change.from {
+            let refused = crate::agent_transit::Refused::Failed {
+                stage: "switching",
+                why: "the agent already changed backend".into(),
+            };
+            let _ = answer.send(Ok(Err(refused)));
+            return Ok(());
+        }
+        let current = change.preserve_selection.then(|| {
+            let mut current = change.clone();
+            current.model.clone_from(&self.setup.record.model);
+            current.effort.clone_from(&self.setup.record.effort);
+            current.shown_as.1 = non_empty(&current.model).unwrap_or_else(|| "default".into());
+            current
+        });
+        let change = current.as_ref().unwrap_or(change);
         let Some(backend) = clarp_backend::by_id(&change.backend) else {
             let refused = crate::agent_transit::Refused::Failed {
                 stage: "switch",
@@ -3875,6 +3894,7 @@ impl Worker {
             Ask::Artifact { want, answer } => return self.handle_artifact(&want, answer),
             Ask::ChangeTool { change, answer } => return self.handle_change_tool(&change, answer),
             Ask::TransitHold { held, answer } => {
+                let held = held || self.setup.record.backend == clarp_backend::LEGACY_AGY;
                 let now = self.now_ms();
                 let Some(actor) = self.actor.as_mut() else {
                     let _ = answer.send(Err(Unavailable::new("the agent is not open".to_string())));

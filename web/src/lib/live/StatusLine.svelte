@@ -8,6 +8,7 @@
   import { statusFor } from '../../stores/app.svelte.js';
   import { PRIMARY, unheard } from '../../stores/reach.svelte.js';
   import { stopAgentTurn } from '../../stores/send.svelte.js';
+  import { t } from '../../stores/i18n.svelte.js';
 
   let { session } = $props();
 
@@ -18,7 +19,7 @@
     ? rosterActivity(session) || activityFromStatus(statusFor(session))
     : activityFromStatus(statusFor(session)));
   let target = $derived.by(() => {
-    const line = statusLine(activity, { skewMs });
+    const line = statusLine(activity, { skewMs, tr: t });
     if (!line) return null;
     const { time, ...rest } = line;
     return rest;
@@ -57,14 +58,14 @@
   <div class="status-line {shown.state}" role="status" aria-live="polite">
     <span class="sl-glyph" aria-hidden="true">{shown.state === 'tool' ? '●' : '◌'}</span>
     {#if shown.itemId}
-      <button class="sl-text sl-link" type="button" title="Show it" onclick={reveal}>{shown.text}</button>
+      <button class="sl-text sl-link" type="button" title={t('live.show_it')} onclick={reveal}>{shown.text}</button>
     {:else}
       <span class="sl-text">{shown.text}</span>
     {/if}
     {#if shown.since}<span class="sl-time" bind:this={timeEl}></span>{/if}
     {#if shown.more}<span class="sl-more">{shown.more}</span>{/if}
     {#if shown.interrupt}
-      <button class="sl-stop" type="button" aria-label="Interrupt" title="Interrupt (Esc)"
+      <button class="sl-stop" type="button" aria-label={t('live.interrupt')} title={t('live.interrupt_tip')}
               onclick={() => stopAgentTurn(session)}>■</button>
     {/if}
   </div>

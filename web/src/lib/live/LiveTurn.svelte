@@ -9,6 +9,8 @@
   import LiveToolRow from './LiveToolRow.svelte';
   import TurnNotice from './TurnNotice.svelte';
   import { isOpen, toggle } from './expanded.svelte.js';
+  import { t } from '../../stores/i18n.svelte.js';
+  import { formatDuration } from '../i18n/format.js';
 
   // `last`: this part is the one the turn ends in (a turn split at a steer draws its
   // fold button and error once, there); an unsplit turn is its own last part.
@@ -27,16 +29,16 @@
     return () => clearInterval(id);
   });
 
-  let rows = $derived(liveRows(items, { explanations, now, skewMs: liveState.skewMs || 0 }));
+  let rows = $derived(liveRows(items, { explanations, now, skewMs: liveState.skewMs || 0, tr: t, duration: formatDuration }));
   // The whole turn's rows, read only by the part the turn ends in and only when the turn
   // was split: whether any part's work is folded decides its button.
   let wholeRows = $derived.by(() => {
     // Only a settled turn folds; a running one must not pay for this on every live event.
     if (!last || !(liveState.turn && liveState.turn.ended_at_ms)) return null;
     const all = currentTurnItems(liveState);
-    return all.length === items.length ? null : liveRows(all, { explanations, now, skewMs: liveState.skewMs || 0 });
+    return all.length === items.length ? null : liveRows(all, { explanations, now, skewMs: liveState.skewMs || 0, tr: t, duration: formatDuration });
   });
-  let fold = $derived(partFold(liveState.turn, rows, { last, wholeRows }));
+  let fold = $derived(partFold(liveState.turn, rows, { last, wholeRows, tr: t, duration: formatDuration }));
   let foldId = $derived(`fold:${liveState.turn ? liveState.turn.turn_id : ''}`);
   let foldOpen = $derived(isOpen(foldId));
   let shown = $derived(!fold || foldOpen ? rows : fold.visible);
@@ -91,13 +93,13 @@
     {:else if row.type === 'diff' && row.item.diff}
       <div class="lv-tool completed lv-turn-diff" data-item-id={row.id}>
         <div class="lv-head"><span class="lv-dot" aria-hidden="true"></span>
-          <span class="lv-verb">Changed</span>
-          <span class="lv-label">{(row.item.diff.files || []).length} files</span>
+          <span class="lv-verb">{t('live.changed')}</span>
+          <span class="lv-label">{t('live.changed_files', { count: (row.item.diff.files || []).length })}</span>
           <span class="lv-diff"><span class="add">+{row.item.diff.added || 0}</span> <span class="del">−{row.item.diff.removed || 0}</span></span>
         </div>
       </div>
     {:else if row.type === 'compaction'}
-      <div class="lv-divider" data-item-id={row.id}>{row.running ? 'Compacting context…' : 'Context compacted'}</div>
+      <div class="lv-divider" data-item-id={row.id}>{row.running ? t('live.compacting_context') : t('live.context_compacted')}</div>
     {/if}
   {/each}
   {#if fold && fold.error}

@@ -75,3 +75,8 @@ export function setLanguage(choice) {
 export function t(key, params) {
   return translate(i18n.locale, dict, en, key, params);
 }
+
+/** Whether the language shown has its own text for `key` (English only when English is shown). */
+export function hasOwn(key) {
+  return dict?.[key] != null;
+}

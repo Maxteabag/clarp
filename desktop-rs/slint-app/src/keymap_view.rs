@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 
+use clarp_core::tr;
 use slint::{ModelRc, VecModel};
 
 use crate::keymap::{self, CONTEXTS, Refusal};
@@ -42,11 +43,18 @@ fn window_ms(app: &App) -> std::time::Duration {
     keymap::double_press_window(app.engine.borrow().settings().get("keymap/doublePressMs").and_then(serde_json::Value::as_i64))
 }
 
-fn filtered(filter: &str) -> Vec<(&'static str, &'static str)> {
+/// The actions `filter` finds: by their label in the app's language, by
+/// their English command name, or by their id.
+fn filtered(filter: &str) -> Vec<(&'static str, String)> {
     let filter = filter.to_lowercase();
     keymap::actions()
         .into_iter()
-        .filter(|(action, label)| filter.is_empty() || label.to_lowercase().contains(&filter) || action.contains(&filter.replace(' ', "-")))
+        .filter(|(action, label)| {
+            filter.is_empty()
+                || label.to_lowercase().contains(&filter)
+                || action.contains(&filter.replace(' ', "-"))
+                || crate::catalogue::find(action).is_some_and(|e| e.label.to_lowercase().contains(&filter))
+        })
         .collect()
 }
 
@@ -86,7 +94,7 @@ pub fn render(app: &App, window: &AppWindow) {
                 let keys = keymap::keys_in(context, action, &overrides);
                 KeymapRow {
                     action: (*action).into(),
-                    label: (*label).into(),
+                    label: label.as_str().into(),
                     keys: if keys.is_empty() { "—".into() } else { keys.iter().map(|k| keymap::display(k)).collect::<Vec<_>>().join("  ·  ").into() },
                     custom: keymap::customised(&overrides, action, context),
                     current: index == editor.current,
@@ -95,7 +103,8 @@ pub fn render(app: &App, window: &AppWindow) {
             .collect();
         window.set_keymap_rows(ModelRc::new(VecModel::from(rows)));
         window.set_keymap_context(keymap::context_name(context).into());
-        window.set_keymap_count(format!("{} of {}", (editor.current + 1).min(actions.len()), actions.len()).into());
+        // i18n: key-binding editor, the position of the current action in the list; {0} its number, {1} how many actions are listed
+        window.set_keymap_count(tr!("{0} of {1}", (editor.current + 1).min(actions.len()), actions.len()).into());
         window.set_keymap_filter(if editor.filtering || !editor.filter.is_empty() { format!("/{}", editor.filter) } else { String::new() }.into());
         window.set_keymap_status(editor.status.clone().into());
         window.set_keymap_error(editor.error.clone().into());
@@ -106,35 +115,72 @@ pub fn render(app: &App, window: &AppWindow) {
 /// The shortcut bar while the editor is open: only the keys that do
 /// something now.
 pub fn hints(app: &App, window: &AppWindow) -> Vec<(String, String)> {
-    let pair = |k: &str, l: &str| (k.to_owned(), l.to_owned());
+    let pair = |k: &str, l: String| (k.to_owned(), l);
     if window.get_keymap_json_focused() {
-        return vec![pair("Esc", "Back to the actions")];
+        // i18n: key-binding editor, shortcut bar while the profile JSON is edited: Esc goes back to the list of actions
+        return vec![pair("Esc", tr!("Back to the actions"))];
     }
     let overrides = crate::commands::overrides(app);
     STATE.with(|s| {
         let editor = s.borrow();
         if editor.capturing {
-            return vec![pair("", "Press the key, twice quickly for a double press"), pair("Esc", "Cancel")];
+            return vec![
+                // i18n: key-binding editor, shortcut bar while waiting for the key to bind; pressing it twice quickly binds a double press
+                pair("", tr!("Press the key, twice quickly for a double press")),
+                // i18n: key-binding editor, shortcut bar: Esc cancels (verb)
+                pair("Esc", tr!("verb" => "Cancel")),
+            ];
         }
         if editor.clash.is_some() {
-            return vec![pair("Enter", "Take it over"), pair("Esc", "Keep it there")];
+            return vec![
+                // i18n: key-binding editor, shortcut bar when the key belongs to another action: Enter moves it to this action
+                pair("Enter", tr!("Take it over")),
+                // i18n: key-binding editor, shortcut bar when the key belongs to another action: Esc leaves it with that action
+                pair("Esc", tr!("Keep it there")),
+            ];
         }
         if editor.deleting {
-            return vec![pair("1-9", "Delete that key"), pair("Esc", "Cancel")];
+            return vec![
+                // i18n: key-binding editor, shortcut bar while choosing which key to delete by its number
+                pair("1-9", tr!("Delete that key")),
+                // i18n: key-binding editor, shortcut bar: Esc cancels (verb)
+                pair("Esc", tr!("verb" => "Cancel")),
+            ];
         }
         if editor.filtering {
-            return vec![pair("Enter", "Done"), pair("Esc", "Clear")];
+            return vec![
+                // i18n: key-binding editor, shortcut bar while typing a filter: Enter ends the filtering (OS term "Done")
+                pair("Enter", tr!("Done")),
+                // i18n: key-binding editor, shortcut bar while typing a filter: Esc empties the filter (verb)
+                pair("Esc", tr!("verb" => "Clear")),
+            ];
         }
         let context = context_of(&editor);
         let action = current_action(&editor);
-        let mut out = vec![pair("↑↓", "Action"), pair("←→", "Context"), pair("Enter", "Add key")];
+        let mut out = vec![
+            // i18n: key-binding editor, shortcut bar: the arrows move between actions (noun)
+            pair("↑↓", tr!("Action")),
+            // i18n: key-binding editor, shortcut bar: the arrows move between key contexts, where a key works (noun)
+            pair("←→", tr!("Context")),
+            // i18n: key-binding editor, shortcut bar: Enter adds a key to the action (verb phrase)
+            pair("Enter", tr!("Add key")),
+        ];
         if action.is_some_and(|a| !keymap::keys_in(context, a, &overrides).is_empty()) {
-            out.push(pair("Del", "Delete key"));
+            // i18n: key-binding editor, shortcut bar: Del removes a key from the action (verb phrase)
+            out.push(pair("Del", tr!("Delete key")));
         }
         if action.is_some_and(|a| keymap::customised(&overrides, a, context)) {
-            out.push(pair("R", "Reset"));
+            // i18n: key-binding editor, shortcut bar: R puts the action's default keys back (verb)
+            out.push(pair("R", tr!("verb" => "Reset")));
         }
-        out.extend([pair("/", "Find"), pair("Tab", "Profile JSON"), pair("Esc", "Close")]);
+        out.extend([
+            // i18n: key-binding editor, shortcut bar: / filters the actions (verb)
+            pair("/", tr!("verb" => "Find")),
+            // i18n: key-binding editor, shortcut bar: Tab edits the key bindings as JSON text (noun: the profile as JSON)
+            pair("Tab", tr!("Profile JSON")),
+            // i18n: key-binding editor, shortcut bar: Esc closes the editor (verb)
+            pair("Esc", tr!("verb" => "Close")),
+        ]);
         out
     })
 }
@@ -158,9 +204,10 @@ fn commit(app: &App, window: &AppWindow, key: &str) {
     let (status, error, clash) = match keymap::add(&crate::commands::overrides(app), action, context, key) {
         Ok(next) => {
             save(app, window, &next);
-            (format!("{} runs {} in {}", keymap::display(key), label(action), keymap::context_name(context)), String::new(), None)
+            (runs(key, action, context), String::new(), None)
         }
-        Err(refusal @ Refusal::Clash(_)) => (String::new(), format!("{refusal}. Enter takes it over, Esc keeps it there."), Some(key.to_owned())),
+        // i18n: key-binding editor, error when the key belongs to another action; {} is "<key> already runs <action> in <context>"; Enter and Esc are keys
+        Err(refusal @ Refusal::Clash(_)) => (String::new(), tr!("{}. Enter takes it over, Esc keeps it there.", refusal), Some(key.to_owned())),
         Err(refusal) => (String::new(), refusal.to_string(), None),
     };
     STATE.with(|s| {
@@ -170,8 +217,14 @@ fn commit(app: &App, window: &AppWindow, key: &str) {
     render(app, window);
 }
 
-fn label(action: &str) -> &'static str {
-    keymap::actions().into_iter().find(|(a, _)| *a == action).map_or("", |(_, l)| l)
+fn label(action: &str) -> String {
+    keymap::actions().into_iter().find(|(a, _)| *a == action).map_or_else(String::new, |(_, l)| l)
+}
+
+/// The status once a key is bound: "<key> runs <action> in <context>".
+fn runs(key: &str, action: &str, context: &str) -> String {
+    // i18n: key-binding editor, status after a key is bound; {0} the key, {1} the action's name, {2} the key context's name
+    tr!("{0} runs {1} in {2}", keymap::display(key), label(action), keymap::context_name(context))
 }
 
 /// A key while the editor is open: true when the editor used it.
@@ -196,7 +249,8 @@ pub fn key(app: &App, window: &AppWindow, text: &str, chord: &str, plain: bool) 
             }
             None => {
                 editor.captured = Some(chord.to_owned());
-                editor.status = format!("{}… press it again for {}", keymap::display(chord), keymap::display(&format!("{chord} {chord}")));
+                // i18n: key-binding editor, status after the first press; {0} the key pressed, {1} the double press of it (e.g. "Right ×2")
+                editor.status = tr!("{0}… press it again for {1}", keymap::display(chord), keymap::display(&format!("{chord} {chord}")));
                 CAPTURE_TIMER.with(|timer| {
                     timer.start(slint::TimerMode::SingleShot, window_ms(app), || {
                         let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
@@ -219,7 +273,7 @@ pub fn key(app: &App, window: &AppWindow, text: &str, chord: &str, plain: bool) 
                 match keymap::take_over(&overrides, action, context_of(&editor), &key) {
                     Ok(next) => {
                         save(app, window, &next);
-                        editor.status = format!("{} runs {} in {}", keymap::display(&key), label(action), keymap::context_name(context_of(&editor)));
+                        editor.status = runs(&key, action, context_of(&editor));
                     }
                     Err(error) => editor.error = error,
                 }
@@ -265,7 +319,8 @@ pub fn key(app: &App, window: &AppWindow, text: &str, chord: &str, plain: bool) 
             "Left" => editor.context = (editor.context + CONTEXTS.len() - 1) % CONTEXTS.len(),
             "Return" | "A" if action.is_some() => {
                 editor.capturing = true;
-                editor.status = format!("Press a key for {} in {}", label(action.unwrap_or_default()), keymap::context_name(context));
+                // i18n: key-binding editor, status while waiting for a key; {0} the action's name, {1} the key context's name
+                editor.status = tr!("Press a key for {0} in {1}", label(action.unwrap_or_default()), keymap::context_name(context));
             }
             "Delete" | "D" => {
                 if let Some(action) = action {
@@ -276,7 +331,8 @@ pub fn key(app: &App, window: &AppWindow, text: &str, chord: &str, plain: bool) 
                         many => {
                             editor.deleting = true;
                             let list: Vec<String> = many.iter().take(9).enumerate().map(|(i, k)| format!("{} {}", i + 1, keymap::display(k))).collect();
-                            editor.status = format!("Delete which? {}", list.join(" · "));
+                            // i18n: key-binding editor, asks which of the action's keys to delete; {} lists them as "1 Ctrl+J · 2 N"
+                            editor.status = tr!("Delete which? {}", list.join(" · "));
                         }
                     }
                 }
@@ -284,7 +340,8 @@ pub fn key(app: &App, window: &AppWindow, text: &str, chord: &str, plain: bool) 
             "R" => {
                 if let Some(action) = action.filter(|a| keymap::customised(&overrides, a, context)) {
                     save(app, window, &keymap::reset(&overrides, action, context));
-                    editor.status = format!("{} is back to its default keys in {}", label(action), keymap::context_name(context));
+                    // i18n: key-binding editor, status after a reset; {0} the action's name, {1} the key context's name
+                    editor.status = tr!("{0} is back to its default keys in {1}", label(action), keymap::context_name(context));
                 }
             }
             "/" => {

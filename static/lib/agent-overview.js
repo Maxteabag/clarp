@@ -1,6 +1,10 @@
 // Pure view-model builder for the responsive Agents control surface.
 // Session identity is authoritative: two chats with the same Contact name are
 // two rows, while a Contact without a live chat appears once in Contacts.
+// Words come from the web app's catalog through `tr` (default English; web/docs/i18n.md).
+
+import { english } from './i18n-en.js';
+import { previewLine } from './chat-preview.js';
 
 function text(value) {
   return String(value || '').trim();
@@ -18,6 +22,9 @@ function matches(row, query) {
   ].some(value => text(value).toLocaleLowerCase().includes(query));
 }
 
+/** Agent states a chat card names in words of its own (overview.state.<state>); others show as sent. */
+const STATES = new Set(['thinking', 'responding', 'tool', 'compacting', 'working', 'idle']);
+
 function sortChats(a, b) {
   if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
   if (a.busy !== b.busy) return a.busy ? -1 : 1;
@@ -28,7 +35,7 @@ function sortChats(a, b) {
 
 export function buildAgentOverview({
   agentsBySession = {}, personas = [], roster = [], availableSessions = [],
-  currentSession = '', query = '', isUnread = () => false,
+  currentSession = '', query = '', isUnread = () => false, tr = english,
 } = {}) {
   const normalizedQuery = text(query).toLocaleLowerCase();
   const personaByName = new Map(
@@ -47,7 +54,9 @@ export function buildAgentOverview({
     const unread = !!isUnread(session);
     const statusText = text(agent.status_text);
     const activity = text(agent.activity_summary || agent.activity?.summary);
-    const preview = text(agent.last_message) || activity || text(agent.cwd) || 'No messages yet';
+    const preview = text(previewLine(agent.last_message_preview, tr) ?? agent.last_message)
+      || activity || text(agent.cwd) || tr('overview.no_messages');
+    const phase = text(agent.activity_phase || agent.latest_state);
     const row = {
       ...agent,
       key: `chat:${agent.agent_id || session}`,
@@ -63,10 +72,10 @@ export function buildAgentOverview({
       preview,
       lastActivity: Number(agent.last_activity) || 0,
       archived: !!agent.archived_at,
-      stateLabel: agent.compacting ? 'compacting'
-        : busy ? text(agent.activity_phase || agent.latest_state) || 'working'
-        : unread ? 'new reply'
-        : statusText || 'idle',
+      stateLabel: agent.compacting ? tr('overview.state.compacting')
+        : busy ? (STATES.has(phase) ? tr(`overview.state.${phase}`) : phase || tr('overview.state.working'))
+        : unread ? tr('overview.state.new_reply')
+        : statusText || tr('overview.state.idle'),
     };
     (row.archived ? archived : chats).push(row);
   }
@@ -102,15 +111,22 @@ export function buildAgentOverview({
   };
 }
 
-export function formatRelativeActivity(epochSeconds, nowSeconds = Date.now() / 1000) {
+/**
+ * When a chat was last active: `relative(ms, nowMs)` (the app passes format.js formatRelative)
+ * for a time, the catalog's "No activity yet" for none.
+ */
+export function formatRelativeActivity(epochSeconds, nowSeconds = Date.now() / 1000,
+  { tr = english, relative = englishRelative } = {}) {
   const value = Number(epochSeconds) || 0;
-  if (!value) return 'No activity yet';
-  const seconds = Math.max(0, Math.floor(nowSeconds - value));
-  if (seconds < 45) return 'Just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
-  return new Date(value * 1000).toLocaleDateString(undefined, {
-    month: 'short', day: 'numeric',
-  });
+  if (!value) return tr('overview.no_activity');
+  return relative(value * 1000, nowSeconds * 1000);
+}
+
+function englishRelative(ms, nowMs) {
+  const secs = Math.round((ms - nowMs) / 1000);
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'auto' });
+  if (Math.abs(secs) < 45) return rtf.format(0, 'second');
+  if (Math.abs(secs) < 3600) return rtf.format(Math.trunc(secs / 60), 'minute');
+  if (Math.abs(secs) < 86400) return rtf.format(Math.trunc(secs / 3600), 'hour');
+  return rtf.format(Math.trunc(secs / 86400), 'day');
 }

@@ -155,7 +155,8 @@ component Chip inherits Rectangle {
             height: 22px;
             y: 1px;
             icon: @image-url("icons/rail-close.svg");
-            label: "Remove " + root.item.name;
+            // i18n: composer, attachment chip, accessibility label of the close button (an action: remove this attachment); {} is the file name
+            label: @tr("Remove {}", root.item.name);
             clicked => { root.remove(); }
         }
     }
@@ -295,7 +296,8 @@ export component Composer inherits FocusScope {
             border-width: 1px;
             border-color: Palette.border;
             accessible-role: list;
-            accessible-label: "Send this message";
+            // i18n: composer, accessibility label of the menu of other ways to send (right-click on Send during a turn): send this typed message
+            accessible-label: @tr("Send this message");
             choice-keys := FocusScope {
                 init => { self.focus(); }
                 key-pressed(event) => {
@@ -338,26 +340,33 @@ export component Composer inherits FocusScope {
         padding-bottom: 2px;
         spacing: 6px;
         if root.starting != "": Text {
-            text: "Starting " + root.starting + "…";
+            // i18n: composer, notice above the editor while an agent starts; {} is the agent's name
+            text: @tr("Starting {}…", root.starting);
             color: Palette.muted;
             font-size: 12 * Look.unit;
         }
         if root.recording: Text {
-            text: "● Recording · Ctrl+Shift+Space sends";
+            // i18n: composer, notice above the editor while voice is recorded; the dot stays; Ctrl+Shift+Space is a key name and stays untranslated; "sends" means pressing it sends the recording
+            text: @tr("● Recording · Ctrl+Shift+Space sends");
             color: Palette.danger;
             font-size: 12 * Look.unit;
         }
         if root.transcribing > 0: HorizontalLayout {
             spacing: 8px;
             Text {
-                text: root.transcribing == 1 ? "Transcribing…" : root.transcribing + " transcribing…";
+                text: root.transcribing == 1
+                    // i18n: composer, notice above the editor while one voice recording is turned into text
+                    ? @tr("Transcribing…")
+                    // i18n: composer, notice above the editor while several voice recordings are turned into text; {n} is how many (always 2 or more)
+                    : @tr("{n} transcribing…" | "{n} transcribing…" % root.transcribing);
                 color: Palette.muted;
                 font-size: 12 * Look.unit;
                 overflow: elide;
                 horizontal-stretch: 1;
             }
             Text {
-                text: "Cancel";
+                // i18n: composer, link beside the transcribing notice (an action: cancel the transcription)
+                text: @tr("Cancel");
                 color: Palette.link;
                 font-size: 12 * Look.unit;
                 TouchArea { clicked => { root.cancel-transcription(); } }
@@ -382,8 +391,10 @@ export component Composer inherits FocusScope {
         // queued_shown) and fades in. A paused queue's messages wait until
         // sent: its dialog sends one now (the queue stays paused until empty).
         if root.queued > 0 && !root.strip-shown: RevealText {
-            text: root.queued + (root.queued == 1 ? " queued" : " queued")
-                + (root.queue-paused ? " · paused" : "");
+            // i18n: composer, line above the editor: how many messages wait to be sent after the running turn; {n} is the count; tapping opens the queue
+            text: @tr("{n} queued" | "{n} queued" % root.queued)
+                // i18n: composer, added after "{n} queued" when the queue is paused (adjective: the queue is paused)
+                + (root.queue-paused ? " · " + @tr("paused") : "");
             color: Palette.muted;
             font-size: 12 * Look.unit;
             overflow: elide;
@@ -393,7 +404,8 @@ export component Composer inherits FocusScope {
         }
         if root.mentions.length > 0: Rectangle {
           accessible-role: list;
-          accessible-label: "Agents to mention";
+          // i18n: composer, accessibility label of the list of agents that pop up while typing @ (to mention one)
+          accessible-label: @tr("Agents to mention");
           VerticalLayout {
             for row[index] in root.mentions: Rectangle {
                 height: 26px;
@@ -423,7 +435,8 @@ export component Composer inherits FocusScope {
                 background: Palette.accent.with-alpha(0.18);
                 accessible-role: text;
                 accessible-id: "route-chip";
-                accessible-label: "Sends to " + root.route;
+                // i18n: composer, accessibility label of the chip that shows where Enter sends the draft; {} is the other agent's name
+                accessible-label: @tr("Sends to {}", root.route);
                 HorizontalLayout {
                     padding-left: 9px;
                     padding-right: 9px;
@@ -453,7 +466,8 @@ export component Composer inherits FocusScope {
             // One line to start; grows with the text up to 240px, then
             // scrolls.
             height: clamp(self.text-height, Palette.body-size * 1.6, 240px);
-            accessible-label: "Message to " + root.agent-name;
+            // i18n: composer, accessibility label of the message editor; {} is the agent's name
+            accessible-label: @tr("Message to {}", root.agent-name);
             accessible-id: "composer-editor";
             edited(text) => {
                 root.edited(text);
@@ -470,9 +484,15 @@ export component Composer inherits FocusScope {
                 width: self.captioned-width;
                 height: Palette.body-size * 1.6;
                 icon: @image-url("icons/stop.svg");
-                caption: "Stop";
-                label: "Stop";
-                tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
+                // i18n: composer, caption on the button that stops the agent's running turn (verb)
+                caption: @tr("Stop");
+                // i18n: composer, accessibility label of the button that stops the agent's running turn (verb)
+                label: @tr("Stop");
+                tip: ComposerKeys.stop == ""
+                    // i18n: composer, tooltip of the stop button (verb: stop the running turn)
+                    ? @tr("Stop")
+                    // i18n: composer, tooltip of the stop button (verb: stop the running turn); {} is its key binding, e.g. Ctrl+.
+                    : @tr("Stop · {}", ComposerKeys.stop);
                 tint: Palette.danger;
                 accessible-id: "composer-stop";
                 clicked => { root.stop(); }
@@ -487,8 +507,12 @@ export component Composer inherits FocusScope {
                 width: Palette.body-size * 1.6;
                 height: Palette.body-size * 1.6;
                 icon: @image-url("icons/send.svg");
-                label: "Send";
-                tip: "Send · " + ComposerKeys.send + (root.busy && SendChoice.options.length > 0 ? " · right-click for other ways" : "");
+                // i18n: composer, accessibility label of the send button (verb: send the typed message)
+                label: @tr("Send");
+                // i18n: composer, tooltip of the send button (verb: send the typed message); {} is its key binding, e.g. Enter
+                tip: @tr("Send · {}", ComposerKeys.send)
+                    // i18n: composer, added to the send button's tooltip during a turn: right-clicking the button opens other ways to send
+                    + (root.busy && SendChoice.options.length > 0 ? " · " + @tr("right-click for other ways") : "");
                 tint: Palette.accent;
                 accessible-id: "composer-send";
                 clicked => { root.submit(false); }
@@ -567,7 +591,8 @@ export component QueueStrip inherits Rectangle {
     background: Palette.window;
     accessible-role: list;
     accessible-id: "queue-strip:" + root.pane-id;
-    accessible-label: root.count == 1 ? "1 message waiting" : root.count + " messages waiting";
+    // i18n: chat, accessibility label of the strip above the composer listing the user's messages that wait behind the running turn; {n} is how many
+    accessible-label: @tr("{n} message waiting" | "{n} messages waiting" % root.count);
     VerticalLayout {
         padding-left: 14px;
         padding-right: 10px;
@@ -585,7 +610,8 @@ export component QueueStrip inherits Rectangle {
                 border-color: Palette.border;
                 accessible-role: groupbox;
                 accessible-id: "steer-chip:" + root.pane-id;
-                accessible-label: root.count == 1 ? "1 message waiting" : root.count + " messages waiting";
+                // i18n: chat, accessibility label of the waiting-messages capsule above the composer; {n} is how many of the user's messages wait behind the running turn
+                accessible-label: @tr("{n} message waiting" | "{n} messages waiting" % root.count);
                 accessible-description: root.chip-label + (root.reason != "" ? " · " + root.reason : "");
                 chip-row := HorizontalLayout {
                     padding-left: 8px;
@@ -599,7 +625,8 @@ export component QueueStrip inherits Rectangle {
                         colorize: Palette.muted;
                     }
                     Text {
-                        text: root.count + " waiting";
+                        // i18n: chat, waiting-messages capsule above the composer, short count of the user's messages waiting behind the running turn; {n} is how many
+                        text: @tr("{n} waiting" | "{n} waiting" % root.count);
                         color: Palette.muted;
                         font-size: 11 * Look.unit;
                         vertical-alignment: center;
@@ -630,7 +657,10 @@ export component QueueStrip inherits Rectangle {
                             : @image-url("icons/stop.svg");
                         spinning: root.acting;
                         text: root.chip-label;
-                        tip: root.reason != "" ? root.reason : root.chip-kind == "steer" ? "Read into this turn" : root.chip-label;
+                        tip: root.reason != "" ? root.reason : root.chip-kind == "steer"
+                            // i18n: chat, tooltip of the "Steer now" pill in the waiting-messages capsule: reads the waiting messages into the agent's running turn
+                            ? @tr("Read into this turn")
+                            : root.chip-label;
                         accessible-id: "steer-chip-action:" + root.pane-id;
                         clicked => {
                             if (!root.acting) { root.act(root.chip-kind, root.chip-target); }
@@ -651,7 +681,8 @@ export component QueueStrip inherits Rectangle {
                 accessible-label: root.reason;
             }
             if root.count > 0 && root.paused && !root.busy: Text {
-                text: "queue paused";
+                // i18n: chat, dim note beside the waiting-messages capsule when the queue is paused (the waiting messages are not sent by themselves)
+                text: @tr("queue paused");
                 color: Palette.muted;
                 font-size: 11 * Look.unit;
                 vertical-alignment: center;
@@ -661,10 +692,12 @@ export component QueueStrip inherits Rectangle {
                 width: manage-text.preferred-width;
                 accessible-role: button;
                 accessible-id: "queue-manage:" + root.pane-id;
-                accessible-label: "Manage waiting messages";
+                // i18n: chat, accessibility label of the Manage link beside the waiting-messages capsule (an action: open the list to edit or send the waiting messages)
+                accessible-label: @tr("Manage waiting messages");
                 accessible-action-default => { root.manage(); }
                 manage-text := Text {
-                    text: "Manage";
+                    // i18n: chat, link beside the waiting-messages capsule (verb: opens the list to edit or send the waiting messages)
+                    text: @tr("Manage");
                     color: manage-touch.has-hover ? Palette.accent : Palette.link;
                     font-size: 11 * Look.unit;
                     vertical-alignment: center;

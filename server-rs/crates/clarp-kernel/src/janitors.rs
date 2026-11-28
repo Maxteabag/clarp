@@ -673,8 +673,9 @@ pub fn execution(
         None => Some(false),
         Some(isolated) => isolated.as_bool(),
     };
-    let can_isolate =
-        provider.is_some_and(|provider| facts.isolating.iter().any(|id| id == provider));
+    let can_isolate = provider
+        .map(execution_provider)
+        .is_some_and(|provider| facts.isolating.iter().any(|id| id == provider));
     let Some(isolated) = isolated.filter(|isolated| !*isolated || can_isolate) else {
         // Antigravity today: a home with nothing in it, an empty directory, a time limit.
         let why = "Isolated execution is an Antigravity option";
@@ -688,16 +689,18 @@ pub fn execution(
             "Demand jobs require an ephemeral executor",
         ));
     };
-    if provider != "openai" && !facts.routing.iter().any(|id| id == provider) {
+    let account = execution_provider(provider);
+    if account != "openai" && !facts.routing.iter().any(|id| id == account) {
         let why = "Unsupported demand execution provider";
         return Err(Refused::invalid(why));
     }
-    let stands_for = facts.backend_of.get(provider).and_then(Value::as_str);
-    if backend != stands_for.unwrap_or(provider) {
+    let backend_account = execution_provider(backend);
+    let stands_for = facts.backend_of.get(account).and_then(Value::as_str);
+    if backend_account != stands_for.unwrap_or(account) {
         let why = "Execution provider must match the Janitor backend";
         return Err(Refused::invalid(why));
     }
-    if template_id == "tool-explainer" && provider != backend {
+    if template_id == "tool-explainer" && account != backend_account {
         let why = "Tool explanation runs on the Janitor's own backend";
         return Err(Refused::invalid(why));
     }
@@ -706,6 +709,14 @@ pub fn execution(
         run.insert("isolated".to_string(), json!(true));
     }
     Ok(run)
+}
+
+/// Antigravity's execution policies name the shared account, regardless of transport.
+pub(super) fn execution_provider(backend: &str) -> &str {
+    match backend {
+        "agy-acp" | "agy_acp" | "antigravity" | "antigravity-acp" => "agy",
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -762,6 +773,9 @@ mod tests {
             );
             assert!(isolates(backend), "{backend}");
         }
+        let saved = json!({"executor":"ephemeral","provider":"agy","isolated":true});
+        let run = execution("scheduled-prompt", Some(&saved), "agy-acp").unwrap();
+        assert_eq!(Value::Object(run), saved);
         // The other cards are refused as before, and in the same words.
         let refused = execution(
             "scheduled-prompt",

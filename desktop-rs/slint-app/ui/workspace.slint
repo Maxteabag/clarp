@@ -25,6 +25,7 @@ export struct ChatChoice {
     current: bool,
 }
 
+// i18n-screen: chat
 // The chat's "⋯" menu on its pane's frame (#653): the chat's own Tool
 // activity (this device's) and, on a Host that offers it, its own choice
 // for messages between agents (the Host's), each a submenu that shows its
@@ -64,7 +65,8 @@ component ChatMenuItem inherits Rectangle {
     background: touch.has-hover ? Palette.hover : transparent;
     accessible-role: button;
     accessible-id: root.id;
-    accessible-label: root.value != "" ? root.text + ": " + root.value : root.text;
+    // i18n: chat's ⋯ menu, accessibility label of an item that has a current setting; {0} is the item's name (e.g. Chat view), {1} its current value
+    accessible-label: root.value != "" ? @tr("{0}: {1}", root.text, root.value) : root.text;
     accessible-action-default => { root.clicked(); }
     HorizontalLayout {
         padding-left: 10px;
@@ -223,7 +225,10 @@ export struct WorkspaceTab {
 export component Pane inherits Rectangle {
     // The header's quiet line: what is set, joined by dots, none trailing.
     property <string> header-info: root.join-info(root.join-info(root.join-info(root.pane.host, root.pane.moved), root.pane.moving),
-        root.pane.availability != "" ? root.pane.availability : root.join-info(root.pane.status, root.pane.busy ? "working" : ""));
+        root.pane.availability != "" ? root.pane.availability : root.join-info(root.pane.status, root.pane.busy
+            // i18n: chat header, quiet line under the agent's name, shown while the agent works on a turn (lower case, joined to other details by dots)
+            ? @tr("working")
+            : ""));
     // An agent's chat has a header inside its frame: its avatar, its name
     // and under the name the quiet line (`header-info`), where why it
     // cannot answer now shows (#918; Peter, 26 Nov 2026). A pair room and
@@ -595,7 +600,8 @@ export component Pane inherits Rectangle {
               overflow: elide;
               accessible-role: button;
               accessible-id: "pane-name:" + root.pane.id;
-              accessible-label: "Agent profile";
+              // i18n: chat header, accessibility label of the agent's name, which opens the agent's profile (noun)
+              accessible-label: @tr("Agent profile");
               accessible-action-default => { ProfileBridge.open-for-pane(root.pane.id); }
               name-touch := TouchArea { mouse-cursor: pointer; clicked => { ProfileBridge.open-for-pane(root.pane.id); } }
             }
@@ -619,12 +625,16 @@ export component Pane inherits Rectangle {
           // and line are in its header above, a pair room's or an empty
           // pane's name on the right of the border.
           PaneFrame {
-            info-name: root.pane.session == "" ? "No agent selected" : root.agent-header ? "" : root.pane.name;
+            info-name: root.pane.session == ""
+                // i18n: chat pane, title on the frame of an empty pane that shows no chat yet
+                ? @tr("No agent selected")
+                : root.agent-header ? "" : root.pane.name;
             info: root.agent-header ? "" : root.pane.workspace-label;
             info-id: "pane-info:" + root.pane.id;
             // In vim mode the title says the mode, as Vim's last line does.
             key: root.pane.active && Focus.mode == "composer" ? (VimBridge.mode != "" ? "esc" : "ctrl+h") : "h";
-            label: "Chat";
+            // i18n: chat pane, name of the keyboard region on the chat's frame, after its key (noun: the chat transcript)
+            label: @tr("Chat");
             right-room: root.pane.session != "" && !root.pane.pair ? 22px : 0px;
             active: root.pane.active && Focus.mode == "pane"; surface: root.background; }
           // The chat's "⋯" menu (#653), at the right end of the frame.
@@ -636,7 +646,8 @@ export component Pane inherits Rectangle {
             background: root.background;
             accessible-role: button;
             accessible-id: "chat-menu:" + root.pane.id;
-            accessible-label: "Chat menu";
+            // i18n: chat pane, accessibility label of the ⋯ button that opens the chat's menu (noun)
+            accessible-label: @tr("Chat menu");
             accessible-action-default => { ChatMenu.opened(root.pane.id); }
             Text {
                 text: "⋯";
@@ -664,8 +675,17 @@ export component Pane inherits Rectangle {
                 x: 1px;
                 y: 1px;
                 icon: @image-url("icons/latest.svg");
-                label: root.pane.news ? "Jump to latest, new messages below" : "Jump to latest";
-                tip: (root.pane.news ? "New below · " : "") + (ComposerKeys.latest == "" ? "Latest" : "Latest · " + ComposerKeys.latest);
+                label: root.pane.news
+                    // i18n: chat, accessibility label of the round button that scrolls to the newest message, when new messages arrived below
+                    ? @tr("Jump to latest, new messages below")
+                    // i18n: chat, accessibility label of the round button that scrolls to the newest message (an action)
+                    : @tr("Jump to latest");
+                // i18n: chat, start of the jump-to-latest button's tooltip when new messages arrived below the view
+                tip: (root.pane.news ? @tr("New below") + " · " : "") + (ComposerKeys.latest == ""
+                    // i18n: chat, tooltip of the round button that scrolls to the newest message (short: the latest message)
+                    ? @tr("Latest")
+                    // i18n: chat, tooltip of the round button that scrolls to the newest message; {} is its key binding, e.g. Ctrl+End
+                    : @tr("Latest · {}", ComposerKeys.latest));
                 accessible-id: "jump-latest:" + root.pane.id;
                 clicked => { transcript.scroll-to-latest(); }
             }
@@ -681,7 +701,8 @@ export component Pane inherits Rectangle {
                 border-color: Palette.raised;
                 accessible-role: text;
                 accessible-id: "jump-news:" + root.pane.id;
-                accessible-label: "New messages below";
+                // i18n: chat, accessibility label of the dot on the jump-to-latest button: new messages arrived below the view
+                accessible-label: @tr("New messages below");
             }
           }
           if ChatMenu.open == root.pane.id: Rectangle {
@@ -699,32 +720,37 @@ export component Pane inherits Rectangle {
                 padding: 3px;
                 if ChatMenu.submenu == "" && ChatMenu.coordination-shown: ChatMenuItem {
                     id: "chat-menu-coordination";
-                    text: "Messages between agents";
+                    // i18n: chat's ⋯ menu, item that opens the choice of how messages between agents show in this chat (noun phrase)
+                    text: @tr("Messages between agents");
                     value: ChatMenu.coordination-label;
                     clicked => { ChatMenu.submenu = "coordination"; }
                 }
                 if ChatMenu.submenu == "" && ChatMenu.view-shown: ChatMenuItem {
                     id: "chat-menu-view";
-                    text: "Chat view";
+                    // i18n: chat's ⋯ menu, item that opens the choice of how this chat is shown (noun)
+                    text: @tr("Chat view");
                     value: ChatMenu.view-label;
                     clicked => { ChatMenu.submenu = "view"; }
                 }
                 if ChatMenu.submenu == "" && ChatMenu.activity-shown: ChatMenuItem {
                     id: "chat-menu-activity";
-                    text: "Tool activity";
+                    // i18n: chat's ⋯ menu, item that opens the choice of how the agent's tool calls show in this chat (noun)
+                    text: @tr("Tool activity");
                     value: ChatMenu.activity-label;
                     clicked => { ChatMenu.submenu = "activity"; }
                 }
                 if ChatMenu.submenu == "": ChatMenuItem {
                     id: "chat-menu-snooze";
-                    text: "Snooze";
+                    // i18n: chat's ⋯ menu, item that opens the choices to silence this chat's notifications for a while (verb)
+                    text: @tr("Snooze");
                     value: ChatMenu.snooze-label;
                     clicked => { ChatMenu.submenu = "snooze"; }
                 }
                 // The agent's artifacts, as its profile's Artifacts shows them.
                 if ChatMenu.submenu == "": ChatMenuItem {
                     id: "chat-menu-artifacts";
-                    text: "Artifacts";
+                    // i18n: chat's ⋯ menu, item that opens the agent's artifacts (published files, reports, documents) (noun)
+                    text: @tr("Artifacts");
                     icon: @image-url("icons/artifacts.svg");
                     clicked => { ChatMenu.artifacts(); }
                 }
@@ -814,7 +840,8 @@ export component Pane inherits Rectangle {
                 if root.pane.live-busy && root.pane.live-stop-key != "" && root.pane.active: KeyHint {
                     y: 3px;
                     key: root.pane.live-stop-key;
-                    label: "Stop";
+                    // i18n: chat, live status line under the transcript, label after the key that stops the running turn (verb)
+                    label: @tr("Stop");
                     clicked => { root.stop(); }
                 }
             }
@@ -837,9 +864,15 @@ export component Pane inherits Rectangle {
                 width: self.captioned-width;
                 height: 24px;
                 icon: @image-url("icons/stop.svg");
-                caption: "Stop";
-                label: "Stop";
-                tip: ComposerKeys.stop == "" ? "Stop" : "Stop · " + ComposerKeys.stop;
+                // i18n: chat, caption on the stop button in the working row when the composer is folded away (verb: stop the running turn)
+                caption: @tr("Stop");
+                // i18n: chat, accessibility label of the stop button in the working row (verb: stop the running turn)
+                label: @tr("Stop");
+                tip: ComposerKeys.stop == ""
+                    // i18n: chat, tooltip of the stop button in the working row (verb: stop the running turn)
+                    ? @tr("Stop")
+                    // i18n: chat, tooltip of the stop button in the working row (verb: stop the running turn); {} is its key binding, e.g. Ctrl+.
+                    : @tr("Stop · {}", ComposerKeys.stop);
                 tint: Palette.danger;
                 accessible-id: "working-stop:" + root.pane.id;
                 clicked => { root.stop(); }
@@ -911,7 +944,8 @@ export component Pane inherits Rectangle {
           }
           PaneFrame {
             key: "i";
-            label: "Insert";
+            // i18n: chat pane, name of the keyboard region on the composer's frame, after its key i (noun-like: the typing area, as in a text editor's insert mode)
+            label: @tr("Insert");
             active: root.pane.active && Focus.mode == "composer";
             surface: root.background;
             // The context and quota meter, quiet on the frame's right end.
@@ -997,6 +1031,7 @@ component Handle inherits Rectangle {
     }
 }
 
+// i18n-screen: workspace
 // Workspace.qml: the workspace tabs, then the panes where the tree puts them.
 export component Workspace inherits Rectangle {
     // The panes' area may shrink to the window; the panes inside wrap.
@@ -1060,7 +1095,8 @@ export component Workspace inherits Rectangle {
             border-radius: 3px;
             background: plus-touch.has-hover ? Palette.hover : transparent;
             accessible-role: button;
-            accessible-label: "New workspace";
+            // i18n: workspace tab bar, accessibility label of the + button (an action: create a new workspace, a set of chat panes)
+            accessible-label: @tr("New workspace");
             Image {
                 source: @image-url("icons/rail-plus.svg");
                 width: 14px;
@@ -1088,14 +1124,16 @@ export component Workspace inherits Rectangle {
         HorizontalLayout {
             spacing: 4px;
             Text { text: root.save-warning-keep-key; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
-            Text { text: "Keep this layout"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+            // i18n: workspace, warning row after the layout could not be saved, words after the key that keeps the current pane layout (an action)
+            Text { text: @tr("Keep this layout"); color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             TouchArea { clicked => { root.save-layout-instead(); } }
         }
         HorizontalLayout {
             spacing: 4px;
             padding-left: 8px;
             Text { text: root.save-warning-dismiss-key; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
-            Text { text: "Dismiss"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+            // i18n: workspace, warning row after the layout could not be saved, words after the key that closes the warning (verb: dismiss)
+            Text { text: @tr("Dismiss"); color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             TouchArea { clicked => { root.dismiss-save-warning(); } }
         }
     }

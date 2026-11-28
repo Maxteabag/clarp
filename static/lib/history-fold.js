@@ -13,18 +13,18 @@
 // A tool call that failed or was cut short stays in its row. Commentary (text between tool calls)
 // folds with the work, except commentary that was spoken (it held a <speak> block): it stays in
 // view above the work row in every mode. The label counts tool calls only.
-import { formatDuration } from './live-present.js';
+import { english, englishDuration } from './i18n-en.js';
 
 export const TOOL_ACTIVITY = ['grouped', 'always', 'group_old', 'hide_done'];
-export const TOOL_ACTIVITY_LABELS = {
-  grouped: 'Grouped', always: 'Always visible', group_old: 'Group old', hide_done: 'Hide when done',
-};
+/** Each mode's catalog key for t() (tool_activity.<mode>); the *_LABELS maps have the English. */
+export const toolActivityKey = mode => (mode === 'follow' ? 'chat_choices.follow' : `tool_activity.${mode}`);
+export const TOOL_ACTIVITY_LABELS = Object.fromEntries(TOOL_ACTIVITY.map(m => [m, english(toolActivityKey(m))]));
 
 // One chat's own choice (kept on the device, keyed by the Host's server id and the session):
 // 'follow' follows the device's Tool activity setting.
 export const FOLLOW = 'follow';
 export const CHAT_TOOL_ACTIVITY = [FOLLOW, ...TOOL_ACTIVITY];
-export const CHAT_TOOL_ACTIVITY_LABELS = { [FOLLOW]: 'Follow Settings', ...TOOL_ACTIVITY_LABELS };
+export const CHAT_TOOL_ACTIVITY_LABELS = { [FOLLOW]: english(toolActivityKey(FOLLOW)), ...TOOL_ACTIVITY_LABELS };
 
 /** The device key of one chat's choice: the Host's server id and the session ('' without either). */
 export function chatKey(serverId, session) {
@@ -44,8 +44,6 @@ export function effectiveToolActivity(global, byChat, key) {
 }
 
 const KEPT = new Set(['error', 'failed', 'killed', 'interrupted', 'cancelled']);
-
-function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
 
 const SPEAK = /<speak\b/i;
 
@@ -78,12 +76,14 @@ function foldable(row, commentary) {
 }
 
 /** 'Worked for 11s · 3 tools', 'Worked for 11s' with none folded, '3 tools' without a worked
- * time, 'Working · 2 tools' running. */
-export function workLabel({ running = false, worked_ms = null, tool_count = 0 } = {}) {
-  const tools = plural(tool_count, 'tool');
-  if (running) return `Working · ${tools}`;
+ * time, 'Working · 2 tools' running. `tr` and `duration` give the app's language. */
+export function workLabel({ running = false, worked_ms = null, tool_count = 0 } = {},
+  { tr = english, duration = englishDuration } = {}) {
+  const tools = tr('live.fold.tools', { count: tool_count });
+  if (running) return tr('history.working', { tools });
   if (worked_ms == null) return tools;
-  return `Worked for ${formatDuration(worked_ms)}` + (tool_count ? ` · ${tools}` : '');
+  const time = tr('live.fold.worked_for', { time: duration(worked_ms) });
+  return tool_count ? tr('live.fold.with_tools', { time, tools }) : time;
 }
 
 /**
@@ -136,10 +136,11 @@ export function foldTurns(rows, { mode = 'grouped', busy = false } = {}) {
     if (!counted && !failedOnly) continue;
     const turnId = (prompt >= 0 && rows[prompt].trace_id) || members.find(m => m.trace_id)?.trace_id
       || members[0].id;
+    // `work` is what the label says, for a view that words it in the app's language.
+    const work = { running: !settled, worked_ms: summary ? summary.worked_ms ?? null : null, tool_count: counted };
     const fold = {
       key: `fold:${turnId}`, running: !settled,
-      label: workLabel({ running: !settled, worked_ms: summary ? summary.worked_ms ?? null : null,
-                         tool_count: counted }),
+      label: workLabel(work), work,
       calls,
     };
     // After the turn's last spoken commentary, which stays above it; else after its prompt.

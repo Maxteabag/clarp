@@ -30,14 +30,28 @@ use sha2::{Digest, Sha256};
 use crate::edge::App;
 
 /// The tools this Host runs, in the order an app lists them.
-const TOOLS: [&str; 8] = [
-    "claude", "codex", "agy", "agy-acp", "grok", "opencode", "deepseek", "muse",
+const TOOLS: [&str; 7] = [
+    "claude", "codex", "agy-acp", "grok", "opencode", "deepseek", "muse",
 ];
 /// How long a tool has to answer one question about itself, where nothing else is declared
 /// of the question (Antigravity fetches its list of models, and is given longer).
 const WITHIN: Duration = Duration::from_millis(2_500);
 /// How long what was found is told again without asking.
 const KEPT_FOR: Duration = Duration::from_secs(300);
+/// The efforts Antigravity ends a model's name in, which it offers over ACP as a thinking
+/// level apart from the model.
+const ACP_EFFORTS: [&str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
+
+pub(crate) fn model_is_offered(tool: &str, model: &str, ids: &[&str]) -> bool {
+    let model = model.trim();
+    ids.contains(&model)
+        || (tool == clarp_backend::agy_acp::ID
+            && ids.iter().any(|id| {
+                id.strip_prefix(model)
+                    .and_then(|rest| rest.strip_prefix('-'))
+                    .is_some_and(|effort| ACP_EFFORTS.contains(&effort))
+            }))
+}
 
 /// What is declared of a tool and this Host does not offer from an app, or cannot do with it
 /// yet. Claude Code: steering is not advertised, as the Python Host does not advertise it
@@ -47,7 +61,7 @@ const KEPT_FOR: Duration = Duration::from_secs(300);
 /// it is not forked, and its conversation is not made shorter from an app. Antigravity: a
 /// conversation is not made shorter from an app; over ACP, steering is not advertised, as for
 /// Claude Code, and a message sent to a running turn is read into it all the same.
-const NOT_YET: [(&str, &[&str]); 5] = [
+const NOT_YET: [(&str, &[&str]); 4] = [
     (
         "claude",
         &["supports_steer", "supports_auth", "supports_usage"],
@@ -63,10 +77,8 @@ const NOT_YET: [(&str, &[&str]); 5] = [
             "supports_usage",
         ],
     ),
-    ("agy", &["supports_compact"]),
-    // Antigravity over ACP does not advertise steering, whatever the `agy` row it is made
-    // from says: as for Claude Code, a message sent while its turn runs is offered to that turn
-    // by the Host (`Backend::steers`), and no app asks for it.
+    // As for Claude Code, the Host offers steering while a turn runs. The app
+    // does not need to ask for steering itself.
     ("agy-acp", &["supports_compact", "supports_steer"]),
     ("grok", &["supports_compact", "supports_auth"]),
 ];
@@ -265,38 +277,63 @@ impl Shelf {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
+    /// Why a tool has no model of this name, checked against its observed list. The
+    /// Antigravity alias shares the ACP catalogue, which takes a base model such as
+    /// `gemini-4-neon` alongside folded model/effort names. Before discovery the ACP
+    /// turn validates the model against what its own session offers.
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
-        if !matches!(tool, "codex" | "agy") {
+        let tool = clarp_backend::canonical_id(tool);
+        if !matches!(tool, "codex" | "agy-acp") {
             return None;
         }
         let kept = self
             .kept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let observed = kept
+        let row = kept
             .as_ref()
             .map(|k| &k.told["providers"][tool])
-            .filter(|r| r["source"]["kind"] == "cli_probe");
-        let bundled = catalogue::declared(tool);
-        let row = observed.or_else(|| (tool == "agy").then_some(&bundled))?;
+            .filter(|r| r["source"]["kind"] == "cli_probe")?;
         let mut ids: Vec<_> = row["models"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|item| item["id"].as_str())
             .collect();
-        if ids.contains(&model.trim()) || (ids.is_empty() && tool == "codex") {
+        let model = model.trim();
+        if model_is_offered(tool, model, &ids) || (ids.is_empty() && tool == "codex") {
             return None;
         }
         let reason = "Invalid provider model identifier";
-        if tool == "agy" {
-            return Some(reason.into());
-        }
         ids.sort_unstable();
         Some(format!(
             "{reason}: {tool} has no model '{model}'; it offers {}",
             ids.join(", ")
         ))
+    }
+
+    /// The same, after asking the tools where what was found does not have the model: since
+    /// this Host started nobody may have asked them (an app asks when it opens its picker),
+    /// or a tool may list a model it did not have when it was asked more than five minutes
+    /// ago. A model that is there is let through without asking anything.
+    pub async fn model_error(&self, tool: &str, model: &str, now_ms: i64) -> Option<String> {
+        self.policy_model_error(tool, model)?;
+        self.told(now_ms).await;
+        self.policy_model_error(tool, model)
+    }
+
+    /// Has the tools asked, where nothing has been found of them since this Host started, so
+    /// that a check that cannot wait for them ([`Shelf::policy_model_error`]) reads what they
+    /// list and not only what is known of them.
+    pub async fn found_once(&self, now_ms: i64) {
+        let found = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some();
+        if !found {
+            self.told(now_ms).await;
+        }
     }
 
     /// The catalogue: what was found within the last five minutes under the logins that
@@ -339,8 +376,7 @@ impl Shelf {
 
 /// The configured model for a backend when the agent has selected none.
 pub(crate) async fn default_for(app: &App, backend: &str) -> Option<String> {
-    let key = format!("{backend}_model");
-    if let Some(model) = crate::owner::text_at(&app.mouth.owners(), &["agents", &key]) {
+    if let Some(model) = crate::telling::configured_model(&app.mouth.owners(), backend) {
         return Some(model);
     }
     let backend = backend.to_owned();
@@ -418,6 +454,9 @@ async fn told(State(app): State<App>) -> Json<Value> {
         for (tool, row) in providers {
             let harness = clarp_backend::by_id(tool).and_then(|backend| backend.runs_through());
             row["runs_through"] = json!(harness);
+            if tool == clarp_backend::agy_acp::ID {
+                row["past_sessions_backend"] = json!(clarp_backend::agy_acp::ID);
+            }
         }
     }
     if crate::logins::sign_in::keeps(&app) {
@@ -444,6 +483,53 @@ mod tests {
         let to_the_second = crate::wire::to_the_second;
         assert_eq!(to_the_second(1_800_000_000_999), "2027-01-15T08:00:00Z");
         assert_eq!(to_the_second(0), "1970-01-01T00:00:00Z");
+    }
+
+    /// A shelf that holds what the tools were found to have, as `told` keeps it.
+    fn shelf_with(rows: Vec<(String, Value)>) -> Shelf {
+        let shelf = Shelf::default();
+        *shelf.kept.lock().unwrap() = Some(Kept {
+            at: Instant::now(),
+            logins: [0; 32],
+            told: catalogue::whole(rows, "2027-01-15T08:00:00Z"),
+        });
+        shelf
+    }
+
+    #[test]
+    fn antigravity_is_held_to_what_it_lists_and_its_refusal_names_them() {
+        let said = "gemini-5-x-low\tX (Low)\ngemini-5-x-high\tX\n";
+        let found = Found {
+            program: Some("/synthetic/bin/agy"),
+            version: None,
+            models: Some(said),
+        };
+        let at = "2027-01-15T08:00:00Z";
+        let shelf = shelf_with(vec![(
+            "agy-acp".to_string(),
+            catalogue::row("agy-acp", &found, at),
+        )]);
+        for tool in ["agy", "agy-acp"] {
+            assert_eq!(shelf.policy_model_error(tool, "gemini-5-x-low"), None);
+            assert_eq!(shelf.policy_model_error(tool, "gemini-5-x"), None);
+            assert!(shelf.policy_model_error(tool, "gemini-5").is_some());
+            let refused = shelf
+                .policy_model_error(tool, "gemini-4-neon-medium")
+                .unwrap();
+            assert!(
+                refused.ends_with("it offers gemini-5-x-high, gemini-5-x-low"),
+                "{refused}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cold_antigravity_catalogue_defers_to_native_session_offers() {
+        let shelf = Shelf::default();
+        for tool in ["agy", "agy-acp"] {
+            assert_eq!(shelf.policy_model_error(tool, "gemini-4-neon-medium"), None);
+            assert_eq!(shelf.policy_model_error(tool, "gemini-nothing"), None);
+        }
     }
 
     #[test]

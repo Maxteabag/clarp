@@ -811,6 +811,9 @@ async fn serve(config: Config) -> Result<(), String> {
         app.start.reached(clarp_host::start::Stage::Agents).await;
         app.start.reach(clarp_host::start::Stage::Started);
         steps.mark("ready");
+        // Replaying a legacy turn needs no provider discovery. Start the
+        // transport changes beside ordinary service after startup is reported.
+        clarp_host::agent_transit::retire_legacy_agy(&app);
         // Said last of its start, after every line the start has always said.
         eprintln!("{}", steps.line());
         Ok::<(), String>(())

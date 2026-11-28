@@ -6,6 +6,7 @@
   // rail use, so a query cannot mean one thing here and another there.
   import { buildAgentOverview } from '@core/agent-overview.js';
   import { quickSwitchRows, resolveChoice, clampIndex } from '@core/quick-switch.js';
+  import { t } from '../stores/i18n.svelte.js';
   import { getLeafPanes } from '@core/pane-tree.js';
   import {
     agentSnapshot, app, avatarUrl, AVATAR_PALETTE, DEFAULT_ROSTER,
@@ -31,8 +32,9 @@
       currentSession: app.session,
       query,
       isUnread: isUserNotificationUnread,
+      tr: t,
     });
-    return quickSwitchRows(overview, 12, query);
+    return quickSwitchRows(overview, 12, query, t);
   });
 
   let selected = $derived(clampIndex(index, rows.length));
@@ -76,11 +78,11 @@
     <div class="quick" onclick={e => e.stopPropagation()}>
       <input
         class="quick-input"
-        placeholder="Go to agent…"
+        placeholder={t('quick_switch.placeholder')}
         bind:this={inputEl}
         bind:value={query}
         onkeydown={keydown}
-        aria-label="Go to agent"
+        aria-label={t('quick_switch.label')}
       />
       <ul class="quick-list">
         {#each rows as row, i (row.key)}
@@ -100,7 +102,7 @@
             </button>
           </li>
         {:else}
-          <li class="quick-empty">No agent matches “{query}”</li>
+          <li class="quick-empty">{t('quick_switch.no_match', { query })}</li>
         {/each}
       </ul>
     </div>

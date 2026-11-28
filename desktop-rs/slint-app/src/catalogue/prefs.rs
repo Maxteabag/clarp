@@ -6,7 +6,9 @@
 
 use clarp_core::prefs::{self, Kind};
 
-use super::{Choice, Entry, Setting, e, number_text};
+use clarp_core::tr;
+
+use super::{Choice, Entry, Setting, e, en, local, number_text};
 use crate::App;
 use crate::look;
 
@@ -46,7 +48,7 @@ pub(super) fn register() -> Vec<Setting> {
                 entry,
                 section,
                 move |_| match spec.kind {
-                    Kind::Choice { options, .. } => options.iter().map(|(id, label)| Choice::new(*id, *label)).collect(),
+                    Kind::Choice { options, .. } => options.iter().map(|(id, label)| Choice::new(*id, local(label))).collect(),
                     _ => Vec::new(),
                 },
                 move |app| prefs::choice_of(app.engine.borrow().settings(), name),
@@ -78,10 +80,22 @@ pub(super) fn register() -> Vec<Setting> {
         };
         out.push(setting);
     }
-    let path = |app: &App| app.engine.borrow().settings().path().map_or_else(|| "In memory only".to_owned(), |p| p.display().to_string());
+    let path = |app: &App| app.engine.borrow().settings().path().map_or_else(
+        // i18n: Settings > Edit the settings file, the row's value when the settings are not saved to any file
+        || tr!("In memory only"),
+        |p| p.display().to_string(),
+    );
     out.push(
         Setting::action(
-            e("pref-edit-file", "Edit the settings file", "settings", "Opens settings.json in your editor, with its schema and reference beside it; saved changes apply at once.", &["settings file", "config file", "json", "editor", "dotfile"]),
+            e(
+                "pref-edit-file",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Opens settings.json in your editor, with its schema and reference beside it; saved changes apply at once.
+                en::tr!("Edit the settings file"),
+                "settings",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Edit the settings file” saying what it does
+                en::tr!("Opens settings.json in your editor, with its schema and reference beside it; saved changes apply at once."),
+                &["settings file", "config file", "json", "editor", "dotfile"],
+            ),
             "ALL SETTINGS",
             |app, _| {
                 look::edit_file(app);
@@ -91,7 +105,15 @@ pub(super) fn register() -> Vec<Setting> {
     );
     out.push(
         Setting::action(
-            e("pref-export", "Export settings", "settings", "Writes every preference to ~/Downloads/clarp-settings.json to keep or share.", &["backup", "save settings", "share settings", "copy settings"]),
+            e(
+                "pref-export",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Writes every preference to ~/Downloads/clarp-settings.json to keep or share.
+                en::tr!("Export settings"),
+                "settings",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Export settings” saying what it does
+                en::tr!("Writes every preference to ~/Downloads/clarp-settings.json to keep or share."),
+                &["backup", "save settings", "share settings", "copy settings"],
+            ),
             "ALL SETTINGS",
             |app, window| {
                 look::export(app, window);
@@ -100,12 +122,28 @@ pub(super) fn register() -> Vec<Setting> {
         .detail(|_| look::export_path().display().to_string()),
     );
     out.push(Setting::action(
-        e("pref-import", "Import settings…", "settings", "Applies the valid preferences of a settings file exported from Clarp and reports the rest.", &["restore", "load settings", "apply settings", "from file"]),
+        e(
+            "pref-import",
+            // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Applies the valid preferences of a settings file exported from Clarp and reports the rest.
+            en::tr!("Import settings…"),
+            "settings",
+            // i18n: Settings page and Ctrl+K, the line under the setting “Import settings…” saying what it does
+            en::tr!("Applies the valid preferences of a settings file exported from Clarp and reports the rest."),
+            &["restore", "load settings", "apply settings", "from file"],
+        ),
         "ALL SETTINGS",
         look::open_import,
     ));
     out.push(Setting::action(
-        e("pref-reset-all", "Reset every setting", "settings", "Puts every preference back to its default; key bindings and chats stay.", &["defaults", "factory reset", "reset all", "restore defaults"]),
+        e(
+            "pref-reset-all",
+            // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Puts every preference back to its default; key bindings and chats stay.
+            en::tr!("Reset every setting"),
+            "settings",
+            // i18n: Settings page and Ctrl+K, the line under the setting “Reset every setting” saying what it does
+            en::tr!("Puts every preference back to its default; key bindings and chats stay."),
+            &["defaults", "factory reset", "reset all", "restore defaults"],
+        ),
         "ALL SETTINGS",
         |app, window| {
             look::reset_all(app, window);

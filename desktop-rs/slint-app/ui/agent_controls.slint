@@ -110,7 +110,8 @@ export component Busy inherits HorizontalLayout {
     spacing: 3px;
     alignment: center;
     accessible-role: progress-indicator;
-    accessible-label: "Loading";
+    // i18n: three pulsing dots shown while something loads, accessibility label (a state: something is loading)
+    accessible-label: @tr("Loading");
     for index in 3: Rectangle {
         width: 5px;
         height: 5px;

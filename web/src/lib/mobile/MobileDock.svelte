@@ -9,6 +9,7 @@
   import ConnDot from '../ConnDot.svelte';
   import DockControls from '../DockControls.svelte';
   import { movedLine } from '@core/agent-moved.js';
+  import { t } from '../../stores/i18n.svelte.js';
   import HostBadge from '../HostBadge.svelte';
 
   let { chatOpen = $bindable(), onTapAgent, onHoldAgent } = $props();
@@ -16,7 +17,7 @@
   let label = $derived(chipLabel(app.session));
   let status = $derived(statusFor(app.session));
   let activity = $derived(
-    movedLine(status.moved) || shortActivityText(status) || (status.busy ? 'Working' : 'Idle'));
+    movedLine(status.moved, t) || shortActivityText(status) || t(status.busy ? 'agent.working' : 'agent.idle'));
   let unread = $derived((app.tick, unreadAgentCount()));
   let host = $derived((app.tick, hostBadgeFor(app.session)));
 
@@ -37,11 +38,11 @@
   }
 </script>
 
-<nav class="dock" aria-label="Controls">
+<nav class="dock" aria-label={t('dock.controls')}>
   <button
     id="session"
     class="session"
-    aria-label="Agent"
+    aria-label={t('dock.agent')}
     onpointerdown={down}
     onpointerup={up}
     onpointercancel={() => { clearTimeout(holdTimer); holdFired = false; }}
@@ -70,7 +71,7 @@
 
   <span class="dock-spacer"></span>
 
-  <button id="chatBtn" class="chat-btn" aria-label="Type message"
+  <button id="chatBtn" class="chat-btn" aria-label={t('dock.type_message')}
           onclick={() => chatOpen = !chatOpen}>
     <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
       <path fill="currentColor" d="M4 4h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-5 4V5a1 1 0 0 1 1-1z"/>

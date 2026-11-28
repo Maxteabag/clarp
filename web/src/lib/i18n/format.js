@@ -95,3 +95,34 @@ export function formatNumber(n, opts, locale = i18n.locale) {
 export function pluralCategory(count, locale = i18n.locale) {
   return new Intl.PluralRules(locale).select(count);
 }
+
+const durationFormats = new Map();
+/**
+ * A length of time: "4s", "1m 5s", "1h 2m" in English, the language's own units elsewhere
+ * (`style` 'narrow' | 'short' | 'long'). Under a minute counts seconds, under an hour minutes
+ * and seconds, otherwise hours and minutes. Uses Intl.DurationFormat where the browser has it,
+ * else each unit through Intl.NumberFormat.
+ */
+export function formatDuration(ms, style = 'narrow', locale = i18n.locale) {
+  const s = Math.max(0, Math.floor((Number(ms) || 0) / 1000));
+  const m = Math.floor(s / 60);
+  const parts = s < 60 ? { seconds: s }
+    : m < 60 ? { minutes: m, seconds: s % 60 }
+    : { hours: Math.floor(m / 60), minutes: m % 60 };
+  if (typeof Intl.DurationFormat === 'function') {
+    const k = locale + style;
+    let f = durationFormats.get(k);
+    if (!f) { f = new Intl.DurationFormat(locale, { style }); durationFormats.set(k, f); }
+    return f.format(parts);
+  }
+  const unit = { hours: 'hour', minutes: 'minute', seconds: 'second' };
+  const shown = Object.entries(parts).filter(([, n]) => n);
+  return (shown.length ? shown : [['seconds', 0]])
+    .map(([u, n]) => new Intl.NumberFormat(locale, { style: 'unit', unit: unit[u], unitDisplay: style }).format(n))
+    .join(' ');
+}
+
+/** "Mike, Rachel and Ida" / "Mike, Rachel og Ida": names joined as the language joins a list. */
+export function formatList(items, type = 'conjunction', locale = i18n.locale) {
+  return new Intl.ListFormat(locale, { type }).format(items);
+}

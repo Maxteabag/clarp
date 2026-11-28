@@ -122,7 +122,7 @@ fn the_host_that_keeps_the_tools_signs_one_in_and_out_from_an_app() {
     for tool in ["claude", "codex", "grok"] {
         assert_eq!(options["providers"][tool]["supports_auth"], true, "{tool}");
     }
-    assert_eq!(options["providers"]["agy"]["supports_auth"], false);
+    assert_eq!(options["providers"]["agy-acp"]["supports_auth"], false);
 
     // Before: nobody is signed in, and every tool with a sign-in of its own can be.
     let before = host.get("/backend-auth?harnesses=all");
@@ -731,12 +731,13 @@ fn account_metadata_names_the_shared_harness_and_installed_hotseat_providers() {
         "claude", "codex", "agy", "grok", "opencode", "deepseek", "muse",
     ] {
         let auth = row(&auth, tool);
-        let catalogue = &catalogue["providers"][tool];
+        let picker = if tool == "agy" { "agy-acp" } else { tool };
+        let catalogue = &catalogue["providers"][picker];
         let expected = (tool == "deepseek").then_some("opencode");
         assert_eq!(auth.get("runs_through"), Some(&json!(expected)), "{tool}");
         assert_eq!(
             catalogue.get("runs_through"),
-            Some(&json!(expected)),
+            Some(&json!(if tool == "agy" { Some("agy") } else { expected })),
             "{tool}"
         );
     }

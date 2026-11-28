@@ -6,7 +6,8 @@
   import {
     prefs, setShowCoordinationLine, setShowHostBadge, setToolActivity,
   } from '../stores/prefs.svelte.js';
-  import { TOOL_ACTIVITY, TOOL_ACTIVITY_LABELS } from '@core/history-fold.js';
+  import { TOOL_ACTIVITY, toolActivityKey } from '@core/history-fold.js';
+  import { escapeHTML } from '@core/html.js';
   import { coordination, setCoordinationVisibility } from '../stores/coordination.svelte.js';
   import { live } from '../stores/live.svelte.js';
   import LanguageSetting from './LanguageSetting.svelte';
@@ -31,7 +32,10 @@
     adding = false;
     if (!addError) { newUrl = ''; newToken = ''; }
   }
-  const STATE_WORDS = { live: 'Connected', connecting: 'Connecting', offline: 'Unreachable', refused: 'Token refused' };
+  const STATES = new Set(['live', 'connecting', 'offline', 'refused']);
+  function stateWord(state) {
+    return t(`chat_settings.host_state.${STATES.has(state) ? state : 'connecting'}`);
+  }
   function keydown(e) {
     if (e.key === 'Escape') { open = false; e.stopPropagation(); }
   }
@@ -40,17 +44,17 @@
 {#if open}
   <div class="start-dialog" onclick={e => { if (e.target === e.currentTarget) open = false; }}
        role="presentation">
-    <div class="start-card" role="dialog" aria-label="Chat settings" tabindex="-1" onkeydown={keydown}>
-      <h3>Chats</h3>
+    <div class="start-card" role="dialog" aria-label={t('chat_settings.title_a11y')} tabindex="-1" onkeydown={keydown}>
+      <h3>{t('chat_settings.title')}</h3>
 
       <label class="start-field inline-toggle">
-        <span>Show chats from all Hosts</span>
+        <span>{t('chat_settings.all_hosts')}</span>
         <input type="checkbox" checked={hostsState.allHosts}
                onchange={e => setAllHosts(e.currentTarget.checked)} />
       </label>
 
-      <div class="hosts-list" aria-label="Hosts">
-        <div class="hosts-row primary"><span class="hosts-name">{app.hosts[0]?.name || 'This Host'}</span><span class="hosts-state">This Host</span></div>
+      <div class="hosts-list" aria-label={t('chat_settings.hosts')}>
+        <div class="hosts-row primary"><span class="hosts-name">{app.hosts[0]?.name || t('chat_settings.this_host')}</span><span class="hosts-state">{t('chat_settings.this_host')}</span></div>
         {#each knownHosts() as h (h.id)}
           <div class="hosts-row">
             <span class="hosts-name" title={h.url}>{h.name || h.url}</span>
@@ -60,10 +64,10 @@
                 {t('host_down.list_row', { host: reach.hosts[h.id]?.label || h.name || h.url, when: formatRelative(lastSeenAt(reach.hosts[h.id]) || reach.now, reach.now) })}
               </button>
             {:else}
-              <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}{#if h.via === 'host'} · via this Host{/if}</span>
+              <span class="hosts-state">{hostsState.allHosts ? stateWord(hostsState.live[h.id]?.state) : t('chat_settings.host_state.not_read')}{#if h.via === 'host'} · {t('chat_settings.via_this_host')}{/if}</span>
             {/if}
             {#if h.via !== 'host'}
-              <button class="hosts-remove" type="button" aria-label={`Remove ${h.name || h.url}`} title="Remove"
+              <button class="hosts-remove" type="button" aria-label={t('chat_settings.remove_host', { host: h.name || h.url })} title={t('chat_settings.remove')}
                       onclick={() => removeHost(h.id)}>×</button>
             {/if}
           </div>
@@ -71,57 +75,57 @@
       </div>
       <div class="hosts-add">
         <label class="start-field">
-          <span>Host address</span>
+          <span>{t('chat_settings.host_address')}</span>
           <input type="url" placeholder="https://studio.example.ts.net" bind:value={newUrl} autocomplete="off" />
         </label>
         <label class="start-field">
-          <span>Token</span>
+          <span>{t('chat_settings.token')}</span>
           <input type="password" placeholder="cld_…" bind:value={newToken} autocomplete="off" />
         </label>
         {#if addError}<p class="start-hint hosts-error" role="alert">{addError}</p>{/if}
         <p class="start-hint">
-          Requires <code>{location.origin}</code> in <code>[server] web_read_origins</code>.
+          {@html t('chat_settings.requires_origin', { origin: `<code>${escapeHTML(location.origin)}</code>`, setting: '<code>[server] web_read_origins</code>' })}
         </p>
         <div class="start-actions">
           <button class="start-btn" type="button" disabled={adding || !newUrl || !newToken} onclick={add}>
-            {adding ? 'Adding…' : 'Add Host'}
+            {adding ? t('chat_settings.adding') : t('chat_settings.add_host')}
           </button>
         </div>
       </div>
 
       <label class="start-field inline-toggle">
-        <span>Show Host badge</span>
+        <span>{t('chat_settings.show_host_badge')}</span>
         <input type="checkbox" checked={prefs.showHostBadge}
                onchange={e => setShowHostBadge(e.currentTarget.checked)} />
       </label>
 
       {#if live.hiddenCoordination}
         <label class="start-field inline-toggle">
-          <span>Show messages between agents</span>
+          <span>{t('chat_settings.show_coordination')}</span>
           <input type="checkbox" checked={coordination.visibility === 'show'}
                  onchange={e => setCoordinationVisibility(e.currentTarget.checked ? 'show' : 'hide')} />
         </label>
-        {#if coordination.error}<p class="start-hint">{coordination.error}</p>{/if}
+        {#if coordination.error}<p class="start-hint">{t(coordination.error)}</p>{/if}
         <!-- Listed whenever the Host hides coordination: a chat's own hide draws these lines
              even while the Host's setting shows them. -->
         <label class="start-field inline-toggle">
-          <span>Show hidden agent-message marker</span>
+          <span>{t('chat_settings.show_coordination_line')}</span>
           <input type="checkbox" checked={prefs.showCoordinationLine}
                  onchange={e => setShowCoordinationLine(e.currentTarget.checked)} />
         </label>
       {/if}
 
       <label class="start-field">
-        <span>Tool activity</span>
+        <span>{t('chat_choices.tool_activity')}</span>
         <select value={prefs.toolActivity} onchange={e => setToolActivity(e.currentTarget.value)}>
-          {#each TOOL_ACTIVITY as mode (mode)}<option value={mode}>{TOOL_ACTIVITY_LABELS[mode]}</option>{/each}
+          {#each TOOL_ACTIVITY as mode (mode)}<option value={mode}>{t(toolActivityKey(mode))}</option>{/each}
         </select>
       </label>
 
       <LanguageSetting />
 
       <div class="start-actions">
-        <button class="start-btn primary" onclick={() => open = false}>Done</button>
+        <button class="start-btn primary" onclick={() => open = false}>{t('chat_settings.done')}</button>
       </div>
     </div>
   </div>
@@ -137,5 +141,5 @@
   .hosts-remove { flex: none; width: 26px; height: 26px; border: 1px solid var(--ink-edge); border-radius: 6px; background: transparent; color: var(--washi-dim); cursor: pointer; }
   .hosts-remove:hover { color: var(--vermillion); border-color: var(--vermillion); }
   .hosts-error { color: var(--vermillion); }
-  .hosts-add code { font-family: var(--font-mono); font-size: 11px; }
+  .hosts-add :global(code) { font-family: var(--font-mono); font-size: 11px; }
 </style>

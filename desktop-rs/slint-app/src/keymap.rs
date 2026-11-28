@@ -13,6 +13,7 @@
 use std::collections::{BTreeMap, HashSet};
 use std::time::{Duration, Instant};
 
+use clarp_core::tr;
 use serde_json::{Map, Value, json};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,7 +51,8 @@ pub enum Guard {
 pub struct Binding {
     pub action: &'static str,
     pub keys: Vec<String>,
-    pub label: &'static str,
+    /// In the app's language, made when the bindings are resolved.
+    pub label: String,
     /// Shown in the shortcut bar.
     pub hint: bool,
     pub guard: Guard,
@@ -62,7 +64,7 @@ pub struct Binding {
     pub native: bool,
 }
 
-fn binding(action: &'static str, keys: &[&str], label: &'static str, hint: bool, guard: Guard, native: bool) -> Binding {
+fn binding(action: &'static str, keys: &[&str], label: String, hint: bool, guard: Guard, native: bool) -> Binding {
     Binding { action, keys: keys.iter().map(|k| (*k).to_owned()).collect(), label, hint, guard, hint_guard: Guard::None, native }
 }
 
@@ -93,247 +95,425 @@ fn state(name: &str) -> Vec<Binding> {
     let b = binding;
     match name {
         "main" => vec![
-            b("edit-keymap", &["Ctrl+Alt+,"], "Key bindings", false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the editor for every keyboard shortcut.
+            b("edit-keymap", &["Ctrl+Alt+,"], tr!("Key bindings"), false, Always, false),
             // The tab bar's workspaces, as a browser's tabs.
-            b("new-workspace", &["Ctrl+T"], "New tab", false, Always, false),
-            b("next-workspace", &["Ctrl+Tab", "Ctrl+Alt+W"], "Next tab", false, Always, false),
-            b("previous-workspace", &["Ctrl+Shift+Tab"], "Previous tab", false, Always, false),
-            b("update-preview", &["Ctrl+Alt+U"], "Update", false, Always, false),
-            b("next-attention", &["Ctrl+J"], "Next attention", true, Attention, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens a new workspace tab with its own pane layout.
+            b("new-workspace", &["Ctrl+T"], tr!("New tab"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It switches to the next workspace tab.
+            b("next-workspace", &["Ctrl+Tab", "Ctrl+Alt+W"], tr!("Next tab"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It switches to the workspace tab before this one.
+            b("previous-workspace", &["Ctrl+Shift+Tab"], tr!("Previous tab"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It opens the app updates (install another build)
+            b("update-preview", &["Ctrl+Alt+U"], tr!("verb" => "Update"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
+            b("next-attention", &["Ctrl+J"], tr!("Next attention"), true, Attention, false),
             // No keys of their own: for the user to bind (and the switcher).
-            b("next-agent", &[], "Next agent", false, Rows, false),
-            b("previous-agent", &[], "Previous agent", false, Rows, false),
-            b("orchestrator", &[], "Orchestrator settings", false, Always, false),
-            b("choose-font", &[], "Choose font…", false, Always, false),
-            b("reset-font", &[], "Reset font to theme default", false, Always, false),
-            b("connection", &[], "Host connection", false, Always, false),
-            b("list-all", &[], "Agents: all chats", false, Always, false),
-            b("list-unread", &[], "Agents: unread only", false, Always, false),
-            b("list-working", &[], "Agents: working", false, Always, false),
-            b("list-needs-you", &[], "Agents: needs you", false, Always, false),
-            b("list-done", &[], "Agents: done", false, Always, false),
-            b("list-snoozed", &[], "Agents: snoozed", false, Always, false),
-            b("snooze-chat", &[], "Snooze chat", false, Agent, false),
-            b("snooze-chat-hour", &[], "Snooze chat for an hour", false, Agent, false),
-            b("snooze-chat-morning", &[], "Snooze chat until morning", false, Agent, false),
-            b("wake-chat", &[], "Wake chat", false, Agent, false),
-            b("list-rooms", &[], "Agent conversations", false, Always, false),
-            b("list-archive", &[], "Archived agents", false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent in the list.
+            b("next-agent", &[], tr!("Next agent"), false, Rows, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the agent above in the list.
+            b("previous-agent", &[], tr!("Previous agent"), false, Rows, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It the orchestrator that routes your messages to agents.
+            b("orchestrator", &[], tr!("Orchestrator settings"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It picks the chat's typeface and size for this reading theme, previewed in the chat.
+            b("choose-font", &[], tr!("Choose font…"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It goes back to the reading theme's own typeface and size.
+            b("reset-font", &[], tr!("Reset font to theme default"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It the Clarp Host this window talks to, and its address and state.
+            b("connection", &[], tr!("Host connection"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows every chat in the explorer.
+            b("list-all", &[], tr!("Agents: all chats"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows only chats with unread messages in the explorer.
+            b("list-unread", &[], tr!("Agents: unread only"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows only the chats whose agent is working now in the explorer.
+            b("list-working", &[], tr!("Agents: working"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows only the chats waiting for you: unread, asking a question or holding a decision. Snoozed chats stay out.
+            b("list-needs-you", &[], tr!("Agents: needs you"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows only the chats that are idle and read in the explorer.
+            b("list-done", &[], tr!("Agents: done"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the chats you snoozed, with when each comes back.
+            b("list-snoozed", &[], tr!("Agents: snoozed"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It takes the chat out of Needs you until it gets a new message. Kept on this device.
+            b("snooze-chat", &[], tr!("Snooze chat"), false, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It takes the chat out of Needs you for an hour. Kept on this device.
+            b("snooze-chat-hour", &[], tr!("Snooze chat for an hour"), false, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It takes the chat out of Needs you until 08:00 tomorrow. Kept on this device.
+            b("snooze-chat-morning", &[], tr!("Snooze chat until morning"), false, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It ends the chat's snooze: it is back in Needs you if it waits for you.
+            b("wake-chat", &[], tr!("Wake chat"), false, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the rooms where agents talk to each other.
+            b("list-rooms", &[], tr!("Agent conversations"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows archived agents so you can restore them.
+            b("list-archive", &[], tr!("Archived agents"), false, Always, false),
             // Everything about the open agent, from anywhere, typing
             // included (no text field uses Ctrl+I).
-            b("agent-profile", &["Ctrl+I"], "Agent profile", true, Agent, false),
-            b("manage-queue", &[], "Message queue", false, Agent, false),
-            b("toggle-queue", &[], "Show/hide queue", false, Always, false),
-            b("dismiss-error", &[], "Dismiss conversation error", false, Always, false),
-            b("dismiss-layout-warning", &[], "Dismiss layout warning", false, Always, false),
-            b("tool-narration", &[], "Plain-English tools", false, Always, false),
-            b("setting:timestampsVisible", &[], "Timestamps on/off", false, Always, false),
-            b("setting:workspaceBarVisible", &[], "Workspace bar on/off", false, Always, false),
-            b("change-directory", &["Ctrl+Alt+D"], "Change directory", false, Always, false),
-            b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
-            b("sidebar", &["Ctrl+B"], "Show/hide sidebar", false, Always, false),
-            b("shortcut-bar", &["Ctrl+Shift+K"], "Show/hide keybindings", false, Always, false),
-            b("quick-new-agent", &["Ctrl+Shift+N"], "New contact & chat", false, Always, false),
-            b("rename-agent", &["F2"], "Rename contact", false, Always, false),
-            b("new", &["Ctrl+N"], "New agent", false, Always, false),
-            b("new-contact", &["Ctrl+Alt+N"], "Start contact", false, Always, false),
-            b("settings", &["Ctrl+,", "Ctrl+4"], "Settings", false, Always, false),
-            b("chats", &["Ctrl+1"], "Chats", false, Always, false),
-            b("updates", &["Ctrl+2"], "Updates", false, Always, false),
-            b("teams", &["Ctrl+3"], "Teams", false, Always, false),
-            b("recent-agents", &["Ctrl+R"], "Recent", true, Always, false),
-            b("search-messages", &["Ctrl+F"], "Search messages", false, Always, false),
-            b("refresh", &["F5"], "Refresh", false, Always, false),
-            b("refresh-agents", &["Shift+F5"], "Refresh agents", false, Always, false),
-            b("mute", &["Ctrl+M"], "Mute", false, Always, false),
-            b("overview", &["Ctrl+Shift+O"], "Overview", false, Always, false),
-            b("tools", &["Ctrl+Shift+T"], "Tools", false, Always, false),
-            b("toggle-explanations", &["Ctrl+Shift+X"], "Tool explanations", false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the open agent's profile: its artifacts and images, files, terminal, voice, plan, prompt history, model and backend.
+            b("agent-profile", &["Ctrl+I"], tr!("Agent profile"), true, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the open chat's queue of waiting messages
+            b("manage-queue", &[], tr!("Message queue"), false, Agent, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue).
+            b("toggle-queue", &[], tr!("Show/hide queue"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It closes the error banner above the chat.
+            b("dismiss-error", &[], tr!("Dismiss conversation error"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It closes the warning that another window saved a newer layout.
+            b("dismiss-layout-warning", &[], tr!("Dismiss layout warning"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It turns plain-English tool explanations on or off
+            b("tool-narration", &[], tr!("Plain-English tools"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It turns the times beside messages on or off
+            b("setting:timestampsVisible", &[], tr!("Timestamps on/off"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows or hides the workspace tab bar
+            b("setting:workspaceBarVisible", &[], tr!("Workspace bar on/off"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It starts a new chat in another folder.
+            b("change-directory", &["Ctrl+Alt+D"], tr!("Change directory"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the command palette
+            b("switcher", &["Ctrl+K"], tr!("Commands"), true, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows or hides the explorer (sidebar)
+            b("sidebar", &["Ctrl+B"], tr!("Show/hide sidebar"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It the key hints along the bottom of the window.
+            b("shortcut-bar", &["Ctrl+Shift+K"], tr!("Show/hide keybindings"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It creates a new contact and opens a chat with it.
+            b("quick-new-agent", &["Ctrl+Shift+N"], tr!("New contact & chat"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It changes the open contact's name.
+            b("rename-agent", &["F2"], tr!("Rename contact"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the hub to start a new agent.
+            b("new", &["Ctrl+N"], tr!("New agent"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It starts one of your idle contacts in a new session.
+            b("new-contact", &["Ctrl+Alt+N"], tr!("Start contact"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the settings page.
+            b("settings", &["Ctrl+,", "Ctrl+4"], tr!("Settings"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It goes to the chats.
+            b("chats", &["Ctrl+1"], tr!("Chats"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It goes to the updates feed.
+            b("updates", &["Ctrl+2"], tr!("Updates"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It goes to the teams.
+            b("teams", &["Ctrl+3"], tr!("Teams"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It lists the agents you opened last, newest first.
+            b("recent-agents", &["Ctrl+R"], tr!("keys" => "Recent"), true, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
+            b("search-messages", &["Ctrl+F"], tr!("Search messages"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It loads the open chat again from the Host.
+            b("refresh", &["F5"], tr!("verb" => "Refresh"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It fetches the agent list from the Host now, also while it is retrying after a failure.
+            b("refresh-agents", &["Shift+F5"], tr!("Refresh agents"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It turns spoken replies off or on
+            b("mute", &["Ctrl+M"], tr!("verb" => "Mute"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows every agent and what it is doing.
+            b("overview", &["Ctrl+Shift+O"], tr!("Overview"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows how tool calls appear in the chat
+            b("tools", &["Ctrl+Shift+T"], tr!("Tools"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It turns the Host's tool explanations on or off
+            b("toggle-explanations", &["Ctrl+Shift+X"], tr!("Tool explanations"), false, Always, false),
             // The chat's zoom on the browser's keys; the whole window's
             // scale (the chats with it) on Ctrl+Alt+PageUp/PageDown/0.
-            b("chat-zoom-in", &["Ctrl+=", "Ctrl++"], "Zoom in", false, Always, false),
-            b("chat-zoom-out", &["Ctrl+-"], "Zoom out", false, Always, false),
-            b("chat-zoom-reset", &["Ctrl+0"], "Reset zoom", false, Always, false),
-            b("ui-larger", &["Ctrl+Alt+PageUp"], "Larger", false, Always, false),
-            b("ui-smaller", &["Ctrl+Alt+PageDown"], "Smaller", false, Always, false),
-            b("ui-reset", &["Ctrl+Alt+0"], "Reset scale", false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats one step (10%) larger: text, code, cards and spacing, apart from the rest of the window.
+            b("chat-zoom-in", &["Ctrl+=", "Ctrl++"], tr!("Zoom in"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats one step (10%) smaller, apart from the rest of the window.
+            b("chat-zoom-out", &["Ctrl+-"], tr!("Zoom out"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats at 100% again.
+            b("chat-zoom-reset", &["Ctrl+0"], tr!("Reset zoom"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the whole window one step larger, the chats included.
+            b("ui-larger", &["Ctrl+Alt+PageUp"], tr!("Larger"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the whole window one step smaller, the chats included.
+            b("ui-smaller", &["Ctrl+Alt+PageDown"], tr!("Smaller"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It returns the whole window to its usual scale.
+            b("ui-reset", &["Ctrl+Alt+0"], tr!("Reset scale"), false, Always, false),
         ],
         "workspace" => vec![
             // Ctrl+E / Ctrl+H reach the explorer and the chat from anywhere,
             // typing included (no Escape first).
-            b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
-            b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
-            b("retry-message", &["Ctrl+Alt+R"], "Retry failed message", false, Agent, false),
-            b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, false),
-            b("auto-assign-agent", &["Ctrl+Shift+A"], "Auto assign", false, Agent, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the explorer (the list of chats)
+            b("focus-sidebar", &["Ctrl+E"], tr!("Explorer"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the chat
+            b("focus-pane", &["Ctrl+H"], tr!("Chat"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It sends the last message that failed again.
+            b("retry-message", &["Ctrl+Alt+R"], tr!("Retry failed message"), false, Agent, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It scrolls the chat to its newest message.
+            b("jump-latest", &["Ctrl+End"], tr!("keys" => "Latest"), true, Behind, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It lets Clarp pick the agent for the message
+            b("auto-assign-agent", &["Ctrl+Shift+A"], tr!("Auto assign"), false, Agent, false),
             // The queue strip's first Send now, from the chat or the composer.
-            b("send-queued", &["Ctrl+Shift+Return"], "Send now", true, Queued, false),
-            b("escape", &["Escape"], "Navigate", false, Always, false),
-            b("keep-layout", &["Ctrl+Shift+S"], "Keep this layout", true, LayoutWarning, false),
-            b("move-left", &["Ctrl+Alt+Left"], "Left pane", false, Always, false),
-            b("move-right", &["Ctrl+Alt+Right"], "Right pane", false, Always, false),
-            b("move-up", &["Ctrl+Alt+Up"], "Upper pane", false, Always, false),
-            b("move-down", &["Ctrl+Alt+Down"], "Lower pane", false, Always, false),
-            b("split-right", &["Ctrl+Alt+V"], "Split right", false, Always, false),
-            b("split-down", &["Ctrl+Alt+S"], "Split down", false, Always, false),
-            b("close-pane", &["Ctrl+Alt+X"], "Close pane", false, Always, false),
-            b("zoom", &["Ctrl+Alt+Z"], "Zoom pane", false, Always, false),
-            b("balance", &["Ctrl+Alt+="], "Balance panes", false, Always, false),
-            b("agent-terminal", &["Ctrl+Alt+T"], "Terminal", false, Agent, false),
-            b("release-agent", &["Ctrl+Shift+R"], "Release", false, Agent, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It hands the open chat's first waiting message to the agent now: read into its running turn where the Host offers that (Steer now), else sent ahead of the queue.
+            b("send-queued", &["Ctrl+Shift+Return"], tr!("Send now"), true, Queued, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("Navigate"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It saves this window's layout over the newer one another window saved.
+            b("keep-layout", &["Ctrl+Shift+S"], tr!("Keep this layout"), true, LayoutWarning, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane on the left
+            b("move-left", &["Ctrl+Alt+Left"], tr!("Left pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane on the right
+            b("move-right", &["Ctrl+Alt+Right"], tr!("Right pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane above
+            b("move-up", &["Ctrl+Alt+Up"], tr!("Upper pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
+            b("move-down", &["Ctrl+Alt+Down"], tr!("Lower pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens a second pane to the right.
+            b("split-right", &["Ctrl+Alt+V"], tr!("Split right"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens a second pane below.
+            b("split-down", &["Ctrl+Alt+S"], tr!("Split down"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It closes the active pane.
+            b("close-pane", &["Ctrl+Alt+X"], tr!("Close pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It fills the window with the active pane, or restores the split.
+            b("zoom", &["Ctrl+Alt+Z"], tr!("Zoom pane"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It makes every pane the same size.
+            b("balance", &["Ctrl+Alt+="], tr!("Balance panes"), false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the agent's CLI, run by its Host, in a terminal.
+            b("agent-terminal", &["Ctrl+Alt+T"], tr!("Terminal"), false, Agent, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It ends the open agent's session and frees its contact.
+            b("release-agent", &["Ctrl+Shift+R"], tr!("verb" => "Release"), false, Agent, false),
             // Stops the agent from anywhere; the bar names it while it works.
-            b("stop-agent", &["Ctrl+.", "Ctrl+C"], "Stop", false, Agent, false).hinted_while(Busy),
-            b("talk", &["Ctrl+Shift+Space"], "Talk", false, Agent, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It interrupts what the open agent is doing.
+            b("stop-agent", &["Ctrl+.", "Ctrl+C"], tr!("verb" => "Stop"), false, Agent, false).hinted_while(Busy),
+            // i18n: Keys (key context “Chats”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It records your voice and sends it to the open agent.
+            b("talk", &["Ctrl+Shift+Space"], tr!("verb" => "Talk"), false, Agent, false),
             // Link hints, from the composer too.
-            b("link-hints", &["Ctrl+L"], "Open a link", false, Always, false),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It numbers the links on screen; type a number to open one.
+            b("link-hints", &["Ctrl+L"], tr!("Open a link"), false, Always, false),
             // The selected agent's jobs and helpers: output, stop. The bar
             // names it while something runs.
-            b("agent-processes", &["Ctrl+Shift+P"], "Processes", false, Agent, false).hinted_while(Work),
+            // i18n: Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.
+            b("agent-processes", &["Ctrl+Shift+P"], tr!("Processes"), false, Agent, false).hinted_while(Work),
         ],
         "navigation" => vec![
-            b("next-attention", &["N", "Ctrl+J"], "Next attention", true, Attention, false),
-            b("focus-sidebar", &["E", "Ctrl+E"], "Explorer", false, Always, false),
-            b("focus-pane", &["H", "Ctrl+H"], "Chat", false, Always, false),
-            b("focus-composer", &["I"], "Insert", false, Agent, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
+            b("next-attention", &["N", "Ctrl+J"], tr!("Next attention"), true, Attention, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the explorer (the list of chats)
+            b("focus-sidebar", &["E", "Ctrl+E"], tr!("Explorer"), false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the chat
+            b("focus-pane", &["H", "Ctrl+H"], tr!("Chat"), false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard in the composer to type
+            b("focus-composer", &["I"], tr!("verb" => "Insert"), false, Agent, false),
             // The keys that matter where the keyboard is; never in a text
             // field, where ? types.
-            b("help-keys", &["?"], "Keys", true, Always, false),
-            b("toggle-focus", &["Tab", "Shift+Tab"], "Switch focus", false, Always, false),
-            b("switcher", &["Space", "Ctrl+K"], "Commands", true, Always, false),
-            b("link-hints", &["F", "Ctrl+L"], "Open a link", false, Always, false),
-            b("escape", &["Escape"], "Chat", false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the keys that matter where the keyboard is, your own bindings included.
+            b("help-keys", &["?"], tr!("Keys"), true, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard between the explorer and the chat
+            b("toggle-focus", &["Tab", "Shift+Tab"], tr!("Switch focus"), false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the command palette
+            b("switcher", &["Space", "Ctrl+K"], tr!("Commands"), true, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It numbers the links on screen; type a number to open one.
+            b("link-hints", &["F", "Ctrl+L"], tr!("Open a link"), false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("Chat"), false, Always, false),
             // Not while typing, where Ctrl+W deletes a word in a terminal.
-            b("close-workspace", &["Ctrl+W"], "Close tab", false, Always, false),
+            // i18n: Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It closes this workspace tab; its chats stay in the explorer.
+            b("close-workspace", &["Ctrl+W"], tr!("Close tab"), false, Always, false),
         ],
         "pane" => vec![
             // The chat's artifact cards: K from the chat is the lowest card on screen.
             // Capital J and K too: vim mode's j and k scroll.
-            b("artifact-previous", &["K", "Shift+K"], "Cards", true, Artifacts, false),
-            b("artifact-next", &["J", "Shift+J"], "Next card", false, Artifacts, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the chat's cards (the lowest one on screen)
+            b("artifact-previous", &["K", "Shift+K"], tr!("Cards"), true, Artifacts, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the next card in the chat
+            b("artifact-next", &["J", "Shift+J"], tr!("Next card"), false, Artifacts, false),
             // O, not Enter: Enter belongs to the composer, where a card's
             // keys never reach.
-            b("artifact-open", &["O"], "Open", true, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It opens the card under the keyboard
+            b("artifact-open", &["O"], tr!("verb" => "Open"), true, Artifact, false),
             // An HTML report's whole page, pictures and all, in the browser.
-            b("open-in-browser", &["B"], "Open in browser", false, Artifact, false),
-            b("artifact-choose", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Choose", false, Artifact, false),
-            b("artifact-discard", &["Delete"], "Discard", false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens an HTML report's whole page, pictures and layout included, in a new browser window; Clarp shows plain ones as a quick preview.
+            b("open-in-browser", &["B"], tr!("Open in browser"), false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It picks an answer on the card by its number
+            b("artifact-choose", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], tr!("Choose"), false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It discards the card under the keyboard
+            b("artifact-discard", &["Delete"], tr!("Discard"), false, Artifact, false),
             // A gallery's tiles, an audio clip's position; S stops a clip.
-            b("artifact-back", &["Left"], "Back", false, Artifact, false),
-            b("artifact-forward", &["Right"], "Forward", false, Artifact, false),
-            b("artifact-stop", &["S"], "Stop", false, Artifact, false),
-            b("move-left", &["Alt+Left", "Ctrl+Alt+Left"], "Left pane", false, Always, false),
-            b("move-right", &["Alt+Right", "Ctrl+Alt+Right"], "Right pane", false, Always, false),
-            b("move-up", &["Alt+Up", "Ctrl+Alt+Up"], "Upper pane", false, Always, false),
-            b("move-down", &["Alt+Down", "Ctrl+Alt+Down"], "Lower pane", false, Always, false),
-            b("split-right", &["Alt+V", "Ctrl+Alt+V", "Ctrl+Shift+V"], "Split right", false, Always, false),
-            b("split-down", &["Alt+S", "Ctrl+Alt+S", "Ctrl+Shift+H"], "Split down", false, Always, false),
-            b("close-pane", &["Alt+X", "Ctrl+Alt+X", "Ctrl+Shift+W"], "Close pane", false, Always, false),
-            b("zoom", &["Alt+Z", "Ctrl+Alt+Z", "Ctrl+Shift+Z"], "Zoom pane", false, Always, false),
-            b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], "Balance panes", false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It steps back in a gallery's pictures or an audio clip
+            b("artifact-back", &["Left"], tr!("verb" => "Back"), false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It steps forward in a gallery's pictures or an audio clip
+            b("artifact-forward", &["Right"], tr!("verb" => "Forward"), false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It stops the audio clip that is playing
+            b("artifact-stop", &["S"], tr!("verb" => "Stop"), false, Artifact, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane on the left
+            b("move-left", &["Alt+Left", "Ctrl+Alt+Left"], tr!("Left pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane on the right
+            b("move-right", &["Alt+Right", "Ctrl+Alt+Right"], tr!("Right pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane above
+            b("move-up", &["Alt+Up", "Ctrl+Alt+Up"], tr!("Upper pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
+            b("move-down", &["Alt+Down", "Ctrl+Alt+Down"], tr!("Lower pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens a second pane to the right.
+            b("split-right", &["Alt+V", "Ctrl+Alt+V", "Ctrl+Shift+V"], tr!("Split right"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens a second pane below.
+            b("split-down", &["Alt+S", "Ctrl+Alt+S", "Ctrl+Shift+H"], tr!("Split down"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It closes the active pane.
+            b("close-pane", &["Alt+X", "Ctrl+Alt+X", "Ctrl+Shift+W"], tr!("Close pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It fills the window with the active pane, or restores the split.
+            b("zoom", &["Alt+Z", "Ctrl+Alt+Z", "Ctrl+Shift+Z"], tr!("Zoom pane"), false, Always, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It makes every pane the same size.
+            b("balance", &["Alt+=", "Ctrl+Alt+=", "Ctrl+Shift+="], tr!("Balance panes"), false, Always, false),
             // Slint's rich text cannot be selected: the chat as plain text.
-            b("select-text", &["V"], "Select text", false, Agent, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the open chat as plain text to select from with the mouse or Shift+arrows and copy with Ctrl+C; a message's own select icon shows just that message.
+            b("select-text", &["V"], tr!("Select text"), false, Agent, false),
             // Conversation view (#702): W opens or folds the work of the
             // message the keyboard is on (or the latest turn's), as a click
             // on its wrench or a right-click does; C shows the chat the
             // other way, as its own choice.
-            b("show-work", &["W"], "Show work", false, Agent, false),
-            b("chat-view", &["C"], "Conversation / Session", false, Agent, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens or folds the work of a finished turn in Conversation view (the message the keyboard is on, else the latest turn), or the running turn's Running box.
+            b("show-work", &["W"], tr!("Show work"), false, Agent, false),
+            // i18n: Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the open chat the other way: Conversation (your messages, the replies, cards; the work behind Show work) or Session (everything as it ran). On a Host that offers it.
+            b("chat-view", &["C"], tr!("Conversation / Session"), false, Agent, false),
         ],
         "sidebar" => vec![
-            b("agent-next", &["J", "Down"], "Next", false, Rows, false),
-            b("agent-previous", &["K", "Up"], "Previous", false, Rows, false),
-            b("agent-open", &["Return", "Enter"], "Open", false, Rows, false),
-            b("agent-search", &["/"], "Search", true, Always, false),
-            b("toggle-preview", &["P"], "Preview", true, Always, false),
-            b("toggle-compact", &["V"], "Compact view", true, Always, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the cursor to the next chat in the explorer
+            b("agent-next", &["J", "Down"], tr!("Next"), false, Rows, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the cursor to the chat above in the explorer
+            b("agent-previous", &["K", "Up"], tr!("Previous"), false, Rows, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It opens the chat under the cursor
+            b("agent-open", &["Return", "Enter"], tr!("verb" => "Open"), false, Rows, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard in the explorer's search field
+            b("agent-search", &["/"], tr!("verb" => "Search"), true, Always, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It turns the explorer live preview on or off
+            b("toggle-preview", &["P"], tr!("keys" => "Preview"), true, Always, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It switches the explorer to its compact view and back
+            b("toggle-compact", &["V"], tr!("Compact view"), true, Always, false),
             // The cursor's chat: snoozed until its next message, or woken.
-            b("snooze-toggle", &["S"], "Snooze", true, Rows, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It snoozes the chat until its next message, or wakes it when snoozed.
+            b("snooze-toggle", &["S"], tr!("verb" => "Snooze"), true, Rows, false),
             // The row's own badge, by key (P is the preview).
-            b("agent-processes", &["Shift+P", "Ctrl+Shift+P"], "Processes", false, Agent, false).hinted_while(Work),
-            b("fold", &["Left"], "Fold", true, Folds, false),
-            b("unfold", &["L", "Right"], "Unfold", true, Folds, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.
+            b("agent-processes", &["Shift+P", "Ctrl+Shift+P"], tr!("Processes"), false, Agent, false).hinted_while(Work),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It folds a chat's sub-agents in the explorer
+            b("fold", &["Left"], tr!("verb" => "Fold"), true, Folds, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It unfolds a chat's sub-agents in the explorer
+            b("unfold", &["L", "Right"], tr!("verb" => "Unfold"), true, Folds, false),
             // The explorer's header buttons, shown while it has the keyboard.
-            b("new", &["Ctrl+N"], "New agent", true, Always, false),
-            b("sidebar", &["Ctrl+B"], "Hide sidebar", true, Always, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the hub to start a new agent.
+            b("new", &["Ctrl+N"], tr!("New agent"), true, Always, false),
+            // i18n: Keys (key context “Explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows or hides the explorer (sidebar)
+            b("sidebar", &["Ctrl+B"], tr!("Hide sidebar"), true, Always, false),
         ],
         "composer" => vec![
-            b("jump-latest", &["Ctrl+End"], "Latest", true, Behind, true),
-            b("send", &["Return"], "Send", false, Send, true),
-            b("newline", &["Shift+Return"], "New line", false, Always, true),
-            b("queue", &["Ctrl+Return"], "Queue", true, Busy, true),
-            b("focus-pane", &["Ctrl+H"], "Chat", false, Always, false),
-            b("focus-sidebar", &["Ctrl+E"], "Explorer", false, Always, false),
+            // i18n: Keys (key context “Composer”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It scrolls the chat to its newest message.
+            b("jump-latest", &["Ctrl+End"], tr!("keys" => "Latest"), true, Behind, true),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It sends the message
+            b("send", &["Return"], tr!("Send"), false, Send, true),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It starts a new line in the message
+            b("newline", &["Shift+Return"], tr!("New line"), false, Always, true),
+            // i18n: Keys (key context “Composer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It queues the message to send after the running turn
+            b("queue", &["Ctrl+Return"], tr!("verb" => "Queue"), true, Busy, true),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the chat
+            b("focus-pane", &["Ctrl+H"], tr!("Chat"), false, Always, false),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It puts the keyboard on the explorer (the list of chats)
+            b("focus-sidebar", &["Ctrl+E"], tr!("Explorer"), false, Always, false),
             // The composer has no buttons: its actions are keys, shown here.
-            b("attach", &["Ctrl+Shift+O"], "Attach", true, Agent, true),
-            b("stop-agent", &["Ctrl+."], "Stop", true, Busy, false),
-            b("silence", &["Ctrl+Shift+M"], "Stop voice", true, Playing, false),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It attaches a file to the message
+            b("attach", &["Ctrl+Shift+O"], tr!("Attach"), true, Agent, true),
+            // i18n: Keys (key context “Composer”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It interrupts what the open agent is doing.
+            b("stop-agent", &["Ctrl+."], tr!("verb" => "Stop"), true, Busy, false),
+            // i18n: Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It stops the voice reply that is playing
+            b("silence", &["Ctrl+Shift+M"], tr!("Stop voice"), true, Playing, false),
         ],
         "search" => vec![
-            b("search-next", &["Down"], "Results", false, Rows, true),
-            b("escape", &["Escape"], "Explorer", false, Always, false),
+            // i18n: Keys (key context “Explorer search”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard from the search field to the results
+            b("search-next", &["Down"], tr!("Results"), false, Rows, true),
+            // i18n: Keys (key context “Explorer search”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("Explorer"), false, Always, false),
         ],
         "settings" => vec![
-            b("settings-move", &["Up", "Down"], "Move", true, Always, true),
-            b("settings-open", &["Return"], "Change", true, Always, true),
-            b("settings-search", &["/"], "Search", true, Always, false),
-            b("settings-reset", &["Delete"], "Default", true, Always, false),
-            b("escape", &["Escape"], "Back", true, Always, false),
-            b("help-keys", &["?"], "Keys", true, Always, false),
+            // i18n: Keys (key context “Settings”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It moves between settings
+            b("settings-move", &["Up", "Down"], tr!("verb" => "Move"), true, Always, true),
+            // i18n: Keys (key context “Settings”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It changes the setting under the cursor
+            b("settings-open", &["Return"], tr!("verb" => "Change"), true, Always, true),
+            // i18n: Keys (key context “Settings”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It searches the settings
+            b("settings-search", &["/"], tr!("verb" => "Search"), true, Always, false),
+            // i18n: Keys (key context “Settings”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It puts the setting under the cursor back to its default
+            b("settings-reset", &["Delete"], tr!("keys" => "Default"), true, Always, false),
+            // i18n: Keys (key context “Settings”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("verb" => "Back"), true, Always, false),
+            // i18n: Keys (key context “Settings”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the keys that matter where the keyboard is, your own bindings included.
+            b("help-keys", &["?"], tr!("Keys"), true, Always, false),
         ],
         // The settings page's search field.
         "settings-search" => vec![
-            b("settings-results", &["Down", "Return"], "Results", true, Always, false),
-            b("settings-search-cancel", &["Escape"], "Clear", true, Always, false),
+            // i18n: Keys (key context “Settings search”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard from the settings search to the results
+            b("settings-results", &["Down", "Return"], tr!("Results"), true, Always, false),
+            // i18n: Keys (key context “Settings search”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It empties the settings search
+            b("settings-search-cancel", &["Escape"], tr!("verb" => "Clear"), true, Always, false),
         ],
         "updates" => vec![
-            b("refresh", &["F5"], "Refresh", true, Always, false),
+            // i18n: Keys (key context “Updates”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It loads the open chat again from the Host.
+            b("refresh", &["F5"], tr!("verb" => "Refresh"), true, Always, false),
             // Every job, with its output and a stop.
-            b("agent-processes", &["Ctrl+Shift+P"], "Jobs", true, Always, false),
-            b("escape", &["Escape"], "Chats", true, Always, false),
-            b("help-keys", &["?"], "Keys", true, Always, false),
+            // i18n: Keys (key context “Updates”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the selected agent's background jobs and running helpers: open a job's output, stop a job or a helper. On Updates, every job.
+            b("agent-processes", &["Ctrl+Shift+P"], tr!("Jobs"), true, Always, false),
+            // i18n: Keys (key context “Updates”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("Chats"), true, Always, false),
+            // i18n: Keys (key context “Updates”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the keys that matter where the keyboard is, your own bindings included.
+            b("help-keys", &["?"], tr!("Keys"), true, Always, false),
         ],
-        "teams" => vec![b("escape", &["Escape"], "Chats", true, Always, false), b("help-keys", &["?"], "Keys", true, Always, false)],
+        "teams" => vec![
+            // i18n: Keys (key context “Teams”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("Chats"), true, Always, false),
+            // i18n: Keys (key context “Teams”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the keys that matter where the keyboard is, your own bindings included.
+            b("help-keys", &["?"], tr!("Keys"), true, Always, false),
+        ],
         "launch" => vec![
-            b("switcher", &["Ctrl+K"], "Commands", true, Always, false),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the command palette
+            b("switcher", &["Ctrl+K"], tr!("Commands"), true, Always, false),
             // The hub's own keys (it handles them; listed here for the bar).
-            b("launch-provider", &["Ctrl+Left"], "Backend", true, Always, true),
-            b("launch-model", &["Ctrl+M"], "Model", true, Always, true),
-            b("launch-effort", &["Ctrl+E"], "Effort", true, Always, true),
-            b("launch-directory", &["Ctrl+D"], "Directory", true, Always, true),
-            b("launch-new-contact", &["Ctrl+N"], "New contact", true, Always, true),
-            b("launch-show-all", &["Ctrl+T"], "Show all", true, Always, true),
-            b("change-directory", &["Ctrl+Alt+D"], "Change directory", false, Always, false),
-            b("escape", &["Escape"], "Back", true, Always, false),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: picks the backend (Claude, Codex, ...)
+            b("launch-provider", &["Ctrl+Left"], tr!("Backend"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: picks the model
+            b("launch-model", &["Ctrl+M"], tr!("Model"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: picks the reasoning effort
+            b("launch-effort", &["Ctrl+E"], tr!("Effort"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: picks the folder the agent works in
+            b("launch-directory", &["Ctrl+D"], tr!("Directory"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: creates a new contact
+            b("launch-new-contact", &["Ctrl+N"], tr!("New contact"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: shows every option
+            b("launch-show-all", &["Ctrl+T"], tr!("Show all"), true, Always, true),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It starts a new chat in another folder.
+            b("change-directory", &["Ctrl+Alt+D"], tr!("Change directory"), false, Always, false),
+            // i18n: Keys (key context “New agent hub”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("verb" => "Back"), true, Always, false),
         ],
-        "modal" => vec![b("escape", &["Escape"], "Close", true, Always, false)],
+        // i18n: Keys (key context “Dialogs”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+        "modal" => vec![b("escape", &["Escape"], tr!("verb" => "Close"), true, Always, false)],
         // The agent profile's Backend picker (#720): keys move, pick and step back.
         "transit" => vec![
-            b("transit-down", &["Down", "J"], "Next", true, Always, false),
-            b("transit-up", &["Up", "K"], "Previous", true, Always, false),
-            b("transit-enter", &["Return"], "Choose", true, Always, false),
-            b("escape", &["Escape"], "Back", true, Always, false),
+            // i18n: Keys (key context “Backend picker”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the next backend in the picker
+            b("transit-down", &["Down", "J"], tr!("Next"), true, Always, false),
+            // i18n: Keys (key context “Backend picker”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the backend above in the picker
+            b("transit-up", &["Up", "K"], tr!("Previous"), true, Always, false),
+            // i18n: Keys (key context “Backend picker”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It chooses the backend under the cursor
+            b("transit-enter", &["Return"], tr!("Choose"), true, Always, false),
+            // i18n: Keys (key context “Backend picker”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It leaves where the keyboard is, back to the place this label names
+            b("escape", &["Escape"], tr!("verb" => "Back"), true, Always, false),
         ],
         // The agent profile from the keyboard: a cursor walks its rows, Tab its
         // cards; a digit jumps to a section (the cards' titles show which);
         // Enter acts on the row, Left and Right change a choice.
         "profile" => vec![
-            b("profile-section", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], "Sections", true, Always, false),
-            b("profile-down", &["Down", "J"], "Next", false, Always, false),
-            b("profile-up", &["Up", "K"], "Previous", false, Always, false),
-            b("profile-next-card", &["Tab"], "Next card", false, Always, false),
-            b("profile-previous-card", &["Shift+Tab"], "Previous card", false, Always, false),
-            b("profile-enter", &["Return"], "Open", true, Always, false),
-            b("profile-left", &["Left"], "Change", false, Always, false),
-            b("profile-right", &["Right"], "Change", false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It jumps to a section of the agent profile by its number
+            b("profile-section", &["1", "2", "3", "4", "5", "6", "7", "8", "9"], tr!("Sections"), true, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the next row of the agent profile
+            b("profile-down", &["Down", "J"], tr!("Next"), false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the row above in the agent profile
+            b("profile-up", &["Up", "K"], tr!("Previous"), false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the next card of the agent profile
+            b("profile-next-card", &["Tab"], tr!("Next card"), false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves to the card before in the agent profile
+            b("profile-previous-card", &["Shift+Tab"], tr!("Previous card"), false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It acts on the row of the agent profile (opens it)
+            b("profile-enter", &["Return"], tr!("verb" => "Open"), true, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It changes the choice on the row
+            b("profile-left", &["Left"], tr!("verb" => "Change"), false, Always, false),
+            // i18n: Keys (key context “Agent profile”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It changes the choice on the row
+            b("profile-right", &["Right"], tr!("verb" => "Change"), false, Always, false),
         ],
         // Link hints show: digits pick a link (the bar says which), Enter
         // opens a number that also starts a longer one; any other key
         // cancels.
         "hints" => vec![
-            b("hint-digit", &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"], "Open", true, Always, false),
-            b("hint-open", &["Return"], "Open", false, Always, false),
-            b("hint-back", &["Backspace"], "Undo digit", false, Always, false),
-            b("hint-cancel", &["Escape"], "Cancel", true, Always, false),
+            // i18n: Keys (key context “Link numbers”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It opens the link with the typed number
+            b("hint-digit", &["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"], tr!("verb" => "Open"), true, Always, false),
+            // i18n: Keys (key context “Link numbers”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It opens the link with the number typed so far
+            b("hint-open", &["Return"], tr!("verb" => "Open"), false, Always, false),
+            // i18n: Keys (key context “Link numbers”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It removes the last digit typed while link numbers show
+            b("hint-back", &["Backspace"], tr!("Undo digit"), false, Always, false),
+            // i18n: Keys (key context “Link numbers”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It hides the link numbers
+            b("hint-cancel", &["Escape"], tr!("Cancel"), true, Always, false),
         ],
         _ => Vec::new(),
     }
@@ -383,24 +563,39 @@ impl Facts {
 /// The contexts a user binds keys in, outermost first, with their names.
 /// "Everywhere" is the window's surfaces, not its dialogs.
 pub const CONTEXTS: &[(&str, &str)] = &[
-    ("main", "Everywhere"),
-    ("workspace", "Chats"),
-    ("navigation", "Chat and explorer"),
-    ("pane", "Chat"),
-    ("sidebar", "Explorer"),
-    ("composer", "Composer"),
-    ("search", "Explorer search"),
-    ("settings", "Settings"),
-    ("settings-search", "Settings search"),
-    ("updates", "Updates"),
-    ("teams", "Teams"),
-    ("launch", "New agent hub"),
-    ("profile", "Agent profile"),
-    ("transit", "Backend picker"),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): everywhere in the window (its surfaces, not dialogs)
+    ("main", crate::catalogue::en::tr!("Everywhere")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the chats surface (chat, composer, explorer)
+    ("workspace", crate::catalogue::en::tr!("Chats")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the chat and the explorer, not while typing
+    ("navigation", crate::catalogue::en::tr!("Chat and explorer")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the chat pane
+    ("pane", crate::catalogue::en::tr!("Chat")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the explorer, the list of chats
+    ("sidebar", crate::catalogue::en::tr!("Explorer")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the message field
+    ("composer", crate::catalogue::en::tr!("Composer")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the explorer's search field
+    ("search", crate::catalogue::en::tr!("Explorer search")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the settings page
+    ("settings", crate::catalogue::en::tr!("Settings")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the settings page's search field
+    ("settings-search", crate::catalogue::en::tr!("Settings search")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the updates feed
+    ("updates", crate::catalogue::en::tr!("Updates")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the teams page
+    ("teams", crate::catalogue::en::tr!("Teams")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the hub that starts a new agent
+    ("launch", crate::catalogue::en::tr!("New agent hub")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): an agent's profile
+    ("profile", crate::catalogue::en::tr!("Agent profile")),
+    // i18n: Key-binding editor and Keys help, the name of a key context (where a key works): the agent profile's backend picker
+    ("transit", crate::catalogue::en::tr!("Backend picker")),
 ];
 
-pub fn context_name(state: &str) -> &str {
-    CONTEXTS.iter().find(|(s, _)| *s == state).map_or(state, |(_, name)| *name)
+/// A context's name in the app's language.
+pub fn context_name(state: &str) -> String {
+    CONTEXTS.iter().find(|(s, _)| *s == state).map_or_else(|| state.to_owned(), |(_, name)| crate::catalogue::local(name))
 }
 
 /// Text fields, where a key without Ctrl or Alt types.
@@ -434,7 +629,7 @@ fn definition(action: &str) -> Option<Binding> {
 /// Every action a user may bind, with its label: not the keys a control
 /// handles itself (the composer's Return) nor the link hints' and cards'
 /// digits.
-pub fn actions() -> Vec<(&'static str, &'static str)> {
+pub fn actions() -> Vec<(&'static str, String)> {
     let mut seen = HashSet::new();
     let mut out = Vec::new();
     for name in STATES {
@@ -650,7 +845,8 @@ pub fn double_press_window(setting: Option<i64>) -> Duration {
 const NAMED: &[&str] = &["Escape", "Tab", "Return", "Left", "Right", "Up", "Down", "Home", "End", "PageUp", "PageDown", "Delete", "Backspace", "Space"];
 
 fn parse_chord(text: &str) -> Result<String, String> {
-    let invalid = || format!("Not a key: {text}");
+    // i18n: Key-binding editor and keymap import, error: the typed text is not a key; {} is that text
+    let invalid = || tr!("Not a key: {}", text);
     let (mut control, mut alt, mut shift, mut rest) = (false, false, false, text);
     loop {
         let lower = rest.to_ascii_lowercase();
@@ -693,11 +889,13 @@ pub fn parse_key(text: &str) -> Result<String, String> {
         [first, second] => {
             let (first, second) = (parse_chord(first)?, parse_chord(second)?);
             if first != second {
-                return Err(format!("A double press is one key twice: {text}"));
+                // i18n: Key-binding editor and keymap import, error: a double press must be the same key twice (e.g. Right Right); {} is what was typed
+                return Err(tr!("A double press is one key twice: {}", text));
             }
             Ok(format!("{first} {second}"))
         }
-        _ => Err(format!("Not a key: {text}")),
+        // i18n: Key-binding editor and keymap import, error: the typed text is not a key; {} is that text
+        _ => Err(tr!("Not a key: {}", text)),
     }
 }
 
@@ -761,18 +959,21 @@ impl std::fmt::Display for Refusal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Refusal::Invalid(why) => f.write_str(why),
-            Refusal::Reserved(key) => write!(f, "{} is reserved for text editing", display(key)),
+            // i18n: Key-binding editor, error: the key is kept for text editing (copy, paste, undo) and cannot be bound; {} is the key, e.g. Ctrl+C
+            Refusal::Reserved(key) => f.write_str(&tr!("{} is reserved for text editing", display(key))),
             Refusal::Clash(clashes) => {
                 let Some(first) = clashes.first() else { return Ok(()) };
                 let other = first.actions[0];
-                let label = definition(other).map_or(other, |d| d.label);
-                let mut places: Vec<&str> = Vec::new();
+                let label = definition(other).map_or_else(|| other.to_owned(), |d| d.label);
+                let mut places: Vec<String> = Vec::new();
                 for clash in clashes.iter().filter(|c| c.actions[0] == other) {
-                    if !places.contains(&context_name(clash.state)) {
-                        places.push(context_name(clash.state));
+                    let place = context_name(clash.state);
+                    if !places.contains(&place) {
+                        places.push(place);
                     }
                 }
-                write!(f, "{} already runs {label} in {}", display(&first.key), places.join(", "))
+                // i18n: Key-binding editor, the key is taken; {0} the key, {1} the action it runs now (a key action's name), {2} the key contexts, comma-separated
+                f.write_str(&tr!("{0} already runs {1} in {2}", display(&first.key), label, places.join(", ")))
             }
         }
     }
@@ -792,10 +993,12 @@ fn tidy(mut overrides: Overrides) -> Overrides {
 
 fn checked_place(action: &str, context: &str) -> Result<(), Refusal> {
     if !bindable(action) {
-        return Err(Refusal::Invalid(format!("{action} keeps its own keys")));
+        // i18n: Key-binding editor and keymap import, error: this action's keys cannot be changed; {} is the action's id (code)
+        return Err(Refusal::Invalid(tr!("{} keeps its own keys", action)));
     }
     if !CONTEXTS.iter().any(|(c, _)| *c == context) {
-        return Err(Refusal::Invalid(format!("No context {context}")));
+        // i18n: Keymap import, error: the file names a key context that does not exist; {} is that context's id (code)
+        return Err(Refusal::Invalid(tr!("No context {}", context)));
     }
     Ok(())
 }
@@ -844,7 +1047,8 @@ pub fn take_over(overrides: &Overrides, action: &str, context: &str, key: &str) 
         let other = if clash.actions[0] == action { clash.actions[1] } else { clash.actions[0] };
         next = remove(&next, other, clash.state, &key);
     }
-    Err(format!("{} still clashes", display(&key)))
+    // i18n: Key-binding editor, error: the key could not be freed from the other actions; {} is the key
+    Err(tr!("{} still clashes", display(&key)))
 }
 
 /// Takes `key` from `action` in `context`.
@@ -922,12 +1126,14 @@ pub fn to_settings(overrides: &Overrides) -> Value {
 /// contexts, real keys, no reserved editing key, and no clash.
 pub fn import(text: &str) -> Result<Overrides, String> {
     let value: Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
-    let object = value.as_object().ok_or("Unsupported keymap")?;
+    // i18n: Keymap import, error: the file is not a keymap Clarp can read
+    let object = value.as_object().ok_or_else(|| tr!("Unsupported keymap"))?;
     let supported = object.keys().all(|k| k == "version" || k == "bindings");
     let bindings = object.get("bindings").and_then(Value::as_object);
     let version = object.get("version").and_then(Value::as_i64);
     let (true, Some(version @ (1 | 2)), Some(bindings)) = (supported, version, bindings) else {
-        return Err("Unsupported keymap".into());
+        // i18n: Keymap import, error: the file is not a keymap Clarp can read
+        return Err(tr!("Unsupported keymap"));
     };
     for (action, contexts) in bindings {
         let readable = match (version, contexts) {
@@ -936,7 +1142,8 @@ pub fn import(text: &str) -> Result<Overrides, String> {
             _ => false,
         };
         if !readable {
-            return Err(format!("Unsupported binding for {action}"));
+            // i18n: Keymap import, error: one action's keys in the file cannot be read; {} is the action's id (code)
+            return Err(tr!("Unsupported binding for {}", action));
         }
     }
     let overrides = from_settings(&Value::Object(bindings.clone()));
@@ -959,7 +1166,8 @@ pub fn import(text: &str) -> Result<Overrides, String> {
     // user's wins (`yield_to_user`), as it does for keys kept in settings.
     let mine = |clash: &Clash| clash.actions.iter().filter(|a| user_added(&chain(clash.state), &canonical, a, &clash.key)).count();
     if let Some(clash) = clashes(&canonical).iter().find(|c| mine(c) != 1) {
-        return Err(format!("Conflict in {}: {}", context_name(clash.state), display(&clash.key)));
+        // i18n: Keymap import, error: two actions share one key; {0} the key context's name, {1} the key
+        return Err(tr!("Conflict in {0}: {1}", context_name(clash.state), display(&clash.key)));
     }
     Ok(canonical)
 }

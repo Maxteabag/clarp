@@ -44,7 +44,7 @@ use clarp_kernel::turn::{Activity, Origin, RunOutcome};
 use clarp_spool::{Entry, Record, ShimEvent};
 use serde_json::{Value, json};
 
-use crate::agy::{self, Agy};
+use crate::agy;
 use crate::{
     Apart, Backend, ErrorTail, Interpreter, Launch, LiveReply, OwnHome, Question, Reading,
     SESSION_ENV, Signal, TurnSpec, shorten,
@@ -54,6 +54,7 @@ use clarp_child::MANAGED_AGY_ENV as MANAGED;
 
 /// The card's name.
 pub const ID: &str = "agy-acp";
+pub use shared::here as native_store;
 /// What the ids of this card's live items begin with. The turn follows it, since agy's own
 /// numbering of what it says starts again each turn ([`AcpInterpreter::shown`]).
 const SHOWN: &str = "aa";
@@ -62,8 +63,6 @@ const SHOWN: &str = "aa";
 const STOP_GRACE_MS: u64 = 20_000;
 
 pub struct AgyAcp {
-    /// The `agy` card: what this one shares with it (its program, its questions asked once).
-    agy: Agy,
     program: String,
 }
 
@@ -73,10 +72,8 @@ impl AgyAcp {
     }
 
     pub fn with_program(program: impl Into<String>) -> Self {
-        let program = program.into();
         Self {
-            agy: Agy::with_program(program.clone()),
-            program,
+            program: program.into(),
         }
     }
 }
@@ -169,7 +166,7 @@ impl Backend for AgyAcp {
     }
 
     fn efforts(&self) -> &'static [&'static str] {
-        self.agy.efforts()
+        agy::EFFORTS
     }
 
     /// The driver gives agy a message the Host writes while the turn runs, says when agy took
@@ -221,19 +218,90 @@ impl Backend for AgyAcp {
     }
 
     fn once(&self, question: &Question) -> Option<Launch> {
-        self.agy.once(question)
+        Some(self.question(question, false))
     }
 
     fn answered(&self, printed: &str) -> Result<String, String> {
-        self.agy.answered(printed)
+        let answer = question_result(printed)
+            .ok_or_else(|| "Antigravity ACP returned no result".to_string())?;
+        let text = text_of(&answer["result"]).trim();
+        if answer["is_error"] == true {
+            return Err(shorten(text, 300));
+        }
+        if text.is_empty() {
+            return Err("Antigravity ACP returned no answer".to_string());
+        }
+        Ok(text.to_string())
     }
 
     fn reads(&self, reading: &Reading) -> Option<Apart> {
-        self.agy.reads(reading)
+        let question = Question {
+            prompt: format!(
+                "{}\n\n{}\n\nReturn only a JSON answer matching this schema: {}",
+                reading.instructions, reading.asked, reading.schema
+            ),
+            model: reading.model.clone(),
+            effort: reading.effort.clone(),
+        };
+        Some(Apart {
+            launch: self.question(&question, true),
+            files: Vec::new(),
+            keeps: agy::KEPT_APART.to_vec(),
+        })
     }
 
     fn own_home(&self) -> Option<OwnHome> {
-        self.agy.own_home()
+        Some(agy::OWN_HOME)
+    }
+}
+
+fn question_result(printed: &str) -> Option<Value> {
+    printed
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "result")
+}
+
+/// The provider's words when an ACP one-off process exits unsuccessfully.
+pub fn question_failure(printed: &str) -> Option<String> {
+    let result = question_result(printed)?;
+    let text = text_of(&result["result"]).trim();
+    (result["is_error"] == true && !text.is_empty()).then(|| text.to_string())
+}
+
+impl AgyAcp {
+    fn question(&self, question: &Question, read_only: bool) -> Launch {
+        let order = Order {
+            prompt: question.prompt.clone(),
+            model: question
+                .model
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_string(),
+            effort: question
+                .effort
+                .as_deref()
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            ..Order::default()
+        };
+        let mut args = vec![shared::DRIVER.to_string(), self.program.clone()];
+        if read_only {
+            args.push(shared::READ_ONLY.to_string());
+        }
+        Launch {
+            prompt_as_file: false,
+            before_stop: None,
+            program: "clarp-shim".to_string(),
+            args,
+            // Scratch homes carry the login used for one-off questions, as
+            // before. A separate conversation profile belongs to agent turns.
+            env: vec![(shared::PROFILE_ENV.to_string(), String::new())],
+            stdin: format!("{}\n", order.to_json()).into_bytes(),
+        }
     }
 }
 
@@ -1045,11 +1113,9 @@ mod tests {
         );
     }
 
-    /// A janitor's isolated question goes to Antigravity as one sandboxed print in a home
-    /// of its own, exactly as for the plain card: never through ACP, and never into the
-    /// conversation store the agents share.
+    /// A janitor asks ACP in its own scratch home and without tool permission.
     #[test]
-    fn an_isolated_question_is_the_plain_cards_one_shot_in_its_own_home() {
+    fn an_isolated_question_uses_the_read_only_acp_driver() {
         let reading = Reading {
             instructions: "Keep the books.".to_string(),
             asked: "GOAL AS RECORDED: ...".to_string(),
@@ -1058,13 +1124,16 @@ mod tests {
             effort: None,
         };
         let acp = AgyAcp::with_program("/opt/agy");
-        let plain = crate::agy::Agy::with_program("/opt/agy");
         let reads = acp.reads(&reading).unwrap();
-        assert_eq!(Some(reads.clone()), plain.reads(&reading));
-        assert_eq!(reads.launch.program, "/opt/agy");
-        assert!(reads.launch.args.iter().any(|arg| arg == "--sandbox"));
-        assert!(!reads.launch.args.iter().any(|arg| arg == "acp"));
-        assert_eq!(acp.own_home(), plain.own_home());
+        assert_eq!(reads.launch.program, "clarp-shim");
+        assert_eq!(
+            reads.launch.args,
+            [shared::DRIVER, "/opt/agy", shared::READ_ONLY]
+        );
+        let order = Order::from_json(&serde_json::from_slice(&reads.launch.stdin).unwrap());
+        assert_eq!(order.model, "gemini-4-hydrogen-low");
+        assert!(order.session.is_empty());
+        assert!(order.prompt.contains(&reading.schema));
         assert!(acp.own_home().is_some());
     }
 }

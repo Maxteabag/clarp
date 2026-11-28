@@ -49,7 +49,7 @@ export async function setCoordinationVisibility(visibility) {
     changed('', coordination.visibility);
   } catch (err) {
     coordination.visibility = before;
-    coordination.error = 'The setting was not saved.';
+    coordination.error = 'chat_settings.not_saved';  // a catalog key; the dialog shows t()
     clog('coordinationSettingFail', err && err.message ? err.message : String(err));
   }
 }

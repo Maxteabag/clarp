@@ -50,7 +50,7 @@ fn shared_host_polls_until_ready_and_caches() {
     // First answer: still pending, so the narrator polls again.
     let effects = narrator.handle_reply(tag, &answer(body, "pending", ""));
     assert!(effects.iter().any(|e| matches!(e, Effect::Poll { .. })));
-    assert!(narrator.status().starts_with("Host translating"));
+    assert!(narrator.status().starts_with("Translating"));
     let resent = requests(&narrator.poll_for(tag));
     assert_eq!(resent.len(), 1);
     narrator.handle_reply(tag, &answer(body, "ready", "Build the desktop preview."));

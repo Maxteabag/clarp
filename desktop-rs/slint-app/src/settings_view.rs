@@ -6,13 +6,15 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use clarp_core::tr;
 use serde_json::Value;
 use slint::{Model, ModelRc, VecModel};
 
 use crate::{App, AppWindow, SettingRow};
 
-fn section(label: &str) -> SettingRow {
-    SettingRow { kind: "section".into(), id: String::new().into(), label: label.into(), ..SettingRow::default() }
+/// A section's title row; `name` is the section's English name, shown in the app's language.
+fn section(name: &str) -> SettingRow {
+    SettingRow { kind: "section".into(), id: String::new().into(), label: crate::catalogue::section_title(name).into(), ..SettingRow::default() }
 }
 fn info(label: &str, detail: &str) -> SettingRow {
     SettingRow { kind: "info".into(), id: String::new().into(), label: label.into(), detail: detail.into(), ..SettingRow::default() }
@@ -70,7 +72,7 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
     let engine = app.engine.borrow();
     let text = |object: &clarp_core::json::Object, key: &str| object.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
     match section {
-        "EXPERIMENTS" => vec![info(engine.narrator_level_description(), &engine.narrator_status())],
+        "EXPERIMENTS" => vec![info(&narrator_level_description(engine.narrator_level_description()), &engine.narrator_status())],
         "HOST STATUS" => {
             let diagnostics = engine.diagnostics_health();
             let transcription = engine.transcription_capabilities();
@@ -78,11 +80,38 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
             let count = |key: &str| queue.get(key).and_then(Value::as_i64).unwrap_or(0);
             let model = text(transcription, "default_model");
             let ready = diagnostics.get("ready").and_then(Value::as_bool) == Some(true);
+            let diagnostics_state = if engine.host_status_loading() {
+                // i18n: Settings > Host status, the Diagnostics row's value while the Host's answer is loading
+                tr!("Loading…")
+            } else if ready {
+                // i18n: Settings > Host status, the Diagnostics row's value (adjective): the Host is ready
+                tr!("Ready")
+            } else {
+                // i18n: Settings > Host status, the Diagnostics row's value: something on the Host is wrong
+                tr!("Needs attention")
+            };
+            let speech = if transcription.get("available").and_then(Value::as_bool) == Some(true) {
+                // i18n: Settings > Host status, the Speech to text row's value (adjective): the Host can transcribe speech
+                tr!("Available")
+            } else {
+                // i18n: Settings > Host status, the Speech to text row's value (adjective): the Host cannot transcribe speech
+                tr!("Unavailable")
+            };
+            // i18n: Settings > Host status, a row's value when the Host has not said (e.g. its transcription model)
+            let model = if model.is_empty() { tr!("Unknown") } else { model };
             vec![
-                info("Diagnostics", if engine.host_status_loading() { "Loading…" } else if ready { "Ready" } else { "Needs attention" }),
-                info("Speech to text", if transcription.get("available").and_then(Value::as_bool) == Some(true) { "Available" } else { "Unavailable" }),
-                info("Transcription model", if model.is_empty() { "Unknown" } else { &model }),
-                info("TTS queue", &format!("{} pending · {} in flight", count("pending"), count("in_flight"))),
+                // i18n: Settings > Host status, information row label (noun): the Host's health checks
+                info(&tr!("Diagnostics"), &diagnostics_state),
+                // i18n: Settings > Host status, information row label (noun): the Host's speech recognition
+                info(&tr!("Speech to text"), &speech),
+                // i18n: Settings > Host status, information row label (noun): the model the Host transcribes speech with
+                info(&tr!("Transcription model"), &model),
+                info(
+                    // i18n: Settings > Host status, information row label (noun): the Host's queue of text-to-speech jobs; TTS is text to speech
+                    &tr!("TTS queue"),
+                    // i18n: Settings > Host status, the TTS queue row's value; {0} jobs waiting, {1} jobs being spoken now
+                    &tr!("{0} pending · {1} in flight", count("pending"), count("in_flight")),
+                ),
             ]
         }
         "KEYBOARD" => {
@@ -90,27 +119,70 @@ fn information(app: &App, section: &str) -> Vec<SettingRow> {
             let overrides = crate::commands::overrides_of(&engine);
             let key = |action: &str| crate::keymap::shown("pane", action, &overrides).unwrap_or_default();
             vec![
-                info("Key bindings", &key("edit-keymap")),
-                info("Command palette", &key("switcher")),
-                info("Settings", &key("settings")),
-                info("Navigate settings", "↑↓ / Tab · Home / End · / search · Delete default"),
-                info("Open agent terminal", &key("agent-terminal")),
-                info("Start idle contact", &key("new-contact")),
-                info("Show / hide sidebar", &key("sidebar")),
-                info("Move between panes", "Ctrl+Alt+Arrow"),
-                info("Split right / down", "Ctrl+Alt+V / S"),
-                info("Zoom / close / balance", "Ctrl+Alt+Z / X / ="),
-                info("Queue message", "Ctrl+Enter"),
+                // i18n: Settings > Keyboard, information row label (noun): the key that opens the key-binding editor; the value is the key
+                info(&tr!("Key bindings"), &key("edit-keymap")),
+                // i18n: Settings > Keyboard, information row label (noun): the key that opens the command palette (Ctrl+K); the value is the key
+                info(&tr!("Command palette"), &key("switcher")),
+                // i18n: Settings > Keyboard, information row label (noun): the key that opens Settings; the value is the key
+                info(&tr!("Settings"), &key("settings")),
+                info(
+                    // i18n: Settings > Keyboard, information row label (an action): the keys that move around the settings page
+                    &tr!("Navigate settings"),
+                    // i18n: Settings > Keyboard, the keys that move around the settings page; key names stay as they are, "search" and "default" say what / and Delete do
+                    &tr!("↑↓ / Tab · Home / End · / search · Delete default"),
+                ),
+                // i18n: Settings > Keyboard, information row label (an action); the value is the key that opens the agent's CLI in a terminal
+                info(&tr!("Open agent terminal"), &key("agent-terminal")),
+                // i18n: Settings > Keyboard, information row label (an action); the value is the key that starts one of your idle contacts
+                info(&tr!("Start idle contact"), &key("new-contact")),
+                // i18n: Settings > Keyboard, information row label (an action); the value is the key that shows or hides the sidebar
+                info(&tr!("Show / hide sidebar"), &key("sidebar")),
+                // i18n: Settings > Keyboard, information row label (an action); the value is the keys that move between panes
+                info(&tr!("Move between panes"), "Ctrl+Alt+Arrow"),
+                // i18n: Settings > Keyboard, information row label (actions); the value is the keys that split a pane to the right or down
+                info(&tr!("Split right / down"), "Ctrl+Alt+V / S"),
+                // i18n: Settings > Keyboard, information row label (actions: zoom a pane, close it, make panes the same size); the value is the keys
+                info(&tr!("Zoom / close / balance"), "Ctrl+Alt+Z / X / ="),
+                // i18n: Settings > Keyboard, information row label (an action, verb): the key that queues a message to send after the running turn
+                info(&tr!("Queue message"), "Ctrl+Enter"),
             ]
         }
         crate::catalogue::lanes::SECTION => {
             crate::catalogue::lanes::information(app).iter().map(|(label, detail)| info(label, detail)).collect()
         }
         "ABOUT" => vec![
-            info("Desktop client", concat!(env!("CARGO_PKG_VERSION"), " preview (Slint)")),
-            info("Host version", if engine.server_version().is_empty() { "Unknown" } else { engine.server_version() }),
+            info(
+                // i18n: Settings > About, information row label (noun): this desktop app; the value is its version
+                &tr!("Desktop client"),
+                // i18n: Settings > About, the desktop app's version; {} is the version number, Slint is the UI toolkit's name
+                &tr!("{} preview (Slint)", env!("CARGO_PKG_VERSION")),
+            ),
+            info(
+                // i18n: Settings > About, information row label (noun): the version of the Clarp Host this window talks to
+                &tr!("Host version"),
+                // i18n: Settings > About, the Host version row's value when the Host has not said its version
+                &if engine.server_version().is_empty() { tr!("Unknown") } else { engine.server_version().to_owned() },
+            ),
         ],
         _ => Vec::new(),
+    }
+}
+
+/// The tool-detail level's description in the app's language
+/// (`clarp_core::narrator` keeps it in English).
+fn narrator_level_description(english: &str) -> String {
+    match english {
+        // i18n: Settings > Experiments, the line describing the Tool detail level "Developer"
+        "Original tool calls." => tr!("Original tool calls."),
+        // i18n: Settings > Experiments, the line describing the Tool detail level "Technical"
+        "Actions with commands and paths." => tr!("Actions with commands and paths."),
+        // i18n: Settings > Experiments, the line describing the Tool detail level "Balanced"
+        "Actions with key technical details." => tr!("Actions with key technical details."),
+        // i18n: Settings > Experiments, the line describing the Tool detail level "Plain English"
+        "Everyday language, no code or paths." => tr!("Everyday language, no code or paths."),
+        // i18n: Settings > Experiments, the line describing the Tool detail level "Grandma"
+        "Simple explanations, no technical terms." => tr!("Simple explanations, no technical terms."),
+        other => crate::catalogue::local(other),
     }
 }
 
@@ -154,9 +226,12 @@ pub fn filter(rows: Vec<SettingRow>, query: &str) -> Vec<SettingRow> {
             if !line {
                 group = if row.kind == "info" { row.label.to_string() } else { String::new() };
             }
-            let aliases = crate::catalogue::find(&row.id).map_or(&[][..], |e| e.aliases);
+            let entry = crate::catalogue::find(&row.id);
+            let aliases = entry.map_or(&[][..], |e| e.aliases);
             let words = if line { format!("{} {} {group}", row.description, row.detail) } else { format!("{} {}", row.description, row.detail) };
-            let score = crate::catalogue::score(query, &row.label, aliases, &words)?;
+            // Found by its words in the app's language, and by its English ones too.
+            let english = entry.filter(|_| clarp_core::i18n::current() != "en").and_then(|e| crate::catalogue::score(query, e.label, e.aliases, &format!("{} {}", e.description, row.detail)));
+            let score = crate::catalogue::score(query, &row.label, aliases, &words).max(english)?;
             Some((actionable(&row), score, crate::catalogue::order(&row.id), row))
         })
         .collect();

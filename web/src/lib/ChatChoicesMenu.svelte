@@ -1,8 +1,9 @@
 <script>
   // The chat's quick '…' menu (#653): its own 'Messages between agents' (kept by the Host) and
   // its own 'Tool activity' (kept on this device), each a submenu that shows its current value.
-  import { CHAT_TOOL_ACTIVITY, CHAT_TOOL_ACTIVITY_LABELS } from '@core/history-fold.js';
-  import { OVERRIDE_LABELS, OVERRIDES } from '@core/coordination.js';
+  import { CHAT_TOOL_ACTIVITY, toolActivityKey } from '@core/history-fold.js';
+  import { OVERRIDE_KEYS, OVERRIDES } from '@core/coordination.js';
+  import { t } from '../stores/i18n.svelte.js';
   import {
     chatChoicesReady, chatCoordinationChoice, chatToolActivity, setChatCoordinationChoice,
     setChatToolActivity,
@@ -46,35 +47,35 @@
 
 <div class="chat-menu-wrap">
   <button id={active ? 'historyChatMenu' : undefined} class="history-btn chat-menu-btn"
-          aria-haspopup="menu" aria-expanded={open} aria-label="Chat options" title="Chat options"
+          aria-haspopup="menu" aria-expanded={open} aria-label={t('chat_choices.menu')} title={t('chat_choices.menu')}
           onclick={() => { open = !open; sub = ''; }}>…</button>
   {#if open}
-    <div class="chat-menu" role="menu" aria-label="Chat options">
+    <div class="chat-menu" role="menu" aria-label={t('chat_choices.menu')}>
       {#if live.hiddenCoordination}
         <button class="chat-menu-row" role="menuitem" aria-haspopup="menu" aria-expanded={sub === 'coordination'}
                 disabled={busy} onclick={() => sub = sub === 'coordination' ? '' : 'coordination'}>
-          <span>Messages between agents</span><span class="chat-menu-value">{OVERRIDE_LABELS[coordination]}</span>
+          <span>{t('chat_choices.coordination')}</span><span class="chat-menu-value">{t(OVERRIDE_KEYS[coordination])}</span>
           <span class="chat-menu-caret" class:open={sub === 'coordination'} aria-hidden="true">›</span>
         </button>
         {#if sub === 'coordination'}
-          <div class="chat-submenu" role="menu" aria-label="Messages between agents in this chat">
+          <div class="chat-submenu" role="menu" aria-label={t('chat_choices.coordination_here')}>
             {#each OVERRIDES as value (value)}
               <button role="menuitemradio" aria-checked={coordination === value} class:checked={coordination === value}
-                      onclick={() => pickCoordination(value)}>{OVERRIDE_LABELS[value]}</button>
+                      onclick={() => pickCoordination(value)}>{t(OVERRIDE_KEYS[value])}</button>
             {/each}
           </div>
         {/if}
       {/if}
       <button class="chat-menu-row" role="menuitem" aria-haspopup="menu" aria-expanded={sub === 'tools'}
               disabled={!ready} onclick={() => sub = sub === 'tools' ? '' : 'tools'}>
-        <span>Tool activity</span><span class="chat-menu-value">{CHAT_TOOL_ACTIVITY_LABELS[tools]}</span>
+        <span>{t('chat_choices.tool_activity')}</span><span class="chat-menu-value">{t(toolActivityKey(tools))}</span>
         <span class="chat-menu-caret" class:open={sub === 'tools'} aria-hidden="true">›</span>
       </button>
       {#if sub === 'tools'}
-        <div class="chat-submenu" role="menu" aria-label="Tool activity in this chat">
+        <div class="chat-submenu" role="menu" aria-label={t('chat_choices.tool_activity_here')}>
           {#each CHAT_TOOL_ACTIVITY as value (value)}
             <button role="menuitemradio" aria-checked={tools === value} class:checked={tools === value}
-                    onclick={() => pickTools(value)}>{CHAT_TOOL_ACTIVITY_LABELS[value]}</button>
+                    onclick={() => pickTools(value)}>{t(toolActivityKey(value))}</button>
           {/each}
         </div>
       {/if}

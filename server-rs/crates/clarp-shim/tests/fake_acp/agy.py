@@ -2,7 +2,7 @@
 # A stand-in for `agy acp`: an Agent Client Protocol (v1) agent on standard input and output,
 # scripted by the file `scenario` beside it (one word; `turn` when there is none). Every
 # message it is sent is written to `acp.log` beside it, one per line, for the test to read.
-# Started with anything but `acp` first (`agy models`, `agy --version`), it says nothing.
+# Model and version probes are separate from turns. Record any other non-ACP launch.
 #
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
@@ -23,20 +23,19 @@ def keep(conversation):
     open(os.path.join(store, conversation + ".db"), "a").close()
 
 
+MODELS = [("gemini-a", "Gemini A"), ("claude-b", "Claude B"), ("gemini-4-neon", "Gemini 4 Neon")]
+EFFORTS = ["low", "medium", "high"]
+
 if sys.argv[1:2] != ["acp"]:
-    # `agy --print=<message>`, as the `agy` card runs a turn: one conversation, continued by
-    # `--conversation <id>`, its turn told as stream-json. Anything else (`agy models`) is silent.
-    told = [arg[len("--print="):] for arg in sys.argv[1:] if arg.startswith("--print=")]
-    if not told:
-        sys.exit(0)
-    args = sys.argv[1:]
-    conversation = args[args.index("--conversation") + 1] if "--conversation" in args else "conv-print"
-    keep(conversation)
-    with open(os.path.join(here, "print.log"), "a") as out:
-        out.write(json.dumps({"conversation": "--conversation" in args and conversation, "prompt": told[0]}) + "\n")
-    print(json.dumps({"event": "init", "conversation_id": conversation, "init": {"model": "fixture"}}))
-    print(json.dumps({"event": "result", "result": {"conversation_id": conversation, "status": "SUCCESS",
-                                                     "response": "Printed"}}))
+    if sys.argv[1:] == ["models"]:
+        listed = [MODELS[0]] if os.path.exists(os.path.join(here, "partial-models")) else MODELS
+        for model, label in listed:
+            for effort in EFFORTS:
+                print(f"{model}-{effort}\t{label} ({effort.title()})")
+    elif sys.argv[1:] != ["--version"]:
+        with open(os.path.join(here, "print.log"), "a") as out:
+            print(json.dumps(sys.argv[1:]), file=out)
+        sys.exit("unexpected standalone invocation")
     sys.exit(0)
 try:
     with open(os.path.join(here, "scenario")) as said:
@@ -46,13 +45,13 @@ except FileNotFoundError:
 log = open(os.path.join(here, "acp.log"), "a")
 with open(os.path.join(here, "argv"), "a") as argv:
     argv.write(json.dumps({"argv": sys.argv[1:], "env": {k: os.environ.get(k) for k in (
-        "GEMINI_API_KEY", "AGY_CLI_DISABLE_AUTO_UPDATE", "AGY_ACP_FORCE_FILE_STORAGE", "SSH_CONNECTION")}}) + "\n")
+        "GEMINI_API_KEY", "CLARP_AGY_MANAGED_TURN", "AGY_CLI_DISABLE_AUTO_UPDATE", "AGY_ACP_FORCE_FILE_STORAGE", "SSH_CONNECTION")}}) + "\n")
 
 OPTIONS = [
     {"id": "model", "name": "Model", "category": "model", "type": "select", "currentValue": "gemini-a",
-     "options": [{"value": "gemini-a", "name": "Gemini A"}, {"value": "claude-b", "name": "Claude B"}]},
+     "options": [{"value": value, "name": name} for value, name in MODELS]},
     {"id": "thought_level", "name": "Thinking", "category": "thought_level", "type": "select",
-     "currentValue": "low", "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]},
+     "currentValue": "low", "options": [{"value": level, "name": level.title()} for level in EFFORTS]},
 ]
 
 
@@ -386,38 +385,49 @@ def prompt(mid, sid, words=""):
                  "usage": {"inputTokens": 10, "outputTokens": 5, "thoughtTokens": 2, "cachedReadTokens": 3}})
 
 
-while True:
-    message = read()
-    method, mid = message.get("method"), message.get("id")
-    if method is None:
-        continue
-    params = message.get("params") or {}
-    if method == "initialize":
-        result(mid, {"protocolVersion": 1, "agentInfo": {"name": "agy", "version": "1.5.15"},
-                     "agentCapabilities": {"loadSession": True,
-                                           # As agy 1.5 says it: no audio, unless the test asks for it.
-                                           "promptCapabilities": {"image": True,
-                                                                  "audio": os.path.exists(os.path.join(here, "audio")),
-                                                                  "embeddedContext": True},
-                                           "_meta": {"antigravity": {"systemPrompt": {"append": True}}}},
-                     "authMethods": [{"id": "oauth-personal", "name": "Google"}]})
-    elif method == "session/new":
-        if scenario == "signed-out":
-            error(mid, -32000, "Authentication required")
-        else:
-            keep("conv-new")
-            result(mid, {"sessionId": "conv-new", "configOptions": OPTIONS})
-    elif method == "session/resume":
-        if scenario == "resume-lost":
-            error(mid, -32002, "Session not found")
-        else:
+
+def default_session_id():
+    return "conv-replacement" if scenario == "resume-lost" else "conv-new"
+
+
+def serve(on_prompt=prompt, new_id=default_session_id):
+    while True:
+        message = read()
+        method, mid = message.get("method"), message.get("id")
+        if method is None:
+            continue
+        params = message.get("params") or {}
+        if method == "initialize":
+            result(mid, {"protocolVersion": 1, "agentInfo": {"name": "agy", "version": "1.5.15"},
+                         "agentCapabilities": {"loadSession": True,
+                                               # As agy 1.5 says it: no audio, unless the test asks for it.
+                                               "promptCapabilities": {"image": True,
+                                                                      "audio": os.path.exists(os.path.join(here, "audio")),
+                                                                      "embeddedContext": True},
+                                               "_meta": {"antigravity": {"systemPrompt": {"append": True}}}},
+                         "authMethods": [{"id": "oauth-personal", "name": "Google"}]})
+        elif method == "session/new":
+            if scenario == "signed-out":
+                error(mid, -32000, "Authentication required")
+            else:
+                sid = new_id()
+                keep(sid)
+                result(mid, {"sessionId": sid, "configOptions": OPTIONS})
+        elif method == "session/resume":
+            if scenario == "resume-lost":
+                error(mid, -32002, "Session not found")
+            else:
+                result(mid, {"configOptions": OPTIONS})
+        elif method == "session/set_config_option":
+            for option in OPTIONS:
+                if option["id"] == params.get("configId"):
+                    option["currentValue"] = params.get("value")
             result(mid, {"configOptions": OPTIONS})
-    elif method == "session/set_config_option":
-        for option in OPTIONS:
-            if option["id"] == params.get("configId"):
-                option["currentValue"] = params.get("value")
-        result(mid, {"configOptions": OPTIONS})
-    elif method == "session/prompt":
-        prompt(mid, params.get("sessionId"), said_in(message))
-    elif mid is not None:
-        error(mid, -32601, "Method not found")
+        elif method == "session/prompt":
+            on_prompt(mid, params.get("sessionId"), said_in(message))
+        elif mid is not None:
+            error(mid, -32601, "Method not found")
+
+
+if __name__ == "__main__":
+    serve()

@@ -1,5 +1,6 @@
 <script>
   // Voice picker for one agent: preview a voice, or claim it.
+  import { t } from '../stores/i18n.svelte.js';
   import { app, flash } from '../stores/app.svelte.js';
 
   let { open = $bindable(), sid = '', name = '', onChanged } = $props();
@@ -14,7 +15,7 @@
   });
 
   async function load() {
-    state = 'Loading…';
+    state = 'voice.loading';
     voices = [];
     bio = '';
     try {
@@ -31,7 +32,7 @@
       }));
       state = '';
     } catch (_) {
-      state = 'Failed to load voices.';
+      state = 'voice.load_failed';
     }
   }
 
@@ -51,10 +52,10 @@
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
-      flash('voice ' + (d.error || 'rejected'), 2000);
+      flash(t('voice.rejected', { error: d.error || t('voice.rejected_default') }), 2000);
       return;
     }
-    flash(`${name} voice updated`, 1500);
+    flash(t('voice.updated', { name }), 1500);
     open = false;
     onChanged?.();
   }
@@ -63,21 +64,21 @@
 {#if open}
   <div class="start-dialog">
     <div class="start-card">
-      <h3 id="voiceTitle">{name}'s voice</h3>
+      <h3 id="voiceTitle">{t('voice.title', { name })}</h3>
       {#if bio}<p class="voice-bio">{bio}</p>{/if}
       <ul class="voice-list">
         {#if state}
-          <li>{state}</li>
+          <li>{t(state)}</li>
         {:else}
           {#each voices as v (v.id)}
             <li class="voice-row" class:current={v.isCurrent} class:taken={!!v.taken}>
               <span class="voice-label">
-                {v.label}{v.taken ? ` · used by ${v.taken}` : ''}{v.isCurrent ? ' · current' : ''}
+                {v.label}{v.taken ? ` · ${t('voice.used_by', { name: v.taken })}` : ''}{v.isCurrent ? ` · ${t('voice.current')}` : ''}
               </span>
               <span class="voice-actions">
                 <button class="voice-preview" onclick={() => preview(v.id)}>▶</button>
                 {#if !v.taken && !v.isCurrent}
-                  <button class="voice-pick" onclick={() => pick(v.id)}>use</button>
+                  <button class="voice-pick" onclick={() => pick(v.id)}>{t('voice.use')}</button>
                 {/if}
               </span>
             </li>
@@ -85,7 +86,7 @@
         {/if}
       </ul>
       <div class="start-actions">
-        <button class="start-btn ghost" onclick={() => open = false}>Done</button>
+        <button class="start-btn ghost" onclick={() => open = false}>{t('voice.done')}</button>
       </div>
     </div>
   </div>

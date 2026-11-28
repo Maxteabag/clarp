@@ -437,6 +437,9 @@ pub enum Amend {
         model: String,
         effort: String,
     },
+    /// The journal has changed the Antigravity transport. Preserve the
+    /// model and effort the owner last chose while that transfer was waiting.
+    RetiredAgy,
     /// The voices it was given, as they are stored: one for each engine it has one for.
     Voice {
         provider: String,
@@ -2025,6 +2028,9 @@ pub(crate) fn backend_of(record: &AgentRecord) -> Result<Arc<dyn clarp_backend::
         Ok(Some(own)) => return Ok(clarp_backend::codex_bound(own)),
         Ok(None) => {}
         Err(why) => return Err(format!("agent {}: {why}", record.session)),
+    }
+    if record.backend == clarp_backend::LEGACY_AGY {
+        return Ok(clarp_backend::legacy_agy());
     }
     clarp_backend::by_id(&record.backend)
         .ok_or_else(|| format!("this Host has no backend named `{}`", record.backend))
@@ -3633,6 +3639,7 @@ impl Fleet {
             asked if asked.is_empty() => before.backend.clone(),
             asked => asked,
         };
+        let backend = clarp_backend::canonical_id(&backend).to_string();
         if clarp_backend::by_id(&backend).is_none() {
             return Err(format!("this Host has no backend named `{backend}`").into());
         }
@@ -3642,7 +3649,7 @@ impl Fleet {
                 session: owner.session.clone(),
             });
         }
-        let another_tool = backend != before.backend;
+        let another_tool = backend != clarp_backend::canonical_id(&before.backend);
         let model = match &request.model {
             Some(model) => model.trim().to_string(),
             None if another_tool => String::new(),
@@ -3911,6 +3918,12 @@ impl Fleet {
         contact: Option<ContactAsked>,
         catalogue: &VoiceCatalogue,
     ) -> Result<AgentRecord, NotMade> {
+        if let Some(backend) = request.backend.as_mut() {
+            let canonical = clarp_backend::canonical_id(backend.trim());
+            if canonical != backend.as_str() {
+                *backend = canonical.to_owned();
+            }
+        }
         if let Some(parent) = request
             .parent
             .as_deref()
@@ -4186,7 +4199,7 @@ impl Fleet {
             agent_id,
             session: seed.session,
             persona: seed.persona,
-            backend: seed.backend,
+            backend: clarp_backend::canonical_id(&seed.backend).to_string(),
             cwd: cwd.display().to_string(),
             model: seed.model,
             effort: seed.effort,
@@ -4299,7 +4312,12 @@ impl Fleet {
                     record.effort = effort;
                 }
             }
-            Amend::Tool(backend) => record.backend = backend,
+            Amend::Tool(backend) => record.backend = clarp_backend::canonical_id(&backend).into(),
+            Amend::RetiredAgy => {
+                if record.backend == clarp_backend::LEGACY_AGY {
+                    record.backend = clarp_backend::agy_acp::ID.to_string();
+                }
+            }
             Amend::ToolChanged {
                 backend,
                 model,

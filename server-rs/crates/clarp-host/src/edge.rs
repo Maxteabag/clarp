@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 216;
+pub const HOST_CONTRACT: u64 = 217;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -377,6 +377,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     // A backend `agy-acp`: Antigravity driven over the Agent Client Protocol (`agy acp`),
     // beside `agy`, with its program, sign-in, models and conversations (`runs_through`).
     ("backend_agy_acp", 165),
+    ("antigravity_acp_only", 217),
     // A turn whose conversation no longer fits its model fails as `prompt_too_long`, its own
     // kind, which says to compact the conversation or start a new one; never tried again.
     ("prompt_too_long", 166),
@@ -2526,12 +2527,10 @@ async fn started_again(
 fn creation_backend(backend: &str) -> String {
     let backend = clarp_kernel::python::strip(backend).to_ascii_lowercase();
     match backend.as_str() {
-        "antigravity" => "agy".to_string(),
-        "antigravity-acp" | "agy_acp" => "agy-acp".to_string(),
         "open-code" | "opencode-ai" => "opencode".to_string(),
         "deep-seek" => "deepseek".to_string(),
         "muse-code" | "musecode" => "muse".to_string(),
-        _ => backend,
+        _ => clarp_backend::canonical_id(&backend).to_string(),
     }
 }
 
@@ -2657,7 +2656,10 @@ pub(crate) async fn make_agent_as(
     );
     if !bound
         && !model.is_empty()
-        && let Some(detail) = app.models.policy_model_error(backend, model)
+        && let Some(detail) = app
+            .models
+            .model_error(backend, model, app.clock.now_ms())
+            .await
     {
         let code = "invalid model for backend";
         let message = detail

@@ -6,9 +6,11 @@
   } from '../stores/app.svelte.js';
   import { audio } from '../stores/audio.svelte.js';
   import { reset } from '../stores/conversations.svelte.js';
+  import { t } from '../stores/i18n.svelte.js';
+  import { formatDateTime } from './i18n/format.js';
   import {
     normalizeBackend, resumableBackend, supportsForkBackend, supportsResumeBackend,
-    backendLabel, catalogBackendIds, allowedBackendForContact,
+    backendLabel, catalogBackendIds, allowedBackendForContact, launchBackend, canSelectBackend,
   } from '@core/agent-launch.js';
   import { AgentBackend } from '@core/protocol.js';
   import { pathTail } from './render.js';
@@ -16,7 +18,8 @@
   let { open = $bindable(), name = '', replaceSid = '', onDone } = $props();
 
   let lockedBackend = $derived.by(() => {
-    return allowedBackendForContact(name);
+    const allowed = allowedBackendForContact(name);
+    return allowed && launchBackend(allowed);
   });
 
   // The server's live capability catalogue (/agent-model-options), with a
@@ -33,7 +36,6 @@
           id, label: id, supported_efforts: ['low', 'medium', 'high'],
         })),
       },
-      agy: { models: [], supported_efforts: ['low', 'medium', 'high'] },
       grok: {
         models: ['grok-4.6', 'grok-4.5'].map(id => ({
           id, label: id, supported_efforts: ['low', 'medium', 'high'],
@@ -99,7 +101,7 @@
   // Installed, unhidden providers plus the one the agent being relaunched
   // already runs on, so a CLI that went missing does not vanish mid-chat.
   let backendIds = $derived(catalogBackendIds(catalogue, {
-    current: replaceSid ? existing.backend : backend,
+    current: replaceSid ? launchBackend(existing.backend) : backend,
   }));
 
   // Seed the form when the dialog opens.
@@ -112,11 +114,11 @@
     resumeItems = [];
     resumeState = '';
     suggestions = [];
-    const targetLocked = allowedBackendForContact(name);
+    const targetLocked = lockedBackend;
     if (targetLocked) {
       backend = targetLocked;
     } else {
-      backend = normalizeBackend(
+      backend = launchBackend(
         (replaceSid && existing.backend)
         || localStorage.getItem('lastAgentBackend') || AgentBackend.CLAUDE);
     }
@@ -128,7 +130,7 @@
   // when the backend still matches.
   $effect(() => {
     const canReuse = replaceSid
-      && normalizeBackend(existing.backend) === normalizeBackend(backend);
+      && launchBackend(existing.backend) === backend;
     const existingModel = canReuse ? (existing.model || '') : '';
     const existingEffort = canReuse ? (existing.effort || '') : '';
     modelPreset = models.includes(existingModel) ? existingModel : '';
@@ -187,7 +189,7 @@
         return {
           path,
           label: pathTail(path) || path,
-          title: count > 1 ? `${path} (${count} launches)` : path,
+          count,
         };
       });
     } catch (_) { favorites = []; }
@@ -195,22 +197,22 @@
 
   async function fetchResume() {
     chosen = '';
-    resumeState = 'Loading…';
+    resumeState = 'start.loading';
     resumeItems = [];
     try {
       const r = await fetch('/past-sessions?cwd=' + encodeURIComponent(cwd)
                             + '&backend=' + encodeURIComponent(resumableBackend(backend)));
       const d = await r.json();
       const items = d.sessions || [];
-      if (!items.length) { resumeState = 'No past sessions for that directory.'; return; }
+      if (!items.length) { resumeState = 'start.no_past_sessions'; return; }
       resumeState = '';
       resumeItems = items.map(s => ({
         id: s.id,
-        preview: s.preview || '(no preview)',
-        date: new Date(s.mtime * 1000).toLocaleString(),
+        preview: s.preview || '',
+        mtime: s.mtime,
       }));
     } catch (_) {
-      resumeState = 'Failed to load past sessions.';
+      resumeState = 'start.past_sessions_failed';
     }
   }
 
@@ -230,7 +232,11 @@
   async function submit() {
     const dir = cwd.trim().replace(/\/+$/, '') || '~';
     localStorage.setItem('lastAgentCwd', dir);
-    const chosenBackend = lockedBackend || resumableBackend(backend);
+    const chosenBackend = lockedBackend || launchBackend(backend);
+    if (!canSelectBackend(chosenBackend, catalogue)) {
+      flash(t('start.acp_unavailable'), 4500);
+      return;
+    }
     localStorage.setItem('lastAgentBackend', chosenBackend);
     const selectedModel = (modelCustom || '').trim() || (modelPreset || '').trim();
     const payload = {
@@ -254,7 +260,7 @@
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) {
-        flash(d.message || ((replaceSid ? 'relaunch' : 'start') + ': ' + (d.error || r.status)), 4500);
+        flash(d.message || t(replaceSid ? 'start.relaunch_failed' : 'start.start_failed', { error: String(d.error || r.status) }), 4500);
         onDone(false);
         return;
       }
@@ -267,7 +273,7 @@
       }
       onDone(true);
     } catch (e) {
-      flash('start failed: ' + e.message, 2500);
+      flash(t('start.start_failed', { error: e.message }), 2500);
       onDone(false);
     }
   }
@@ -276,11 +282,11 @@
 {#if open}
   <div class="start-dialog">
     <div class="start-card">
-      <h3 id="startTitle">{replaceSid ? `Relaunch ${name}` : `Start ${name}`}</h3>
+      <h3 id="startTitle">{replaceSid ? t('start.title_relaunch', { name }) : t('start.title_start', { name })}</h3>
 
       <label class="start-field">
-        <span>Working directory</span>
-        <input type="text" autocomplete="off" placeholder="~ or ~/Projects/example"
+        <span>{t('start.directory')}</span>
+        <input type="text" autocomplete="off" placeholder={t('start.directory_placeholder')}
                bind:value={cwd} oninput={onCwdInput} />
       </label>
       {#if suggestions.length}
@@ -296,7 +302,7 @@
         <ul class="start-favorites">
           {#each favorites as f (f.path)}
             <li>
-              <button type="button" title={f.title} onclick={() => {
+              <button type="button" title={f.count > 1 ? t('start.favorite_title', { path: f.path, count: f.count }) : f.path} onclick={() => {
                 cwd = f.path;
                 favorites = [];
                 suggestions = [];
@@ -307,16 +313,16 @@
         </ul>
       {/if}
 
-      <div class="start-backends" role="radiogroup" aria-label="Harness">
+      <div class="start-backends" role="radiogroup" aria-label={t('start.harness')}>
         {#each backendIds as b (b)}
           {@const isLocked = !!lockedBackend && lockedBackend !== b}
-          <label class:disabled={isLocked} title={isLocked ? `${name} is locked to ${backendLabel(lockedBackend, catalogue)}` : ''}>
+          <label class:disabled={isLocked} title={isLocked ? t('start.locked', { name, backend: backendLabel(lockedBackend, catalogue) }) : ''}>
             <input type="radio" value={b} checked={backend === b}
                    disabled={isLocked}
                    onchange={() => onBackendChange(b)} />
             {backendLabel(b, catalogue)}
             {#if lockedBackend === b}
-              <span class="locked-badge">Required</span>
+              <span class="locked-badge">{t('start.required')}</span>
             {/if}
           </label>
         {/each}
@@ -324,34 +330,34 @@
 
       {#if modelProviders.length}
         <label class="start-field">
-          <span>Model provider</span>
+          <span>{t('start.model_provider')}</span>
           <select bind:value={modelProvider}>
-            <option value="">All providers</option>
+            <option value="">{t('start.all_providers')}</option>
             {#each modelProviders as p (p.id)}
-              <option value={p.id}>{p.name || p.id}{p.signed_in ? '' : ' (not signed in)'}</option>
+              <option value={p.id}>{p.signed_in ? (p.name || p.id) : t('start.not_signed_in', { name: p.name || p.id })}</option>
             {/each}
           </select>
         </label>
       {/if}
 
       <label class="start-field">
-        <span>Model</span>
+        <span>{t('start.model')}</span>
         <select bind:value={modelPreset}>
-          <option value="">Default</option>
+          <option value="">{t('start.default')}</option>
           {#each visibleModels as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
         </select>
       </label>
 
       <label class="start-field">
-        <span>Custom model</span>
-        <input type="text" autocomplete="off" placeholder="optional" bind:value={modelCustom} />
+        <span>{t('start.custom_model')}</span>
+        <input type="text" autocomplete="off" placeholder={t('start.optional')} bind:value={modelCustom} />
       </label>
 
       {#if efforts.length}
         <label class="start-field">
-          <span>Effort</span>
+          <span>{t('start.effort')}</span>
           <select bind:value={effort}>
-            <option value="">Default</option>
+            <option value="">{t('start.default')}</option>
             {#each efforts as e (e)}<option value={e}>{e}</option>{/each}
           </select>
         </label>
@@ -359,28 +365,28 @@
 
       <div class="start-modes">
         <label>
-          <input type="radio" checked={mode === 'fresh'} onchange={() => onModeChange('fresh')} /> Fresh
+          <input type="radio" checked={mode === 'fresh'} onchange={() => onModeChange('fresh')} /> {t('start.fresh')}
         </label>
         <label>
           <input type="radio" checked={mode === 'resume'} disabled={!canResume}
-                 onchange={() => onModeChange('resume')} /> Resume…
+                 onchange={() => onModeChange('resume')} /> {t('start.resume')}
         </label>
         <label>
           <input type="radio" checked={mode === 'fork'} disabled={!canFork}
-                 onchange={() => onModeChange('fork')} /> Fork…
+                 onchange={() => onModeChange('fork')} /> {t('start.fork')}
         </label>
       </div>
 
       {#if resumeState || resumeItems.length}
         <ul class="start-resume">
           {#if resumeState}
-            <li>{resumeState}</li>
+            <li>{t(resumeState)}</li>
           {:else}
             {#each resumeItems as s (s.id)}
               <li class:selected={chosen === s.id}>
                 <button type="button" onclick={() => chosen = s.id}>
-                  <div class="preview">{s.preview}</div>
-                  <div class="meta">{s.date}</div>
+                  <div class="preview">{s.preview || t('start.no_preview')}</div>
+                  <div class="meta">{formatDateTime(s.mtime * 1000)}</div>
                 </button>
               </li>
             {/each}
@@ -389,8 +395,8 @@
       {/if}
 
       <div class="start-actions">
-        <button class="start-btn ghost" onclick={() => { open = false; onDone(false); }}>Cancel</button>
-        <button class="start-btn primary" onclick={submit}>{replaceSid ? 'Relaunch' : 'Start'}</button>
+        <button class="start-btn ghost" onclick={() => { open = false; onDone(false); }}>{t('start.cancel')}</button>
+        <button class="start-btn primary" onclick={submit}>{replaceSid ? t('start.relaunch') : t('start.start')}</button>
       </div>
     </div>
   </div>

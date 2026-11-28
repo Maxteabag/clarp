@@ -20,7 +20,9 @@
 use clarp_engine::lanes;
 use serde_json::Value;
 
-use super::{Choice, Setting, e};
+use clarp_core::tr;
+
+use super::{Choice, Setting, e, en};
 use crate::App;
 
 pub const SECTION: &str = "KEPT PROCESSES";
@@ -65,9 +67,11 @@ fn tool_switch(slot: usize) -> Setting {
     Setting::toggle(
         e(
             SLOTS[slot],
-            "Kept between messages",
+            // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Keeps this tool warm between messages.
+            en::tr!("Kept between messages"),
             "host",
-            "Keeps this tool warm between messages.",
+            // i18n: Settings page and Ctrl+K, the line under the setting “Kept between messages” saying what it does
+            en::tr!("Keeps this tool warm between messages."),
             &["kept processes", "lanes", "keep running", "warm", "background process", "tool process", "toggle"],
         ),
         SECTION,
@@ -78,16 +82,26 @@ fn tool_switch(slot: usize) -> Setting {
             }
         },
     )
-    .label_from(move |app| switch(app, slot).map_or_else(String::new, |s| format!("{} kept between messages", lanes::tool_name(&s.tool))))
+    .label_from(move |app| {
+        switch(app, slot).map_or_else(String::new, |s| {
+            // i18n: Settings > Kept processes, a switch's label; {} is a tool's name (e.g. Claude, Codex): its process stays running between messages
+            tr!("{} kept between messages", lanes::tool_name(&s.tool))
+        })
+    })
     .when(move |app| offered(app) && switch(app, slot).is_some())
 }
 
 #[allow(clippy::too_many_arguments)]
 fn limit(id: &'static str, label: &'static str, description: &'static str, aliases: &'static [&'static str], key: &'static str, fallback: (f64, f64), step: f64, unit: &'static str) -> Setting {
     let shown = move |app: &App| {
-        let value = super::with_unit(&super::number_text(number(app, key), step), unit);
+        let value = super::shown_number(number(app, key), step, unit);
         // In auto a fixed limit is not used: said beside it.
-        if lanes::FIXED_NUMBERS.contains(&key) && in_auto(app) { format!("{value} · fixed limit, setting it switches to fixed") } else { value }
+        if lanes::FIXED_NUMBERS.contains(&key) && in_auto(app) {
+            // i18n: Settings > Kept processes, a fixed limit's value while limits are on Auto; {} is the value; changing it switches the limits to Fixed
+            tr!("{} · fixed limit, setting it switches to fixed", value)
+        } else {
+            value
+        }
     };
     Setting::number(
         e(id, label, "host", description, aliases),
@@ -108,16 +122,26 @@ fn limits_choice() -> Setting {
     Setting::choice(
         e(
             "kept-limits",
-            "Limits",
+            // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: Auto follows free memory; fixed uses the limits below.
+            en::tr!("Limits"),
             "host",
-            "Auto follows free memory; fixed uses the limits below.",
+            // i18n: Settings page and Ctrl+K, the line under the setting “Limits” saying what it does
+            en::tr!("Auto follows free memory; fixed uses the limits below."),
             &["auto", "fixed", "limits", "free memory", "dynamic", "kept processes", "lanes", "mode"],
         ),
         SECTION,
         |_| {
             vec![
-                Choice::new(lanes::AUTO, "Auto").about("Follow free memory"),
-                Choice::new(lanes::FIXED, "Fixed").about("Fixed process and memory cap"),
+                // i18n: Settings > Kept processes > Limits, option (adjective): the limits follow the free memory
+                Choice::new(lanes::AUTO, tr!("limits" => "Auto")).about(
+                    // i18n: Settings > Kept processes > Limits, the line under the option "Auto"
+                    tr!("Follow free memory"),
+                ),
+                // i18n: Settings > Kept processes > Limits, option (adjective): fixed limits set below
+                Choice::new(lanes::FIXED, tr!("limits" => "Fixed")).about(
+                    // i18n: Settings > Kept processes > Limits, the line under the option "Fixed"
+                    tr!("Fixed process and memory cap"),
+                ),
             ]
         },
         |app| app.engine.borrow().lane_settings().and_then(lanes::limits).unwrap_or_default().to_owned(),
@@ -138,8 +162,10 @@ pub(super) fn register() -> Vec<Setting> {
     all.push(limits_choice());
     all.push(host_number(
         "kept-reserve",
-        "Memory kept free",
-        "Minimum free memory kept in auto mode.",
+        // i18n: Settings > Kept processes, a setting's name, the row label (a number). What it does: Minimum free memory kept in auto mode.
+        en::tr!("Memory kept free"),
+        // i18n: Settings > Kept processes, the line under the setting “Memory kept free” saying what it does
+        en::tr!("Minimum free memory kept in auto mode."),
         &["reserve", "reserve percent", "free memory", "headroom", "auto", "kept processes"],
         "reserve_percent",
         (5.0, 50.0),
@@ -148,8 +174,10 @@ pub(super) fn register() -> Vec<Setting> {
     .when(in_auto));
     all.push(host_number(
         "kept-ceiling",
-        "Most kept in auto",
-        "Maximum kept processes in auto mode.",
+        // i18n: Settings > Kept processes, a setting's name, the row label (a number). What it does: Maximum kept processes in auto mode.
+        en::tr!("Most kept in auto"),
+        // i18n: Settings > Kept processes, the line under the setting “Most kept in auto” saying what it does
+        en::tr!("Maximum kept processes in auto mode."),
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["ceiling", "cap", "most lanes", "auto", "how many", "kept processes", "maximum"],
         "ceiling",
@@ -160,8 +188,10 @@ pub(super) fn register() -> Vec<Setting> {
     .when(|app| in_auto(app) && !app.engine.borrow().lane_live_offered()));
     all.push(limit(
         "kept-most",
-        "Most kept processes",
-        "Maximum kept processes across all tools.",
+        // i18n: Settings > Kept processes, a setting's name, the row label (a number). What it does: Maximum kept processes across all tools.
+        en::tr!("Most kept processes"),
+        // i18n: Settings > Kept processes, the line under the setting “Most kept processes” saying what it does
+        en::tr!("Maximum kept processes across all tools."),
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["lanes", "most lanes", "limit", "how many", "kept processes", "maximum"],
         "most",
@@ -171,8 +201,10 @@ pub(super) fn register() -> Vec<Setting> {
     ));
     all.push(limit(
         "kept-memory",
-        "Memory limit",
-        "Total memory budget for kept processes.",
+        // i18n: Settings > Kept processes, a setting's name, the row label (a number). What it does: Total memory budget for kept processes.
+        en::tr!("Memory limit"),
+        // i18n: Settings > Kept processes, the line under the setting “Memory limit” saying what it does
+        en::tr!("Total memory budget for kept processes."),
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["memory", "ram", "lane memory", "budget", "kept processes", "megabytes"],
         "memory_mb",
@@ -182,8 +214,10 @@ pub(super) fn register() -> Vec<Setting> {
     ));
     all.push(limit(
         "kept-idle",
-        "Idle timeout",
-        "How long unused processes stay warm.",
+        // i18n: Settings > Kept processes, a setting's name, the row label (a number). What it does: How long unused processes stay warm.
+        en::tr!("Idle timeout"),
+        // i18n: Settings > Kept processes, the line under the setting “Idle timeout” saying what it does
+        en::tr!("How long unused processes stay warm."),
         &["idle", "timeout", "idle minutes", "how long", "kept processes", "unused"],
         "idle_minutes",
         (1.0, 240.0),
@@ -200,25 +234,40 @@ pub fn information(app: &App) -> Vec<(String, String)> {
     if !engine.lane_settings_offered() {
         return Vec::new();
     }
-    let now = engine.lane_settings().map(lanes::held_line).filter(|line| !line.is_empty()).unwrap_or_else(|| "Loading…".to_owned());
+    let now = engine.lane_settings().map(lanes::held_line).filter(|line| !line.is_empty()).unwrap_or_else(|| {
+            // i18n: Settings > Kept processes, the "Now" line's value while the Host's answer is loading
+            tr!("Loading…")
+        });
     let mut out = Vec::new();
     let auto = engine.lane_auto_limits_offered() && engine.lane_settings().and_then(lanes::limits) == Some(lanes::AUTO);
     if auto {
         let free = engine.lane_settings().map(lanes::free_line).filter(|line| !line.is_empty());
-        out.push(("Free memory".to_owned(), free.unwrap_or_else(|| "The Host has not said what its machine has free".to_owned())));
+        out.push((
+            // i18n: Settings > Kept processes, information row label (noun): the Host machine's free memory
+            tr!("Free memory"),
+            // i18n: Settings > Kept processes, the "Free memory" row's value when the Host sent no figure
+            free.unwrap_or_else(|| tr!("The Host has not said what its machine has free")),
+        ));
     }
     let groups = if engine.lane_live_offered() { engine.lane_settings().map(groups).unwrap_or_default() } else { Vec::new() };
     if groups.is_empty() {
-        out.push(("Now".to_owned(), now));
+        // i18n: Settings > Kept processes, information row label: what the kept processes hold right now
+        out.push((tr!("Now"), now));
     }
     for group in groups {
         out.push((group.title, group.summary));
         out.extend(group.lines.into_iter().map(|(label, detail)| (format!("{TOOL_INDENT}{label}"), detail)));
     }
     if !engine.lane_settings_error().is_empty() {
-        out.push(("Not changed".to_owned(), engine.lane_settings_error().to_owned()));
+        // i18n: Settings > Kept processes, information row label: the Host refused a change; the value is the Host's own sentence
+        out.push((tr!("Not changed"), engine.lane_settings_error().to_owned()));
     }
-    out.push(("When".to_owned(), "Applies on next message.".to_owned()));
+    out.push((
+        // i18n: Settings > Kept processes, information row label: when a change takes effect
+        tr!("When"),
+        // i18n: Settings > Kept processes, the "When" row's value: a change takes effect with the next message
+        tr!("Applies on next message."),
+    ));
     out
 }
 

@@ -1,6 +1,6 @@
 //! The Host's policy for isolated Janitor model calls.
 use super::book::{Agent, Config, World};
-use super::{Refused, template};
+use super::{Refused, execution_provider, template};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeSet;
@@ -18,6 +18,10 @@ pub struct Policy {
 pub struct Model {
     pub provider: String,
     pub model: String,
+}
+
+fn model_key<'a>(provider: &'a str, model: &'a str) -> (&'a str, &'a str) {
+    (execution_provider(provider), model)
 }
 
 impl Policy {
@@ -81,7 +85,11 @@ impl Policy {
                     return Err(bad(&error));
                 }
             }
-            if models.iter().collect::<BTreeSet<_>>().len() != models.len() {
+            let mut seen = BTreeSet::new();
+            if models
+                .iter()
+                .any(|model| !seen.insert(model_key(&model.provider, &model.model)))
+            {
                 return Err(bad("Duplicate model"));
             }
             next.model_chain = models;
@@ -101,18 +109,22 @@ impl Policy {
                 return Err(bad("Deterministic Janitors do not inherit models"));
             }
             let role = template(&config.template_id)?;
+            let backend = execution_provider(&agent.backend);
             let supports = |m: &Model| {
+                let provider = execution_provider(&m.provider);
                 role["supported_providers"]
                     .as_array()
-                    .map_or(m.provider == agent.backend, |list| {
-                        list.iter().any(|p| p == m.provider.as_str())
+                    .map_or(provider == backend, |list| {
+                        list.iter()
+                            .filter_map(Value::as_str)
+                            .any(|p| execution_provider(p) == provider)
                     })
             };
             if !next.model_chain.iter().all(supports) {
                 return Err(bad(&format!("Model provider incompatible with {session}")));
             }
             if super::turn_templates().contains(&config.template_id)
-                && next.model_chain[0].provider != agent.backend
+                && execution_provider(&next.model_chain[0].provider) != backend
             {
                 return Err(bad(
                     "Managed primary provider must match the Janitor backend",
@@ -171,24 +183,34 @@ pub fn choices(primary: Pick, effective: &Value) -> (Pick, Vec<(usize, Pick)>) {
     if effective["source"] != "global" {
         return (primary, vec![]);
     }
-    let chain = effective["chain"]
+    let mut chain = effective["chain"]
         .as_array()
         .into_iter()
         .flatten()
-        .map(|row| Pick {
-            backend: row["provider"].as_str().unwrap_or_default().into(),
-            model: row["model"].as_str().unwrap_or_default().into(),
-            effort: String::new(),
+        .enumerate()
+        .map(|(index, row)| {
+            (
+                index,
+                row["provider"].as_str().unwrap_or_default(),
+                row["model"].as_str().unwrap_or_default(),
+            )
         });
-    let mut chain = chain.enumerate();
-    let Some((_, primary)) = chain.next() else {
+    let Some((_, backend, model)) = chain.next() else {
         return (primary, vec![]);
     };
+    let pick = |backend: &str, model: &str| Pick {
+        backend: backend.into(),
+        model: model.into(),
+        effort: String::new(),
+    };
+    // Historical policies can contain aliases of the same model. Preserve each
+    // surviving row's saved spelling and receipt index.
+    let mut seen = BTreeSet::from([model_key(backend, model)]);
     let alternatives = chain
-        .filter(|(_, pick)| pick != &primary)
-        .map(|(index, pick)| (index - 1, pick))
+        .filter(|&(_, backend, model)| seen.insert(model_key(backend, model)))
+        .map(|(index, backend, model)| (index - 1, pick(backend, model)))
         .collect();
-    (primary, alternatives)
+    (pick(backend, model), alternatives)
 }
 
 pub fn schema_object(text: &str, schema: &Value) -> Option<Value> {

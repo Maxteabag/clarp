@@ -23,10 +23,19 @@ export struct SwitcherRow {
 export component Switcher inherits Rectangle {
     in property <[SwitcherRow]> rows;
     in-out property <int> current;
-    in property <string> placeholder: "Agent, contact, setting or command";
-    in property <string> empty-text: "No matching agent or contact";
+    // i18n: quick switcher (Ctrl+K), placeholder of the search field: what can be found by typing
+    in property <string> placeholder: @tr("Agent, contact, setting or command");
+    // i18n: quick switcher, empty state when nothing matches the typed text
+    in property <string> empty-text: @tr("No matching agent or contact");
     // What the keys do, under the list.
-    in property <string> hint: "↑↓ move · Enter run or switch · Esc close";
+    // i18n: quick switcher, key help under the list; ↑↓, Enter and Esc are key names left as is; move/run/switch/close are verbs
+    in property <string> hint: @tr("↑↓ move · Enter run or switch · Esc close");
+    // A value pill is highlighted when it says the setting is on or the row
+    // is the current choice; the value comes from Rust in either language.
+    // i18n: quick switcher, value pill on a setting row: the setting is switched on (adjective)
+    property <string> on-text: @tr("On");
+    // i18n: quick switcher, value pill on a row: this is the one in use now (adjective)
+    property <string> current-text: @tr("Current");
     // Under the results: what message search searched.
     in property <string> note;
     out property <string> query: search.text;
@@ -162,10 +171,10 @@ export component Switcher inherits Rectangle {
                                 height: 20px;
                                 width: value-text.preferred-width + 14px;
                                 border-radius: 10px;
-                                background: row.value == "On" || row.value == "Current" ? Palette.accent : Palette.sunken;
+                                background: row.value == "On" || row.value == "Current" || row.value == root.on-text || row.value == root.current-text ? Palette.accent : Palette.sunken;
                                 value-text := Text {
                                     text: row.value;
-                                    color: row.value == "On" || row.value == "Current" ? Palette.accent-text : Palette.text;
+                                    color: row.value == "On" || row.value == "Current" || row.value == root.on-text || row.value == root.current-text ? Palette.accent-text : Palette.text;
                                     font-size: 11 * Look.unit;
                                     horizontal-alignment: center;
                                     vertical-alignment: center;
@@ -177,7 +186,8 @@ export component Switcher inherits Rectangle {
                                 font-size: 13 * Look.unit;
                                 font-weight: 700;
                                 vertical-alignment: center;
-                                accessible-label: "Minus or plus steps it";
+                                // i18n: quick switcher, accessibility label of the "−  +" sign on a setting that steps: the minus and plus keys change its value
+                                accessible-label: @tr("Minus or plus steps it");
                             }
                             if row.key != "": Text {
                                 text: row.key;

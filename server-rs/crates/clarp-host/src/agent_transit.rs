@@ -46,7 +46,7 @@ use crate::hub::Hub;
 use crate::roster::{Fields, Refusal};
 
 /// The tools an agent can be moved to: those that keep a conversation of their own.
-pub const TARGETS: [&str; 6] = ["claude", "codex", "agy", "agy-acp", "grok", "opencode"];
+pub const TARGETS: [&str; 5] = ["claude", "codex", "agy-acp", "grok", "opencode"];
 
 /// How many changes the Host remembers, the finished ones forgotten first.
 const KEPT: usize = 256;
@@ -70,9 +70,11 @@ impl std::fmt::Debug for Progress {
 /// What the agent's own thread is asked to do: go on with this tool.
 #[derive(Debug, Clone)]
 pub struct Change {
+    pub from: String,
     pub backend: String,
     pub model: String,
     pub effort: String,
+    pub preserve_selection: bool,
     /// The version of the new tool, as it says it, when the Host knows it.
     pub tool_version: Option<String>,
     /// The tool and the model as a person reads them, for the row the change leaves.
@@ -594,6 +596,14 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .cloned()
         .filter(|member| !member.record.is_janitor)
         .ok_or_else(|| Refusal::Plain(ApiError::new(StatusCode::NOT_FOUND, "no such agent")))?;
+    start_for(app, member, asked).await
+}
+
+async fn start_for(
+    app: &App,
+    member: Arc<crate::fleet::Member>,
+    asked: &Fields,
+) -> Result<String, Refusal> {
     let before = member.record.clone();
     let request = optional(asked, "request_id")?
         .filter(|id| !id.is_empty())
@@ -606,6 +616,7 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     let backend = optional(asked, "backend")?
         .unwrap_or_default()
         .to_ascii_lowercase();
+    let backend = clarp_backend::canonical_id(&backend).to_owned();
     // An agent bound to a provider of its own stays on it: moving it to another tool would
     // carry its conversation, and the summary of it, to other services. Its models are its
     // provider's deployments, which no catalogue lists.
@@ -642,7 +653,11 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .flatten()
         .filter_map(|model| model["id"].as_str())
         .collect();
-    if !bound && !model.is_empty() && !offered.is_empty() && !offered.contains(&model.as_str()) {
+    if !bound
+        && !model.is_empty()
+        && !offered.is_empty()
+        && !crate::models::model_is_offered(&backend, &model, &offered)
+    {
         return Err(refused(StatusCode::BAD_REQUEST, "unknown_model"));
     }
     let valid = clarp_backend::efforts(&backend);
@@ -674,14 +689,43 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
             return Err(refused(StatusCode::CONFLICT, "messages_waiting"));
         }
     }
-    let id = crate::ids::uuid();
+    let old_row = catalogue["providers"]
+        .get(&before.backend)
+        .unwrap_or(&Value::Null);
+    let shown = Shown {
+        backend: backend_shown(&row, &backend),
+        model: model_shown(&row, &model),
+        old_backend: backend_shown(old_row, &before.backend),
+        old_model: model_shown(old_row, &before.model),
+    };
+    let goal = Goal {
+        id: crate::ids::uuid(),
+        backend,
+        model,
+        effort,
+        preserve_selection: false,
+        tool_version: row["cli_version"].as_str().and_then(version_in),
+        shown,
+    };
+    begin(app, member, goal, request).await
+}
+
+async fn begin(
+    app: &App,
+    member: Arc<crate::fleet::Member>,
+    goal: Goal,
+    request: Option<(String, String)>,
+) -> Result<String, Refusal> {
+    let before = member.record.clone();
+    let same_backend = before.backend == goal.backend;
+    let id = goal.id.clone();
     let now = app.clock.now_ms();
     let state = json!({
         "agent_id": before.agent_id,
         "session": before.session,
         "transit_id": id,
-        "backend": backend,
-        "model": model,
+        "backend": goal.backend,
+        "model": goal.model,
         "phase": if same_backend { "switching" } else { "reading" },
         "error": null,
         "previous_backend": before.backend,
@@ -702,24 +746,6 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         json!({"type": "agent-roster", "kind": "agent-transit", "session": before.session}),
         now,
     );
-    let old_row = catalogue["providers"]
-        .get(&before.backend)
-        .cloned()
-        .unwrap_or(Value::Null);
-    let shown = Shown {
-        backend: backend_shown(&row, &backend),
-        model: model_shown(&row, &model),
-        old_backend: backend_shown(&old_row, &before.backend),
-        old_model: model_shown(&old_row, &before.model),
-    };
-    let goal = Goal {
-        id: id.clone(),
-        backend,
-        model,
-        effort,
-        tool_version: row["cli_version"].as_str().and_then(version_in),
-        shown,
-    };
     let app = app.clone();
     let (prepared, ready) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
@@ -734,6 +760,79 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
     Ok(id)
 }
 
+/// Drain standalone Antigravity attempts on their original shim, then change the
+/// transport through Transit. The opening actor fences fresh work before replay.
+pub fn retire_legacy_agy(app: &App) {
+    let directory = app.fleet.directory();
+    for member in directory.members.iter().chain(&directory.janitors) {
+        if member.record.backend != clarp_backend::LEGACY_AGY {
+            continue;
+        }
+        if !clarp_backend::same_store(clarp_backend::LEGACY_AGY, clarp_backend::agy_acp::ID) {
+            eprintln!(
+                "clarp-host: {} needs a Transit across Antigravity profiles",
+                member.record.session
+            );
+            continue;
+        }
+        let (app, member) = (app.clone(), member.clone());
+        tokio::spawn(async move {
+            let session = member.record.session.clone();
+            if let Err(why) = retire_legacy_agent(&app, member).await {
+                eprintln!("clarp-host: cannot move {session} to Antigravity ACP: {why}");
+            }
+        });
+    }
+}
+
+async fn retire_legacy_agent(app: &App, member: Arc<crate::fleet::Member>) -> Result<(), String> {
+    // The request waits for the actor to open. It can already have recovered
+    // a journaled switch which the fleet never heard before a restart.
+    member
+        .agent
+        .hold_for_transit(true)
+        .await
+        .map_err(|why| why.0)?;
+    if member.agent.view().backend == clarp_backend::agy_acp::ID {
+        let amended = app
+            .fleet
+            .amend_any(member.record.agent_id.clone(), Amend::RetiredAgy)
+            .await;
+        member
+            .agent
+            .hold_for_transit(false)
+            .await
+            .map_err(|why| why.0)?;
+        amended
+            .map_err(|why| why.0)?
+            .map_err(|why| format!("{why:?}"))?;
+        return Ok(());
+    }
+    // This transfer keeps the native conversation and the saved selection.
+    // Discovery can be cold or unavailable, so it cannot fence retirement.
+    // ACP validates the model on the first ordinary launch after the transfer.
+    let record = &member.record;
+    let model = crate::fleet::non_empty(&record.model).unwrap_or_else(|| "default".into());
+    let goal = Goal {
+        id: crate::ids::uuid(),
+        backend: clarp_backend::agy_acp::ID.to_string(),
+        model: record.model.clone(),
+        effort: record.effort.clone(),
+        preserve_selection: true,
+        tool_version: None,
+        shown: Shown {
+            backend: "Antigravity (ACP)".to_string(),
+            old_backend: "Antigravity".to_string(),
+            old_model: model.clone(),
+            model,
+        },
+    };
+    begin(app, member, goal, None)
+        .await
+        .map_err(|why| why.answered().1.to_string())?;
+    Ok(())
+}
+
 struct Shown {
     backend: String,
     model: String,
@@ -746,6 +845,7 @@ struct Goal {
     backend: String,
     model: String,
     effort: String,
+    preserve_selection: bool,
     tool_version: Option<String>,
     shown: Shown,
 }
@@ -864,9 +964,11 @@ async fn carry_at_boundary(
         summarized(app, member, budget).await
     };
     let change = Change {
+        from: before.backend.clone(),
         backend: goal.backend.clone(),
         model: goal.model.clone(),
         effort: goal.effort.clone(),
+        preserve_selection: goal.preserve_selection,
         tool_version: goal.tool_version.clone(),
         shown_as: (goal.shown.backend.clone(), goal.shown.model.clone()),
         shown_from: goal.shown.old_backend.clone(),
@@ -897,17 +999,24 @@ async fn carry_at_boundary(
     };
     // The log has the change: the fleet's record follows it. Should that fail, the agent runs
     // on the new tool all the same, and its record is put right when the Host next opens it.
-    let _ = app
+    let amend = if goal.preserve_selection {
+        Amend::RetiredAgy
+    } else {
+        Amend::ToolChanged {
+            backend: goal.backend.clone(),
+            model: goal.model.clone(),
+            effort: goal.effort.clone(),
+        }
+    };
+    let kept = app
         .fleet
-        .amend(
-            before.agent_id.clone(),
-            Amend::ToolChanged {
-                backend: goal.backend.clone(),
-                model: goal.model.clone(),
-                effort: goal.effort.clone(),
-            },
-        )
-        .await;
+        .amend_any(before.agent_id.clone(), amend)
+        .await
+        .map_err(|why| why.0)
+        .and_then(|record| record.map_err(|why| format!("{why:?}")));
+    if let Err(why) = kept {
+        app.fleet.unkept("agent-transit", &why);
+    }
     Ok(carried)
 }
 
@@ -1138,7 +1247,7 @@ mod tests {
         assert_eq!(row["available"], false);
         assert_eq!(row["unavailable_reason"], "not_supported");
         let mut row = json!({"installed": false, "models": []});
-        judge("agy", &mut row, &used_up, None);
+        judge("agy-acp", &mut row, &used_up, None);
         assert_eq!(row["unavailable_reason"], "not_installed");
         let mut row = json!({"installed": true, "models": [{"id": "a"}, {"id": "b"}]});
         judge("muse", &mut row, &used_up, Some("b"));

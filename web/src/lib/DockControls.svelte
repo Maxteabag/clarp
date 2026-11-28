@@ -2,6 +2,7 @@
   // Mute, stop and mic. Shared by both docks: the buttons and their gestures
   // are identical on desktop and phone — only their surroundings differ, so
   // splitting the docks should not mean duplicating this.
+  import { t } from '../stores/i18n.svelte.js';
   import { audio, setMuted, silenceNow, unlockAudio } from '../stores/audio.svelte.js';
   import { mic, micTap, startAlwaysOn } from '../stores/mic.svelte.js';
   import { app, statusFor } from '../stores/app.svelte.js';
@@ -51,7 +52,7 @@
   class="mute-audio-btn"
   class:muted={audio.muted}
   class:active={audio.speaking}
-  aria-label={audio.muted ? 'Unmute' : 'Stop audio'}
+  aria-label={t(audio.muted ? 'dock.unmute' : 'dock.stop_audio')}
   onpointerdown={muteDown}
   onpointerup={muteCancel}
   onpointercancel={muteCancel}
@@ -64,7 +65,7 @@
   </svg>
 </button>
 
-<button class="stop-btn" class:busy={!!status.busy} aria-label="Stop agent" onclick={stopAgentTurn}>
+<button class="stop-btn" class:busy={!!status.busy} aria-label={t('dock.stop_agent')} onclick={stopAgentTurn}>
   <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
     <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" fill="currentColor"/>
   </svg>
@@ -75,7 +76,7 @@
   class="mic"
   class:recording={mic.recording}
   class:capturing={mic.capturing}
-  aria-label="Talk"
+  aria-label={t('dock.talk')}
   onpointerdown={micDown}
   onpointerup={micRelease}
   onpointercancel={() => { clearTimeout(micTimer); micHoldFired = false; }}

@@ -2,6 +2,7 @@
   // One agent's transcript. Every pane mounts its own, reading its own
   // session from the conversation store, so panes never share a scroll
   // position or a set of turns.
+  import { t } from '../stores/i18n.svelte.js';
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
   import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
@@ -260,13 +261,13 @@
   {#if conv.hiddenAfter && prefs.showCoordinationLine}<HiddenRun count={conv.hiddenAfter} onShow={showCoordination} />{/if}
   {#if conv.revealed}
     <div class="turn hidden-run revealed" role="note">
-      <span class="hidden-run-text">Showing messages between agents</span>
-      <button class="hidden-run-show" type="button" onclick={() => concealCoordination(session)}>Hide</button>
+      <span class="hidden-run-text">{t('hidden_run.showing')}</span>
+      <button class="hidden-run-show" type="button" onclick={() => concealCoordination(session)}>{t('hidden_run.hide')}</button>
     </div>
   {/if}
   </div>
 </div>
 
 {#if showJump}
-  <button class="history-jump" type="button" onclick={jumpToLatest}>Latest</button>
+  <button class="history-jump" type="button" onclick={jumpToLatest}>{t('chat.latest')}</button>
 {/if}

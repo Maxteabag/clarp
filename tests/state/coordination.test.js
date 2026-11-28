@@ -33,7 +33,7 @@ describe('the count lines', () => {
   it('name the agents of the run', () => {
     expect(countAgents(run(2))).toBe('with Mike');
     expect(countAgents(run(2, { agents: [{ agent_id: 'a', name: 'Mike' }, { agent_id: 'b', name: 'Rachel' },
-      { agent_id: 'c', name: 'Ida' }] }))).toBe('with Mike, Rachel and Ida');
+      { agent_id: 'c', name: 'Ida' }] }))).toBe('with Mike, Rachel, and Ida');
     expect(countAgents(run(2, { agents: [{ agent_id: 'a', name: '' }] }))).toBe('');
     expect(normalizeCount({ messages: 'x', exchanges: 1, agents: 'no' }).agents).toEqual([]);
   });

@@ -5,6 +5,8 @@
 // the composer is held, and a send the Host refuses (409 agent_moved) is never sent again.
 // Framework-free so the vitest suite can pin the wording every client shares.
 
+import { english } from './i18n-en.js';
+
 const MAX_HOST = 64;
 
 /** `{to: {host, id}, at}` or null, from a snapshot row's `moved`. */
@@ -24,20 +26,21 @@ export function movedHost(moved) {
 }
 
 /** 'Moved to <host>' (or 'Moved to another Host'), or '' for an agent that did not move. */
-export function movedLine(moved) {
+export function movedLine(moved, tr = english) {
   if (!moved) return '';
   const host = movedHost(moved);
-  return host ? `Moved to ${host}` : 'Moved to another Host';
+  return host ? tr('moved.to_host', { host }) : tr('moved.to_another');
 }
 
 /** What a send to a moved agent says, never sent again. */
-export function movedSendText(name, moved) {
+export function movedSendText(name, moved, tr = english) {
   const host = movedHost(moved);
-  return `${name || 'This agent'} moved to ${host || 'another Host'}, so this was not sent.`;
+  const agent = name || tr('moved.this_agent');
+  return host ? tr('moved.not_sent', { name: agent, host }) : tr('moved.not_sent_another', { name: agent });
 }
 
 /** The refusal's text when the Host answered a send `409 {error: "agent_moved"}`, else ''. */
-export function movedRefusal(status, body, name) {
+export function movedRefusal(status, body, name, tr = english) {
   if (status !== 409 || !body || body.error !== 'agent_moved') return '';
-  return movedSendText(name, { to: body.moved_to || {} });
+  return movedSendText(name, { to: body.moved_to || {} }, tr);
 }

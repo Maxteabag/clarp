@@ -3,6 +3,7 @@
 
 use std::rc::Rc;
 
+use clarp_core::tr;
 use clarp_engine::Change;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
@@ -179,11 +180,16 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     // Runs on every scroll report: the defaults are spelled without
     // resolving the map again.
     let shown = |action: &str, default: &str| keymap::shown_or(state, action, &overrides, default);
-    let mut hints: Vec<Hint> = keymap::hints(state, &overrides, facts(app, window))
+    let bound: Vec<keymap::Binding> = keymap::hints(state, &overrides, facts(app, window))
         .into_iter()
         // The keyboard's card says what its keys do (below).
         .filter(|b| card_keys.is_none() || !b.action.starts_with("artifact-") || b.action == "artifact-previous")
         .filter(|b| b.action != "artifact-open")
+        .collect();
+    // Each hint's action, beside it (the labels are in the app's language).
+    let mut actions: Vec<&str> = bound.iter().map(|b| b.action).collect();
+    let mut hints: Vec<Hint> = bound
+        .iter()
         .map(|b| Hint {
             // J and K both walk the cards; the hints' digits are their numbers.
             keys: if b.action == "artifact-previous" {
@@ -198,47 +204,63 @@ pub fn show_hints(app: &App, window: &AppWindow) {
                 b.keys.first().map(|k| keymap::display(k)).unwrap_or_default().into()
             },
             label: if b.action == "toggle-preview" {
-                if app.engine.borrow().settings().boolean("explorer/livePreview", false) { "Preview: on".into() } else { "Preview: off".into() }
+                if app.engine.borrow().settings().boolean("explorer/livePreview", false) {
+                    // i18n: shortcut bar, the explorer's live preview key while the preview is on
+                    tr!("Preview: on").into()
+                } else {
+                    // i18n: shortcut bar, the explorer's live preview key while the preview is off
+                    tr!("Preview: off").into()
+                }
             } else {
-                b.label.into()
+                b.label.as_str().into()
             },
         })
         .collect();
     if let Some(keys) = card_keys {
-        let at = hints.iter().position(|h| h.label == "Cards").map_or(0, |i| i + 1);
+        let at = actions.iter().position(|a| *a == "artifact-previous").map_or(0, |i| i + 1);
         for (offset, (keys, label)) in keys.into_iter().enumerate() {
             hints.insert(at + offset, Hint { keys: keys.into(), label: label.into() });
+            actions.insert(at + offset, "");
         }
     }
     // From the composer, the way onto the chat's cards.
     if state == "composer" && crate::artifacts_view::has_cards(app) && !window.global::<crate::ArtifactBridge>().get_editing() {
         let keys = format!("{} {}", shown("escape", "Esc"), keymap::shown_or("pane", "artifact-previous", &overrides, "K"));
-        hints.push(Hint { keys: keys.trim().into(), label: "Cards".into() });
+        // i18n: shortcut bar in the composer, the keys that move the keyboard onto the chat's cards (noun: the artifact cards)
+        hints.push(Hint { keys: keys.trim().into(), label: tr!("Cards").into() });
+        actions.push("artifact-previous");
     }
     if state == "keymap" {
         hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
+        actions.clear();
     }
     if state == "processes" {
         hints = crate::processes_view::hints();
+        actions.clear();
     }
     if state == "publications" {
         hints = crate::publications_view::hints(window);
+        actions.clear();
     }
     if state == "fonts" {
         hints = crate::font_view::hints();
+        actions.clear();
     }
     if state == "profile" {
         hints = crate::profile_view::hints(app, window);
+        actions.clear();
     }
     if state == "hints" && crate::link_hints::count() == 0 {
-        hints = vec![Hint { keys: "".into(), label: "No links on screen".into() }];
+        // i18n: shortcut bar while link numbers show, when there is no link on screen to number
+        hints = vec![Hint { keys: "".into(), label: tr!("No links on screen").into() }];
+        actions.clear();
     }
     // Vim mode's own keys lead; Space is its leader, the switcher two of them.
     if vim_on(app) {
-        for hint in hints.iter_mut() {
-            match hint.label.as_str() {
-                "Commands" if matches!(state, "pane" | "sidebar") => hint.keys = "Space Space".into(),
-                "Cards" => hint.keys = "Shift+J/K".into(),
+        for (hint, action) in hints.iter_mut().zip(actions.iter()) {
+            match *action {
+                "switcher" if matches!(state, "pane" | "sidebar") => hint.keys = "Space Space".into(),
+                "artifact-previous" => hint.keys = "Shift+J/K".into(),
                 _ => {}
             }
         }
@@ -248,11 +270,16 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     }
     crate::vim_view::show(app, window, state);
     let mode = match state {
-        "composer" => "INSERT".to_owned(),
-        "sidebar" => "EXPLORER".to_owned(),
-        "pane" => "CHAT".to_owned(),
-        "keymap" => "KEYS".to_owned(),
-        "fonts" => "FONT".to_owned(),
+        // i18n: shortcut bar, the keyboard mode badge in capitals while typing in the composer (as vim's insert mode)
+        "composer" => tr!("INSERT"),
+        // i18n: shortcut bar, the keyboard mode badge in capitals while the keyboard is on the explorer (the list of chats)
+        "sidebar" => tr!("EXPLORER"),
+        // i18n: shortcut bar, the keyboard mode badge in capitals while the keyboard is on the chat
+        "pane" => tr!("CHAT"),
+        // i18n: shortcut bar, the keyboard mode badge in capitals while the key-binding editor is open
+        "keymap" => tr!("KEYS"),
+        // i18n: shortcut bar, the keyboard mode badge in capitals while the font picker is open
+        "fonts" => tr!("FONT"),
         other => other.to_uppercase(),
     };
     window.set_keyboard_mode(mode.into());
@@ -455,9 +482,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "recent-agents" => {
             open_switcher(app, window);
             app.switcher.borrow_mut().recent_only = true;
-            window.set_switcher_placeholder("Recent agents".into());
-            window.set_switcher_empty("No other agents yet".into());
-            window.set_switcher_hint("↑↓ move · Enter open · Esc close".into());
+            // i18n: Ctrl+R recent agents list, placeholder of the search field
+            window.set_switcher_placeholder(tr!("Recent agents").into());
+            // i18n: Ctrl+R recent agents list, shown when there is no other agent to go back to
+            window.set_switcher_empty(tr!("No other agents yet").into());
+            // i18n: Ctrl+R recent agents list, the key hint line at the bottom; key names stay, the words say what each key does (verbs)
+            window.set_switcher_hint(tr!("↑↓ move · Enter open · Esc close").into());
             refresh_switcher(app, window);
         }
         "escape" if app.switcher.borrow().open && !app.switcher.borrow().picker.is_empty() => close_picker(app, window),
@@ -492,9 +522,11 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
         "search-messages" => {
             open_switcher(app, window);
             app.switcher.borrow_mut().messages_only = true;
-            window.set_switcher_placeholder("Search messages in every chat".into());
+            // i18n: Ctrl+F message search, placeholder of the search field
+            window.set_switcher_placeholder(tr!("Search messages in every chat").into());
             window.set_switcher_empty(crate::search_view::EMPTY.into());
-            window.set_switcher_hint("↑↓ move · Enter opens the chat at the message · Esc close".into());
+            // i18n: Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
+            window.set_switcher_hint(tr!("↑↓ move · Enter opens the chat at the message · Esc close").into());
             refresh_switcher(app, window);
         }
         // ---- profile and overview
@@ -875,7 +907,12 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
 /// A new tab (workspace) named `name` ("Workspace N" when empty), opened.
 pub fn new_workspace(app: &Rc<App>, window: &AppWindow, name: &str) {
     let typing = context(app, window) == "composer";
-    let name = if name.trim().is_empty() { format!("Workspace {}", app.engine.borrow().panes().workspaces().len() + 1) } else { name.trim().to_owned() };
+    let name = if name.trim().is_empty() {
+        // i18n: the name a new workspace tab gets when the user gives none (noun); {} is its number
+        tr!("Workspace {}", app.engine.borrow().panes().workspaces().len() + 1)
+    } else {
+        name.trim().to_owned()
+    };
     app.engine.borrow_mut().with_panes(|p| p.create_workspace(&name));
     pump_now(app);
     app.refresh(&[Change::Panes]);
@@ -922,9 +959,14 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
     }
     crate::search_view::forget_asked();
     window.set_switcher_note("".into());
-    window.set_switcher_placeholder("Agent, contact, setting or command".into());
-    window.set_switcher_empty("No matching agent or contact".into());
-    window.set_switcher_hint("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close".into());
+    // i18n: Ctrl+K command palette, placeholder of the search field: what it finds
+    window.set_switcher_placeholder(tr!("Agent, contact, setting or command").into());
+    // i18n: Ctrl+K command palette, shown when nothing matches the search
+    window.set_switcher_empty(tr!("No matching agent or contact").into());
+    window.set_switcher_hint(
+        // i18n: Ctrl+K command palette, the key hint line at the bottom; key names stay, the words say what each key does
+        tr!("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close").into(),
+    );
     window.set_switcher_open(true);
     window.invoke_show_switcher();
     refresh_switcher(app, window);
@@ -933,7 +975,7 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
 /// Enter on a setting with choices: the switcher lists its options, the
 /// current one marked; Escape goes back to everything.
 pub fn open_picker(app: &App, window: &AppWindow, id: &str) {
-    let label = crate::catalogue::setting(id).map_or_else(|| crate::catalogue::find(id).map_or(id, |e| e.label).to_owned(), |s| s.label(app));
+    let label = crate::catalogue::setting(id).map_or_else(|| crate::catalogue::find(id).map_or_else(|| id.to_owned(), |e| e.label_text()), |s| s.label(app));
     {
         let mut state = app.switcher.borrow_mut();
         state.open = true;
@@ -941,14 +983,20 @@ pub fn open_picker(app: &App, window: &AppWindow, id: &str) {
         state.selected.clear();
         state.picker = id.to_owned();
     }
-    window.set_switcher_placeholder(format!("{label}: choose one").into());
-    window.set_switcher_empty("No matching choice".into());
-    window.set_switcher_hint("↑↓ move · Enter chooses · Esc back to everything".into());
+    // i18n: Ctrl+K, placeholder while a setting's options are listed; {} is the setting's name
+    window.set_switcher_placeholder(tr!("{}: choose one", label).into());
+    // i18n: Ctrl+K, shown when none of a setting's options matches the search
+    window.set_switcher_empty(tr!("No matching choice").into());
+    // i18n: Ctrl+K, the key hint line while a setting's options are listed; key names stay, the words say what each key does
+    window.set_switcher_hint(tr!("↑↓ move · Enter chooses · Esc back to everything").into());
     window.set_switcher_open(true);
     window.invoke_show_switcher();
     refresh_switcher(app, window);
     // The current option is where the keyboard starts.
-    let current = app.switcher.borrow().items.iter().position(|i| i.value == "Current");
+    // The pill's word, in English or (once the switcher translates it) the app's language.
+    // i18n: quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
+    let current_word = tr!("Current");
+    let current = app.switcher.borrow().items.iter().position(|i| i.value == "Current" || i.value == current_word.as_str());
     if let Some(index) = current {
         switcher_moved(app, window, index as i32);
     }
@@ -957,10 +1005,15 @@ pub fn open_picker(app: &App, window: &AppWindow, id: &str) {
 /// Escape in a picker: back to the whole list.
 fn close_picker(app: &App, window: &AppWindow) {
     app.switcher.borrow_mut().picker.clear();
-    window.set_switcher_placeholder("Agent, contact, setting or command".into());
-    window.set_switcher_empty("No matching agent or contact".into());
+    // i18n: Ctrl+K command palette, placeholder of the search field: what it finds
+    window.set_switcher_placeholder(tr!("Agent, contact, setting or command").into());
+    // i18n: Ctrl+K command palette, shown when nothing matches the search
+    window.set_switcher_empty(tr!("No matching agent or contact").into());
     app.switcher.borrow_mut().query.clear();
-    window.set_switcher_hint("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close".into());
+    window.set_switcher_hint(
+        // i18n: Ctrl+K command palette, the key hint line at the bottom; key names stay, the words say what each key does
+        tr!("↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close").into(),
+    );
     window.invoke_show_switcher();
     refresh_switcher(app, window);
 }
@@ -974,7 +1027,8 @@ pub fn roster_note(engine: &clarp_engine::Engine) -> (String, String) {
     let unreachable = engine.unreachable_hosts_note();
     match (note.is_empty(), unreachable.is_empty()) {
         (_, true) => (note, detail),
-        (true, false) => (unreachable, "Its chats show as last read; the desktop keeps trying.".into()),
+        // i18n: explorer and Ctrl+K, the detail under the note that a paired Host cannot be reached: its chats are shown from the last read, and the app keeps trying
+        (true, false) => (unreachable, tr!("Its chats show as last read; the desktop keeps trying.")),
         (false, false) => (format!("{note} · {unreachable}"), detail),
     }
 }
@@ -1011,7 +1065,8 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         // Ctrl+K lists agents, contacts, commands and settings, never
         // messages: those are Ctrl+F's.
         if !contacts_only && query.trim().chars().count() >= crate::search_view::HINT_FROM {
-            note = "Ctrl+F searches the messages of every chat.".to_owned();
+            // i18n: Ctrl+K, a note under the search: message text is searched with Ctrl+F, not here
+            note = tr!("Ctrl+F searches the messages of every chat.");
         }
         switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
     };

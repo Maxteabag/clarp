@@ -39,6 +39,7 @@ export struct KeymapRow {
 // The key bindings: every action's keys in one context at a time, from
 // the keyboard (the window hands the editor its keys; the shortcut bar
 // says which work now), or the whole profile as JSON.
+// i18n-screen: keys
 export component KeymapEditor inherits Modal {
     in property <[KeymapRow]> rows;
     in property <string> context;
@@ -66,9 +67,18 @@ export component KeymapEditor inherits Modal {
         spacing: 10px;
         HorizontalLayout {
             spacing: 12px;
-            Text { text: "Key bindings"; color: Palette.text; font-size: 20 * Look.unit; }
+            // i18n: Key bindings editor, title (noun, plural: which keys do what)
+            Text { text: @tr("Key bindings"); color: Palette.text; font-size: 20 * Look.unit; }
             Rectangle { horizontal-stretch: 1; }
-            Text { text: "‹ " + root.context + " ›"; color: Palette.accent; font-size: 14 * Look.unit; font-weight: 700; vertical-alignment: center; accessible-label: "Context " + root.context; }
+            Text {
+                text: "‹ " + root.context + " ›";
+                color: Palette.accent;
+                font-size: 14 * Look.unit;
+                font-weight: 700;
+                vertical-alignment: center;
+                // i18n: Key bindings editor, accessibility label of the switcher at the top right; {} is the place the shown keys work in (chat, list, settings …)
+                accessible-label: @tr("Context {}", root.context);
+            }
         }
         if root.filter != "" || root.count != "": HorizontalLayout {
             spacing: 12px;
@@ -90,7 +100,8 @@ export component KeymapEditor inherits Modal {
                     border-radius: 3px;
                     background: row.current ? Palette.accent.with-alpha(0.16) : area.has-hover ? Palette.hover : transparent;
                     accessible-role: list-item;
-                    accessible-label: row.label + ": " + row.keys;
+                    // i18n: Key bindings editor, accessibility label of a row; {0} is the action, {1} its keys (only the colon is text)
+                    accessible-label: @tr("{0}: {1}", row.label, row.keys);
                     area := TouchArea { clicked => { root.clicked(row.action); } }
                     HorizontalLayout {
                         padding-left: 10px;
@@ -122,20 +133,26 @@ export component KeymapEditor inherits Modal {
         }
         if root.status != "": Text { font-size: ChromeText.body; text: root.status; color: Palette.text; wrap: word-wrap; }
         if root.error != "": Text { font-size: ChromeText.body; text: root.error; color: Palette.danger; wrap: word-wrap; }
-        Text { text: "Profile JSON"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // i18n: Key bindings editor, label over the text box holding the key profile as JSON (JSON left as is)
+        Text { text: @tr("Profile JSON"); color: Palette.muted; font-size: 11 * Look.unit; }
         json := Editor {
             height: 110px;
             text <=> root.profile;
             font-family: "JetBrains Mono";
-            accessible-label: "Keymap JSON";
+            // i18n: Key bindings editor, accessibility label of the text box holding the key profile as JSON (JSON left as is)
+            accessible-label: @tr("Keymap JSON");
         }
         HorizontalLayout {
             spacing: 8px;
-            Button { text: "Import"; clicked => { root.import-profile(root.profile); } }
-            Button { text: "Export"; clicked => { root.export-profile(); } }
-            Button { text: "Reset defaults"; clicked => { root.reset(); } }
+            // i18n: Key bindings editor, button (verb): use the JSON in the box as the key profile
+            Button { text: @tr("Import"); clicked => { root.import-profile(root.profile); } }
+            // i18n: Key bindings editor, button (verb): put the current key profile into the box as JSON
+            Button { text: @tr("Export"); clicked => { root.export-profile(); } }
+            // i18n: Key bindings editor, button (verb phrase): put every key back to its default
+            Button { text: @tr("Reset defaults"); clicked => { root.reset(); } }
             Rectangle { horizontal-stretch: 1; }
-            Button { text: "Done"; primary: true; clicked => { root.done(); } }
+            // i18n: Key bindings editor, main button (finish and close; OS-standard "Done")
+            Button { text: @tr("Done"); primary: true; clicked => { root.done(); } }
         }
     }
 }
@@ -150,6 +167,7 @@ export struct SavedHostRow {
 // ConnectionPage.qml: the Host's address and a token, or a one-time pairing
 // code; the device token then stays in the keyring. The Hosts connected to
 // before are listed above, each one click from being the Host again.
+// i18n-screen: connection
 export component ConnectionPage inherits Modal {
     in property <string> base-url;
     in property <string> state;
@@ -176,8 +194,10 @@ export component ConnectionPage inherits Modal {
     VerticalLayout {
         padding: 28px;
         spacing: 14px;
-        Text { text: "Connect to Clarp"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        if root.hosts.length > 0: Text { text: "Saved Hosts"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // i18n: Connection page, title (verb phrase); Clarp is the product name
+        Text { text: @tr("Connect to Clarp"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        // i18n: Connection page, heading over the Hosts this app has connected to before (Host is the product noun, keep capitalised)
+        if root.hosts.length > 0: Text { text: @tr("Saved Hosts"); color: Palette.muted; font-size: 11 * Look.unit; }
         // At most six (the app sends no more); Ctrl+K finds every saved Host.
         for host in root.hosts: HorizontalLayout {
             height: 40px;
@@ -190,40 +210,54 @@ export component ConnectionPage inherits Modal {
                     color: host.current ? Palette.success : Palette.text;
                     font-size: 12 * Look.unit;
                     overflow: elide;
-                    accessible-label: host.current ? "Connected Host " + host.name : "Saved Host " + host.name;
+                    // i18n: Connection page, accessibility label of the Host this app is connected to now; {} is its name
+                    accessible-label: host.current ? @tr("Connected Host {}", host.name)
+                        // i18n: Connection page, accessibility label of a saved Host this app is not connected to now; {} is its name
+                        : @tr("Saved Host {}", host.name);
                 }
                 Text { text: host.url; color: Palette.muted; font-size: 10 * Look.unit; overflow: elide; }
             }
             if !host.current: Button {
-                text: "Connect";
+                // i18n: Connection page, saved Host row, button (verb): connect to this Host
+                text: @tr("Connect");
                 enabled: !root.connecting;
                 clicked => { root.connect(host.url, ""); }
             }
             Button {
-                text: "Remove";
+                // i18n: Connection page, saved Host row, button (verb): forget this saved Host
+                text: @tr("Remove");
                 enabled: !host.current;
                 clicked => { root.remove(host.url); }
             }
         }
-        server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
+        server := Field {
+            placeholder-text: "http://127.0.0.1:7682";
+            // i18n: Connection page, accessibility label of the field for the Host's address (noun)
+            accessible-label: @tr("Server");
+        }
         token := Field {
-            placeholder-text: "Token";
+            // i18n: Connection page, placeholder of the field for the Host's access token (noun: a secret key)
+            placeholder-text: @tr("Token");
             input-type: password;
-            accessible-label: "Token";
+            // i18n: Connection page, accessibility label of the access token field (noun: a secret key)
+            accessible-label: @tr("Token");
             accepted => { root.connect(server.text, token.text); }
         }
         Rectangle { height: 1px; background: Palette.border; }
-        Text { text: "Or pair with a one-time code"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // i18n: Connection page, line over the pairing code field: instead of a token, pair with a code shown on the Host
+        Text { text: @tr("Or pair with a one-time code"); color: Palette.muted; font-size: 11 * Look.unit; }
         HorizontalLayout {
             spacing: 8px;
             code := Field {
                 placeholder-text: "clp_…";
                 input-type: password;
-                accessible-label: "Pairing code";
+                // i18n: Connection page, accessibility label of the one-time pairing code field (noun)
+                accessible-label: @tr("Pairing code");
                 accepted => { root.pair(server.text, code.text); }
             }
             Button {
-                text: "Pair";
+                // i18n: Connection page, button (verb): pair with the Host using the one-time code
+                text: @tr("Pair");
                 enabled: code.text != "" && !root.connecting;
                 clicked => { root.pair(server.text, code.text); }
             }
@@ -238,17 +272,39 @@ export component ConnectionPage inherits Modal {
                 y: 4px;
                 border-radius: 12px;
                 background: root.state == "live" ? Palette.success.with-alpha(0.2) : Palette.warning.with-alpha(0.2);
-                pill := Text { text: root.state; color: root.state == "live" ? Palette.success : Palette.warning; font-size: 11 * Look.unit; }
+                // The connection state in the reader's language; an unknown
+                // state is shown as the engine names it.
+                pill := Text {
+                    text:
+                        // i18n: Connection page, state pill: connected and up to date (adjective)
+                        root.state == "live" ? @tr("live")
+                        // i18n: Connection page, state pill: connecting to the Host now (a state)
+                        : root.state == "connecting" ? @tr("connecting")
+                        // i18n: Connection page, state pill: the connection dropped and is being made again (a state)
+                        : root.state == "reconnecting" ? @tr("reconnecting")
+                        // i18n: Connection page, state pill: the Host cannot be reached (adjective)
+                        : root.state == "offline" ? @tr("offline")
+                        // i18n: Connection page, state pill: the Host refused the token or code (adjective)
+                        : root.state == "unauthorized" ? @tr("unauthorized")
+                        : root.state;
+                    color: root.state == "live" ? Palette.success : Palette.warning;
+                    font-size: 11 * Look.unit;
+                }
             }
             Rectangle { horizontal-stretch: 1; }
-            if root.can-cancel: Button { text: "Cancel"; clicked => { root.cancel(); } }
+            // i18n: Connection page, button (verb): close the page without connecting
+            if root.can-cancel: Button { text: @tr("Cancel"); clicked => { root.cancel(); } }
             if root.stored: Button {
-                text: "Forget device token";
+                // i18n: Connection page, button (verb phrase): delete the access token this computer has saved
+                text: @tr("Forget device token");
                 enabled: !root.connecting;
                 clicked => { token.text = ""; code.text = ""; root.forget(); }
             }
             Button {
-                text: root.connecting ? "Connecting…" : "Connect";
+                // i18n: Connection page, main button while connecting (a state)
+                text: root.connecting ? @tr("Connecting…")
+                    // i18n: Connection page, main button (verb): connect to the Host with the address and token above
+                    : @tr("Connect");
                 primary: true;
                 enabled: !root.connecting;
                 clicked => { root.connect(server.text, token.text); }
@@ -261,6 +317,7 @@ export component ConnectionPage inherits Modal {
 // text cannot be selected, so this shows the same words without styling.
 // Drag or Shift+arrows select, Ctrl+A selects all, Ctrl+C copies the
 // selection; Escape or a click outside closes it.
+// i18n-screen: select text
 export component SelectTextPage inherits Modal {
     in property <string> title;
     in property <string> body;
@@ -307,7 +364,8 @@ export component SelectTextPage inherits Modal {
                 border-radius: 4px;
                 background: copy-touch.has-hover ? Palette.hover : transparent;
                 accessible-role: button;
-                accessible-label: "Copy all";
+                // i18n: Select text page (a message as plain text to select from), accessibility label of the copy button (verb phrase: copy the whole text)
+                accessible-label: @tr("Copy all");
                 Image { source: @image-url("icons/copy.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
                 copy-touch := TouchArea { clicked => { root.copy-all(); } }
             }
@@ -317,13 +375,15 @@ export component SelectTextPage inherits Modal {
                 border-radius: 4px;
                 background: close-touch.has-hover ? Palette.hover : transparent;
                 accessible-role: button;
-                accessible-label: "Close";
+                // i18n: Select text page, accessibility label of the close button (verb)
+                accessible-label: @tr("Close");
                 Image { source: @image-url("icons/close.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
                 close-touch := TouchArea { clicked => { root.close(); } }
             }
         }
         Text {
-            text: "Ctrl+A all · Ctrl+C copy · Esc close";
+            // i18n: Select text page, key help under the title; Ctrl+A, Ctrl+C and Esc are key names left as is; "all" = select all, copy and close are verbs
+            text: @tr("Ctrl+A all · Ctrl+C copy · Esc close");
             color: Palette.muted;
             font-size: 11 * Look.unit;
         }
@@ -332,7 +392,8 @@ export component SelectTextPage inherits Modal {
             read-only: true;
             wrap: word-wrap;
             vertical-stretch: 1;
-            accessible-label: "Selectable text";
+            // i18n: Select text page, accessibility label of the text box the user selects from
+            accessible-label: @tr("Selectable text");
         }
     }
 }

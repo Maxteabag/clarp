@@ -4,6 +4,8 @@ import { DisplayCell, DisplayCellCard } from "cells.slint";
 import { ArtifactItem, ArtifactCard, ArtifactBridge, KeyHint } from "artifacts.slint";
 import { AgentAvatar } from "avatar.slint";
 
+// i18n-screen: chat
+
 export struct TableRow {
     cells: [styled-text],
     header: bool,
@@ -248,12 +250,22 @@ component ToolCard inherits Rectangle {
                 font-size: ChatText.detail;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
-                accessible-label: root.tool.explanation != "" ? root.tool.explanation : "Explaining " + root.tool.name;
+                accessible-label: root.tool.explanation != "" ? root.tool.explanation
+                    // i18n: chat, tool call line, accessibility label while its plain-language explanation is still being written; {} is the tool's name (stays untranslated)
+                    : @tr("Explaining {}", root.tool.name);
             }
             if root.tool.detail != "": TouchArea {
                 width: 60px * ChatText.scale;
                 clicked => { root.open = !root.open; }
-                Text { text: root.open ? "Hide" : "Details"; color: Palette.link; font-size: ChatText.detail; }
+                Text {
+                    text: root.open
+                        // i18n: chat, tool call line, link (verb): hides the call's details again
+                        ? @tr("Hide")
+                        // i18n: chat, tool call line, link (noun): shows the call's details (its input and output)
+                        : @tr("Details");
+                    color: Palette.link;
+                    font-size: ChatText.detail;
+                }
             }
         }
         if root.open: Text {
@@ -335,7 +347,8 @@ component DecisionReceipt inherits Rectangle {
             if root.selected && Focus.mode == "pane" && root.receipt.linked: KeyHint {
                 chat: true;
                 key: "O";
-                label: "Show decision";
+                // i18n: chat, answered decision, keyboard hint beside the key O (an action): opens the decision card this answer belongs to
+                label: @tr("Show decision");
                 emphasised: true;
                 clicked => { ArtifactBridge.open(root.receipt.key); }
             }
@@ -495,7 +508,8 @@ component LiveItem inherits Rectangle {
             if root.live.stop != "": KeyHint {
                 chat: true;
                 key: root.live.stop;
-                label: "Stop";
+                // i18n: chat, stalled running turn, keyboard hint beside the stop key (verb): stops the turn
+                label: @tr("Stop");
                 emphasised: true;
                 accessible-id: root.measuring ? "" : "box-stop:" + root.live.key;
                 clicked => { ArtifactBridge.open("live:stop:" + root.live.key); }
@@ -510,7 +524,11 @@ component LiveItem inherits Rectangle {
             if root.selected && Focus.mode == "pane": KeyHint {
                 chat: true;
                 key: "O";
-                label: root.live.expanded ? "Collapse" : "Expand";
+                label: root.live.expanded
+                    // i18n: chat, running step row, keyboard hint beside the key O (verb): folds the step's lines away
+                    ? @tr("Collapse")
+                    // i18n: chat, running step row, keyboard hint beside the key O (verb): unfolds the step's lines
+                    : @tr("Expand");
                 emphasised: true;
                 clicked => { ArtifactBridge.open(root.live.key); }
             }
@@ -521,7 +539,10 @@ component LiveItem inherits Rectangle {
             spacing: 2px * ChatText.scale;
             if root.live.secondary != "" || root.live.reserve: Text {
                 height: 17px * ChatText.scale;
-                text: root.live.secondary != "" ? root.live.secondary : root.live.explaining ? "Explaining…" : "";
+                text: root.live.secondary != "" ? root.live.secondary : root.live.explaining
+                    // i18n: chat, running step row, faint line under the step while its plain-language explanation is being written
+                    ? @tr("Explaining…")
+                    : "";
                 color: root.live.secondary != "" ? Palette.muted : Palette.faint;
                 font-size: ChatText.detail;
                 font-italic: root.live.secondary == "";
@@ -577,7 +598,11 @@ component PromptLine inherits Rectangle {
     border-width: root.selected ? 1px : 0px;
     border-color: Palette.accent;
     accessible-role: button;
-    accessible-label: root.prompt.sender + " prompted" + (root.prompt.expanded || root.prompt.line == "" ? "" : " · " + root.prompt.line);
+    accessible-label: root.prompt.expanded || root.prompt.line == ""
+        // i18n: chat, row for a prompt another agent sent into this chat, accessibility label; {} is the sending agent's name (stays as it is)
+        ? @tr("{} prompted", root.prompt.sender)
+        // i18n: chat, folded row for a prompt another agent sent into this chat, accessibility label; {0} is the sending agent's name (stays as it is), {1} the prompt's first line
+        : @tr("{0} prompted · {1}", root.prompt.sender, root.prompt.line);
     accessible-action-default => { ArtifactBridge.open(root.prompt.key); }
     Timer {
         interval: 150ms;
@@ -607,7 +632,11 @@ component PromptLine inherits Rectangle {
             vertical-alignment: center;
         }
         Text {
-            text: root.prompt.expanded || root.prompt.line == "" ? "prompted" : "prompted ·";
+            text: root.prompt.expanded || root.prompt.line == ""
+                // i18n: chat, row for a prompt another agent sent into this chat: the word after the agent's name, which is drawn just before it in its own colour (verb, past: "Arnold prompted")
+                ? @tr("prompted")
+                // i18n: chat, folded row for a prompt another agent sent into this chat: the word after the agent's name, before the prompt's first line (verb, past: "Arnold prompted · …")
+                : @tr("prompted ·");
             color: Palette.muted;
             font-size: ChatText.detail;
             vertical-alignment: center;
@@ -633,7 +662,11 @@ component PromptLine inherits Rectangle {
             chat: true;
             y: (parent.height - self.height) / 2;
             key: "O";
-            label: root.prompt.expanded ? "Collapse" : "Expand";
+            label: root.prompt.expanded
+                // i18n: chat, prompt row, keyboard hint beside the key O (verb): folds the prompt back to one line
+                ? @tr("Collapse")
+                // i18n: chat, prompt row, keyboard hint beside the key O (verb): shows the whole prompt
+                : @tr("Expand");
             emphasised: true;
             clicked => { ArtifactBridge.open(root.prompt.key); }
         }
@@ -727,7 +760,8 @@ export component Block inherits VerticalLayout {
         min-width: 0px;
         preferred-width: self.natural;
         accessible-role: AccessibleRole.table;
-        accessible-label: self.count + " columns";
+        // i18n: chat, table in a message, accessibility label of the table; {n} is how many columns it has
+        accessible-label: @tr("{n} column" | "{n} columns" % self.count);
         VerticalLayout {
             spacing: 0px;
             table-view := Rectangle {
@@ -797,12 +831,17 @@ export component Block inherits VerticalLayout {
                 min-width: 0px;
                 accessible-role: AccessibleRole.button;
                 accessible-id: "table-scroll";
-                accessible-label: table-box.count + " columns, scroll sideways";
+                // i18n: chat, wide table, accessibility label of the strip above it that scrolls the table to its end and back; {n} is how many columns it has
+                accessible-label: @tr("{n} column, scroll sideways" | "{n} columns, scroll sideways" % table-box.count);
                 accessible-action-default => { table-box.offset = table-box.offset < table-box.span / 2 ? table-box.span : 0px; }
                 hint := Text {
                     x: 0;
                     height: parent.height;
-                    text: table-box.offset < table-box.span / 2 ? "→ " + table-box.count + " columns" : "← back to the start";
+                    text: table-box.offset < table-box.span / 2
+                        // i18n: chat, wide table, clickable hint above it: scrolls the table sideways to its end; {n} is how many columns it has; the arrow points right
+                        ? @tr("→ {n} column" | "→ {n} columns" % table-box.count)
+                        // i18n: chat, wide table, clickable hint above it once scrolled to the end: scrolls back to the first columns; the arrow points left
+                        : @tr("← back to the start");
                     color: hint-touch.has-hover ? Palette.accent : Palette.muted;
                     font-size: ChatText.detail;
                     vertical-alignment: center;
@@ -894,7 +933,16 @@ export component Block inherits VerticalLayout {
                     padding-left: 4px;
                     spacing: 6px;
                     // A tile is narrow: its keys, briefly.
-                    KeyHint { key: "O"; label: root.block.gallery ? "Open" : "Enlarge"; emphasised: true; clicked => { ArtifactBridge.image-clicked(root.block.key, index); } }
+                    KeyHint {
+                        key: "O";
+                        label: root.block.gallery
+                            // i18n: chat, image tile in a gallery, keyboard hint beside the key O (verb): opens the gallery viewer; keep it short, the tile is narrow
+                            ? @tr("verb" => "Open")
+                            // i18n: chat, image in a message, keyboard hint beside the key O (verb): shows the image large; keep it short, the tile is narrow
+                            : @tr("Enlarge");
+                        emphasised: true;
+                        clicked => { ArtifactBridge.image-clicked(root.block.key, index); }
+                    }
                     if root.block.gallery: KeyHint { key: "←/→"; label: ""; emphasised: true; }
                 }
             }
@@ -902,7 +950,11 @@ export component Block inherits VerticalLayout {
                 width: parent.width - 16px;
                 x: 8px;
                 height: parent.height;
-                text: picture.failed ? "Image unavailable" + (picture.alt != "" ? " · " + picture.alt : "") : picture.alt;
+                text: !picture.failed ? picture.alt : picture.alt != ""
+                    // i18n: chat, in place of an image that could not be loaded; {} is the image's description from the message
+                    ? @tr("Image unavailable · {}", picture.alt)
+                    // i18n: chat, in place of an image that could not be loaded (no description)
+                    : @tr("Image unavailable");
                 color: picture.failed ? Palette.warning : Palette.faint;
                 font-size: ChatText.detail;
                 wrap: word-wrap;
@@ -1171,7 +1223,8 @@ component TranscriptRow inherits HorizontalLayout {
             height: parent.height + (self.is-top ? self.gap / 2 : self.gap) + (self.is-bottom ? self.gap / 2 : self.gap);
             accessible-role: groupbox;
             accessible-id: root.measuring ? "" : "work-box:" + root.message.id;
-            accessible-label: "Work";
+            // i18n: chat, accessibility label of the box around a turn's work (tool calls, steps) shown under its reply (noun)
+            accessible-label: @tr("Work");
             background: Palette.raised.with-alpha(0.35);
             Rectangle { x: 0; y: 0; width: 1px; height: parent.height; background: Palette.border; }
             Rectangle { x: parent.width - 1px; y: 0; width: 1px; height: parent.height; background: Palette.border; }
@@ -1201,7 +1254,8 @@ component TranscriptRow inherits HorizontalLayout {
             height: 18px * ChatText.scale;
             opacity: hover.has-hover || copy.has-hover ? 1 : 0;
             accessible-role: button;
-            accessible-label: "Copy message";
+            // i18n: chat, accessibility label of a message's copy icon (an action: copies the message text)
+            accessible-label: @tr("Copy message");
             Image { source: @image-url("icons/copy.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             copy := TouchArea { clicked => { root.copy-message(root.message.id); } }
         }
@@ -1215,7 +1269,11 @@ component TranscriptRow inherits HorizontalLayout {
             height: 18px * ChatText.scale;
             accessible-role: button;
             accessible-id: root.measuring ? "" : "work:" + root.message.id;
-            accessible-label: root.message.work-open ? "Hide work" : "Show work";
+            accessible-label: root.message.work-open
+                // i18n: chat, accessibility label of a reply's work icon (an action): folds away the tool calls and steps of the turn
+                ? @tr("Hide work")
+                // i18n: chat, accessibility label of a reply's work icon (an action): shows the tool calls and steps of the turn
+                : @tr("Show work");
             accessible-action-default => { ArtifactBridge.open(root.message.work-key); }
             if root.message.work-open || hover.has-hover || work-touch.has-hover: Image {
                 source: @image-url("icons/work.svg");
@@ -1234,7 +1292,8 @@ component TranscriptRow inherits HorizontalLayout {
             width: 18px * ChatText.scale;
             height: 18px * ChatText.scale;
             accessible-role: button;
-            accessible-label: "Select text";
+            // i18n: chat, accessibility label of a message's select icon (an action: shows the message as plain text to select from)
+            accessible-label: @tr("Select text");
             if hover.has-hover || select-touch.has-hover: Image { source: @image-url("icons/select-text.svg"); width: 14px * ChatText.scale; height: 14px * ChatText.scale; colorize: Palette.faint; }
             select-touch := TouchArea { clicked => { root.select-message(root.message.id); } }
         }
@@ -1302,7 +1361,11 @@ component TranscriptRow inherits HorizontalLayout {
                 height: 20px * ChatText.scale;
                 clicked => { root.toggle-activity(root.message.id, root.message.group-id); }
                 Text {
-                    text: (root.message.expanded ? "Hide · " : "Show · ") + root.message.activity-label;
+                    text: root.message.expanded
+                        // i18n: chat, clickable line under a message (verb): folds its tool calls away; {} is the summary of what they did
+                        ? @tr("Hide · {}", root.message.activity-label)
+                        // i18n: chat, clickable line under a message (verb): shows its tool calls; {} is the summary of what they did
+                        : @tr("Show · {}", root.message.activity-label);
                     color: Palette.faint;
                     font-size: ChatText.detail;
                     x: 0;
@@ -1343,7 +1406,14 @@ component TranscriptRow inherits HorizontalLayout {
             // been unsent for the grace period, a failure at once; either
             // fades in. Otherwise the time, when timestamps are on.
             if ((root.message.pending && root.message.status-due) || root.message.failed || root.message.stopped) && (root.message.prompt.key == "" || root.message.prompt.expanded): RevealText {
-                text: root.message.failed ? "Not delivered" : root.message.stopped ? "Not sent (stopped)" : "Sending…";
+                text: root.message.failed
+                    // i18n: chat, status under the user's own message: the Host did not get it
+                    ? @tr("Not delivered")
+                    : root.message.stopped
+                        // i18n: chat, status under the user's own message: it was not sent because the user stopped it
+                        ? @tr("Not sent (stopped)")
+                        // i18n: chat, status under the user's own message while it is on its way to the Host
+                        : @tr("Sending…");
                 color: root.message.failed ? Palette.danger : Palette.faint;
                 font-size: ChatText.note;
                 horizontal-alignment: root.message.author == "user" ? right : left;
@@ -1636,7 +1706,8 @@ export component Transcript inherits FocusScope {
         border-width: 1px;
         border-color: Palette.border;
         accessible-role: text;
-        accessible-label: "Zoom " + Look.zoom-note;
+        // i18n: chat, accessibility label of the short overlay shown while the chat text is zoomed; {} is the zoom level, e.g. 120% (noun)
+        accessible-label: @tr("Zoom {}", Look.zoom-note);
         note := Text {
             text: Look.zoom-note;
             color: Palette.chrome-text;

@@ -132,9 +132,31 @@ export global ProfileBridge {
     in-out property <int> artifacts-request;
     callback set-tool-activity(int);
     callback set-chat-view(int);
-    in property <[string]> chat-view-choices: ["Follow Settings", "Conversation", "Session"];
-    in property <[string]> agent-message-choices: ["Follow Settings", "Show", "Hide"];
-    in property <[string]> tool-activity-choices: ["Follow Settings", "Grouped", "Always visible", "Group old", "Hide when done"];
+    in property <[string]> chat-view-choices: [
+        // i18n: agent profile, "Chat view" drop-down, option: use the app-wide choice made in Settings
+        @tr("Follow Settings"),
+        // i18n: agent profile, "Chat view" drop-down, option (noun): show this chat as a plain conversation, the agent's work hidden
+        @tr("Conversation"),
+        // i18n: agent profile, "Chat view" drop-down, option (noun): show this chat as a working session with the agent's tools and steps
+        @tr("Session")];
+    in property <[string]> agent-message-choices: [
+        // i18n: agent profile, "Messages between agents" drop-down, option: use the app-wide choice made in Settings
+        @tr("Follow Settings"),
+        // i18n: agent profile, "Messages between agents" drop-down, option (verb): show the messages agents send each other in this chat
+        @tr("Show"),
+        // i18n: agent profile, "Messages between agents" drop-down, option (verb): hide the messages agents send each other in this chat
+        @tr("Hide")];
+    in property <[string]> tool-activity-choices: [
+        // i18n: agent profile, "Tool activity" drop-down, option: use the app-wide choice made in Settings
+        @tr("Follow Settings"),
+        // i18n: agent profile, "Tool activity" drop-down, option (adjective): the agent's tool steps are folded into groups
+        @tr("Grouped"),
+        // i18n: agent profile, "Tool activity" drop-down, option: every tool step stays shown
+        @tr("Always visible"),
+        // i18n: agent profile, "Tool activity" drop-down, option: older tool steps are folded into a group, recent ones stay shown
+        @tr("Group old"),
+        // i18n: agent profile, "Tool activity" drop-down, option: tool steps disappear once the agent's turn is finished
+        @tr("Hide when done")];
     callback set-mcp(string, bool);
     callback set-schedule(string, bool);
     callback compact();
@@ -226,6 +248,7 @@ component Card inherits VerticalLayout {
     @children
 }
 
+// i18n-screen: agent profile
 // A yes/cancel question over the profile (its compact and release dialogs).
 component Confirm inherits Modal {
     in property <string> title;
@@ -244,7 +267,8 @@ component Confirm inherits Modal {
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { ProfileBridge.confirm = ""; } }
+            // i18n: agent profile, confirmation dialog (compact or release), tooltip of the icon button that closes the question without doing it (verb)
+            IconButton { icon: @image-url("icons/close.svg"); tip: @tr("Cancel"); clicked => { ProfileBridge.confirm = ""; } }
             IconButton { icon: @image-url("icons/check.svg"); tip: root.yes-tip; clicked => { root.accepted(); } }
         }
     }
@@ -320,7 +344,8 @@ export component AgentProfile inherits Modal {
             IconButton {
                 y: (parent.height - self.height) / 2;
                 icon: @image-url("icons/close.svg");
-                tip: "Close";
+                // i18n: agent profile, tooltip of the icon button at the top right that closes the profile panel (verb)
+                tip: @tr("Close");
                 clicked => { ProfileBridge.close(); }
             }
         }
@@ -355,24 +380,32 @@ export component AgentProfile inherits Modal {
                 }
                 // One card for this chat: the session is in the subtitle.
                 Card {
-                    title: "THIS CHAT";
-                    InfoRow { label: "Folder"; value: root.info.folder; }
+                    // i18n: agent profile, section title in capitals (noun phrase): settings and facts about the chat the profile was opened from
+                    title: @tr("THIS CHAT");
+                    // i18n: agent profile, This chat section, row label (noun): the folder on the computer the agent works in; the path follows
+                    InfoRow { label: @tr("Folder"); value: root.info.folder; }
                     HorizontalLayout {
                         spacing: 4px;
                         alignment: start;
                         Spot {
                             spot: "files";
-                            IconButton { icon: @image-url("icons/folder.svg"); tip: "Open files"; clicked => { ProfileBridge.open-files(); } }
+                            IconButton { icon: @image-url("icons/folder.svg");
+                                // i18n: agent profile, This chat section, tooltip of the icon button that opens the agent's working folder in the file manager (verb)
+                                tip: @tr("Open files"); clicked => { ProfileBridge.open-files(); } }
                             KeyBadge { text: "3"; y: (parent.height - self.height) / 2; }
                         }
                         Spot {
                             spot: "terminal";
-                            IconButton { icon: @image-url("icons/terminal.svg"); tip: "Open terminal"; clicked => { ProfileBridge.open-terminal(); } }
+                            IconButton { icon: @image-url("icons/terminal.svg");
+                                // i18n: agent profile, This chat section, tooltip of the icon button that opens a terminal in the agent's working folder (verb)
+                                tip: @tr("Open terminal"); clicked => { ProfileBridge.open-terminal(); } }
                             KeyBadge { text: "4"; y: (parent.height - self.height) / 2; }
                         }
                         Spot {
                             spot: "voice";
-                            IconButton { icon: @image-url("icons/voice.svg"); tip: "Voice"; clicked => { ProfileBridge.voice(); } }
+                            IconButton { icon: @image-url("icons/voice.svg");
+                                // i18n: agent profile, This chat section, tooltip of the icon button that starts a voice conversation with the agent (noun: voice mode)
+                                tip: @tr("Voice"); clicked => { ProfileBridge.voice(); } }
                             KeyBadge { text: "5"; y: (parent.height - self.height) / 2; }
                         }
                     }
@@ -380,12 +413,14 @@ export component AgentProfile inherits Modal {
                         spot: "chat-view";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Chat view"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            // i18n: agent profile, This chat section, row label (noun) beside a drop-down: how this chat is shown, as a conversation or as a session
+                            Text { text: @tr("Chat view"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.chat-view-choices;
                                 current-index: root.info.chat-view-index;
-                                accessible-label: "Chat view";
+                                // i18n: agent profile, accessibility label of the "Chat view" drop-down (noun)
+                                accessible-label: @tr("Chat view");
                                 selected => { ProfileBridge.set-chat-view(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -395,12 +430,14 @@ export component AgentProfile inherits Modal {
                         spot: "agent-messages";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Messages between agents"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            // i18n: agent profile, This chat section, row label beside a drop-down: whether messages agents send each other show in this chat
+                            Text { text: @tr("Messages between agents"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.agent-message-choices;
                                 current-index: root.info.agent-messages-index;
-                                accessible-label: "Messages between agents";
+                                // i18n: agent profile, accessibility label of the "Messages between agents" drop-down
+                                accessible-label: @tr("Messages between agents");
                                 selected => { ProfileBridge.set-agent-messages(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -410,13 +447,15 @@ export component AgentProfile inherits Modal {
                         spot: "tool-activity";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Tool activity"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            // i18n: agent profile, This chat section, row label (noun) beside a drop-down: how the agent's tool steps (commands, file reads) are shown in this chat
+                            Text { text: @tr("Tool activity"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.tool-activity-choices;
                                 current-index: root.info.tool-activity-index;
                                 enabled: root.info.tool-activity-applies;
-                                accessible-label: "Tool activity";
+                                // i18n: agent profile, accessibility label of the "Tool activity" drop-down (noun)
+                                accessible-label: @tr("Tool activity");
                                 selected => { ProfileBridge.set-tool-activity(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -424,7 +463,8 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 if root.info.backend-shown: Card {
-                    title: "BACKEND";
+                    // i18n: agent profile, section title in capitals (noun): the AI command-line tool the agent runs on (Claude, Codex, ...); the value below names it
+                    title: @tr("BACKEND");
                     key: "9";
                     Spot {
                         spot: "backend";
@@ -438,12 +478,14 @@ export component AgentProfile inherits Modal {
                                 vertical-alignment: center;
                                 overflow: elide;
                                 horizontal-stretch: 1;
-                                accessible-label: "Backend, " + root.info.backend-value;
+                                // i18n: agent profile, accessibility label of the backend row; {} is the backend's name and model
+                                accessible-label: @tr("Backend, {}", root.info.backend-value);
                             }
                             if root.info.backend-moving: Busy { reduced-motion: ProfileBridge.reduced-motion; }
                             IconButton {
                                 icon: @image-url("icons/swap.svg");
-                                tip: "Change backend";
+                                // i18n: agent profile, Backend section, tooltip of the icon button that opens the picker to move the agent to another backend (verb)
+                                tip: @tr("Change backend");
                                 enabled: root.info.backend-enabled;
                                 clicked => { ProfileBridge.open-transit(); }
                             }
@@ -457,14 +499,17 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 if root.info.plan-shown: Card {
-                    title: "CURRENT PLAN";
+                    // i18n: agent profile, section title in capitals (noun phrase): the task plan the agent is working through now
+                    title: @tr("CURRENT PLAN");
                     key: "6";
                     Spot {
                         spot: "plan";
                         HorizontalLayout {
                             spacing: 8px;
                             Text {
-                                text: root.info.plan-title != "" ? root.info.plan-title : "Loading plan…";
+                                text: root.info.plan-title != "" ? root.info.plan-title
+                                    // i18n: agent profile, Current plan section, shown in place of the plan's title while it loads
+                                    : @tr("Loading plan…");
                                 color: Palette.text;
                                 font-size: 13 * Look.unit;
                                 font-weight: 600;
@@ -488,7 +533,8 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 if root.info.prompts-shown: Card {
-                    title: "PROMPT HISTORY";
+                    // i18n: agent profile, section title in capitals (noun phrase): the messages the user sent this agent earlier
+                    title: @tr("PROMPT HISTORY");
                     key: "7";
                     for prompt[index] in ProfileBridge.prompts: Spot {
                         spot: "prompt:" + index;
@@ -510,7 +556,8 @@ export component AgentProfile inherits Modal {
                         HorizontalLayout {
                             spacing: 8px;
                             if ProfileBridge.prompts.length == 0 && !root.info.prompts-loading: Text {
-                                text: "No prompts yet";
+                                // i18n: agent profile, Prompt history section, empty state when the user has sent this agent nothing yet
+                                text: @tr("No prompts yet");
                                 color: Palette.muted;
                                 font-size: 11 * Look.unit;
                                 vertical-alignment: center;
@@ -520,7 +567,8 @@ export component AgentProfile inherits Modal {
                             if root.info.prompts-more: Spot {
                                 spot: "history-more";
                                 TextButton {
-                                    text: "Load older";
+                                    // i18n: agent profile, Prompt history section, button under the list that loads earlier prompts (verb)
+                                    text: @tr("Load older");
                                     enabled: !root.info.prompts-loading;
                                     clicked => { ProfileBridge.load-older(); }
                                 }
@@ -529,18 +577,21 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 Card {
-                    title: "MODEL & EFFORT";
+                    // i18n: agent profile, section title in capitals: the AI model the agent uses and how much reasoning effort it spends
+                    title: @tr("MODEL & EFFORT");
                     key: "8";
                     Spot {
                         spot: "model";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Model"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                            // i18n: agent profile, Model & effort section, short row label (noun) beside the drop-down of AI models
+                            Text { text: @tr("Model"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
                             model-box := ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.models;
                                 current-index: root.info.model-index;
-                                accessible-label: "Model";
+                                // i18n: agent profile, accessibility label of the drop-down of AI models (noun)
+                                accessible-label: @tr("Model");
                                 selected => { ProfileBridge.set-model(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -550,12 +601,14 @@ export component AgentProfile inherits Modal {
                         spot: "effort";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: "Effort"; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
+                            // i18n: agent profile, Model & effort section, short row label (noun) beside the drop-down of reasoning effort levels (low, medium, high)
+                            Text { text: @tr("Effort"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 50 * Look.unit; vertical-alignment: center; }
                             effort-box := ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.efforts;
                                 current-index: root.info.effort-index;
-                                accessible-label: "Effort";
+                                // i18n: agent profile, accessibility label of the drop-down of reasoning effort levels (noun)
+                                accessible-label: @tr("Effort");
                                 selected => { ProfileBridge.set-effort(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -563,19 +616,24 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 Card {
-                    title: "AUTONOMY & NOTIFICATIONS";
-                    Spot { spot: "heartbeat"; ToggleRow { label: "Heartbeat"; note: root.info.heartbeat-note; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } } }
+                    // i18n: agent profile, section title in capitals: what the agent does by itself and when it notifies the user
+                    title: @tr("AUTONOMY & NOTIFICATIONS");
+                    // i18n: agent profile, switch label (noun): Clarp wakes the agent now and then to check on its work by itself
+                    Spot { spot: "heartbeat"; ToggleRow { label: @tr("Heartbeat"); note: root.info.heartbeat-note; checked: root.info.heartbeat; toggled(on) => { ProfileBridge.set-heartbeat(on); } } }
                     // The heartbeat's recent checks, under its switch.
                     for line in ProfileBridge.heartbeat-history: HorizontalLayout {
                         spacing: 8px;
                         Rectangle { width: 6px; height: 6px; y: (parent.height - self.height) / 2; border-radius: 2px; background: Palette.chrome-text; }
                         Text { text: line; color: Palette.text; font-size: 11 * Look.unit; overflow: elide; horizontal-stretch: 1; }
                     }
-                    Spot { spot: "dreaming"; ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
-                    Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
+                    // i18n: agent profile, switch label (noun): the agent reflects on its past work while idle and keeps what it learns
+                    Spot { spot: "dreaming"; ToggleRow { label: @tr("Dreaming"); checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
+                    // i18n: agent profile, switch label (noun): phone/desktop notifications from this agent
+                    Spot { spot: "push-alerts"; ToggleRow { label: @tr("Push alerts"); checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
                 }
                 if ProfileBridge.teams.length > 0: Card {
-                    title: "TEAMS";
+                    // i18n: agent profile, section title in capitals (noun): the agent teams this agent belongs to
+                    title: @tr("TEAMS");
                     for team in ProfileBridge.teams: HorizontalLayout {
                         spacing: 8px;
                         Text { text: team.name; color: Palette.chrome-text; font-size: 12 * Look.unit; horizontal-stretch: 1; }
@@ -583,7 +641,8 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 if root.info.mcp-shown: Card {
-                    title: "MCP SERVERS";
+                    // i18n: agent profile, section title in capitals: the agent's MCP tool servers, each with a switch; "MCP" stays as is
+                    title: @tr("MCP SERVERS");
                     for server[index] in ProfileBridge.mcp: Spot {
                         spot: "mcp:" + index;
                         ToggleRow {
@@ -594,7 +653,8 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 Card {
-                    title: "CONTEXT";
+                    // i18n: agent profile, section title in capitals (noun): the AI model's context window, how much of it the conversation fills
+                    title: @tr("CONTEXT");
                     // No gauge while the usage is unknown (#403).
                     if root.info.context-fraction >= 0: Rectangle {
                         height: 4px;
@@ -607,13 +667,15 @@ export component AgentProfile inherits Modal {
                             background: Palette.muted;
                         }
                     }
-                    if root.info.context-used != "": InfoRow { label: "Used"; value: root.info.context-used; }
+                    // i18n: agent profile, Context section, row label: how much of the context window is used; the amount follows (adjective/past participle)
+                    if root.info.context-used != "": InfoRow { label: @tr("Used"); value: root.info.context-used; }
                     HorizontalLayout {
                         alignment: start;
                         Spot {
                             spot: "compact";
                             TextButton {
-                                text: "Compact context";
+                                // i18n: agent profile, Context section, button (verb): asks the agent to summarize older messages so the context window has room again
+                                text: @tr("Compact context");
                                 enabled: !root.info.compacting;
                                 clicked => { ProfileBridge.confirm = "compact"; }
                             }
@@ -623,33 +685,40 @@ export component AgentProfile inherits Modal {
                 // One way to what the agent published: the Publications
                 // overlay, every kind and older ones too (no partial list here).
                 artifacts-card := Card {
-                    title: "PUBLICATIONS";
+                    // i18n: agent profile, section title in capitals (noun): what the agent has published (files, images, reports, cards)
+                    title: @tr("PUBLICATIONS");
                     icon: @image-url("icons/artifacts.svg");
                     HorizontalLayout {
                         alignment: start;
                         spacing: 6px;
                         Spot {
                             spot: "publications";
-                            TextButton { text: "All publications"; clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(0); } }
+                            // i18n: agent profile, Publications section, button that opens everything this agent has published
+                            TextButton { text: @tr("All publications"); clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(0); } }
                             KeyBadge { text: "1"; y: (parent.height - self.height) / 2; }
                         }
                         Spot {
                             spot: "images";
-                            TextButton { text: "Images"; clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(1); } }
+                            // i18n: agent profile, Publications section, button that opens only the images this agent has published (noun)
+                            TextButton { text: @tr("Images"); clicked => { PublicationsBridge.open(ProfileBridge.info.session); PublicationsBridge.choose-filter(1); } }
                             KeyBadge { text: "2"; y: (parent.height - self.height) / 2; }
                         }
                     }
                 }
                 Card {
-                    title: "QUEUED MESSAGES";
+                    // i18n: agent profile, section title in capitals (noun: the messages waiting to be sent to the agent)
+                    title: @tr("QUEUED MESSAGES");
                     Spot {
                         spot: "queue";
                         Text { text: root.info.queue-text; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
-                        IconButton { icon: @image-url("icons/queue.svg"); tip: "Manage"; clicked => { ProfileBridge.queue(); } }
+                        IconButton { icon: @image-url("icons/queue.svg");
+                            // i18n: agent profile, Queued messages section, tooltip of the icon button that opens the queue to edit, send or remove messages (verb)
+                            tip: @tr("Manage"); clicked => { ProfileBridge.queue(); } }
                     }
                 }
                 if ProfileBridge.schedules.length > 0: Card {
-                    title: "SCHEDULED TASKS";
+                    // i18n: agent profile, section title in capitals (noun phrase): tasks set to run for this agent at set times, each with a switch
+                    title: @tr("SCHEDULED TASKS");
                     for schedule[index] in ProfileBridge.schedules: Spot {
                         spot: "schedule:" + index;
                         ToggleRow {
@@ -660,11 +729,16 @@ export component AgentProfile inherits Modal {
                     }
                 }
                 Card {
-                    title: "CHAT ACTIONS";
+                    // i18n: agent profile, section title in capitals (noun phrase): actions on this chat (relaunch, release)
+                    title: @tr("CHAT ACTIONS");
                     HorizontalLayout {
-                        Spot { spot: "relaunch"; IconButton { icon: @image-url("icons/relaunch.svg"); tip: "Relaunch"; clicked => { ProfileBridge.relaunch(); } } }
+                        Spot { spot: "relaunch"; IconButton { icon: @image-url("icons/relaunch.svg");
+                            // i18n: agent profile, Chat actions section, tooltip of the icon button that restarts the agent's process for this chat (verb)
+                            tip: @tr("Relaunch"); clicked => { ProfileBridge.relaunch(); } } }
                         Rectangle { horizontal-stretch: 1; }
-                        Spot { spot: "release"; IconButton { icon: @image-url("icons/release.svg"); tip: "Release…"; danger: true; clicked => { ProfileBridge.confirm = "release"; } } }
+                        Spot { spot: "release"; IconButton { icon: @image-url("icons/release.svg");
+                            // i18n: agent profile, Chat actions section, tooltip of the icon button that frees the agent from this chat after a confirmation (verb; history and files are kept)
+                            tip: @tr("Release…"); danger: true; clicked => { ProfileBridge.confirm = "release"; } } }
                     }
                 }
             }
@@ -674,6 +748,7 @@ export component AgentProfile inherits Modal {
     FocusRing { shown: Focus.mode == "profile"; }
 }
 
+// i18n-screen: backend picker
 // The Backend picker (clarp-ios#140's sheet): the backends, dimmed with
 // their reason when they cannot be chosen; then the chosen one's models,
 // the default marked and the current one ticked; then Move or Cancel.
@@ -692,7 +767,11 @@ component TransitPicker inherits Modal {
             Text { text: ProfileBridge.transit-title; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; wrap: word-wrap; horizontal-stretch: 1; }
             IconButton {
                 icon: @image-url("icons/close.svg");
-                tip: ProfileBridge.transit-step == "backends" ? "Cancel" : "Back";
+                tip: ProfileBridge.transit-step == "backends"
+                    // i18n: backend picker, tooltip of the close icon on the first step (the list of backends): closes the picker without moving (verb)
+                    ? @tr("Cancel")
+                    // i18n: backend picker, tooltip of the close icon on a later step: goes back one step (verb)
+                    : @tr("Back");
                 clicked => { ProfileBridge.transit-back(); }
             }
         }
@@ -706,13 +785,20 @@ component TransitPicker inherits Modal {
         if ProfileBridge.transit-step == "confirm": HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { ProfileBridge.transit-back(); } }
-            IconButton { icon: @image-url("icons/check.svg"); tip: "Move"; clicked => { ProfileBridge.confirm-transit(); } }
+            // i18n: backend picker, last step, tooltip of the icon button that steps back without moving the agent (verb)
+            IconButton { icon: @image-url("icons/close.svg"); tip: @tr("Cancel"); clicked => { ProfileBridge.transit-back(); } }
+            // i18n: backend picker, last step, tooltip of the icon button that moves the agent, with its conversation, to the chosen backend and model (verb)
+            IconButton { icon: @image-url("icons/check.svg"); tip: @tr("Move"); clicked => { ProfileBridge.confirm-transit(); } }
         }
         if ProfileBridge.transit-step != "confirm" && (ProfileBridge.transit-loading || ProfileBridge.transit-error != "" || ProfileBridge.transit-choices.length == 0): HorizontalLayout {
             spacing: 8px;
             Text {
-                text: ProfileBridge.transit-loading ? "Loading…" : ProfileBridge.transit-error != "" ? ProfileBridge.transit-error : "Nothing to move to";
+                text: ProfileBridge.transit-loading
+                    // i18n: backend picker, shown while the list of backends or models loads
+                    ? @tr("Loading…")
+                    : ProfileBridge.transit-error != "" ? ProfileBridge.transit-error
+                    // i18n: backend picker, empty state when there is no other backend or model the agent can move to
+                    : @tr("Nothing to move to");
                 color: ProfileBridge.transit-error != "" ? Palette.danger : Palette.muted;
                 font-size: 12 * Look.unit;
                 horizontal-stretch: 1;
@@ -760,6 +846,7 @@ component TransitPicker inherits Modal {
     }
 }
 
+// i18n-screen: agent profile
 // The profile's confirmations and its Backend picker, over the whole window.
 export component ProfileLayers inherits Rectangle {
     if ProfileBridge.transit-step != "": TransitPicker {
@@ -769,17 +856,23 @@ export component ProfileLayers inherits Rectangle {
     if ProfileBridge.confirm == "compact": Confirm {
         width: root.width;
         height: root.height;
-        title: "Compact context?";
-        message: "Summarizes older messages.";
-        yes-tip: "Compact";
+        // i18n: agent profile, confirmation dialog title: asks whether to compact the agent's context window
+        title: @tr("Compact context?");
+        // i18n: agent profile, compact-context confirmation, explanation under the title: what compacting does
+        message: @tr("Summarizes older messages.");
+        // i18n: agent profile, compact-context confirmation, tooltip of the icon button that confirms (verb: compact the context)
+        yes-tip: @tr("Compact");
         accepted => { ProfileBridge.compact(); }
     }
     if ProfileBridge.confirm == "release": Confirm {
         width: root.width;
         height: root.height;
-        title: "Release chat?";
-        message: "History and files are kept.";
-        yes-tip: "Release";
+        // i18n: agent profile, confirmation dialog title: asks whether to release the agent from this chat (verb)
+        title: @tr("Release chat?");
+        // i18n: agent profile, release-chat confirmation, explanation under the title: releasing keeps the chat's history and files
+        message: @tr("History and files are kept.");
+        // i18n: agent profile, release-chat confirmation, tooltip of the icon button that confirms (verb: release the chat)
+        yes-tip: @tr("Release");
         accepted => { ProfileBridge.release(); }
     }
 }

@@ -45,22 +45,29 @@ export component OrchestratorDialog inherits Modal {
         spacing: 11px;
         HorizontalLayout {
             spacing: 8px;
-            Text { text: "Orchestrator"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
+            // i18n: Orchestrator dialog (Orchestrator is a feature name, left as is: a model that routes requests to agents), title
+            Text { text: @tr("Orchestrator"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
             if OrchestratorBridge.loading: Busy { reduced-motion: OrchestratorBridge.reduced-motion; }
-            IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { OrchestratorBridge.close(); } }
+            // i18n: Orchestrator dialog, tooltip of the close button at the top (verb)
+            IconButton { icon: @image-url("icons/close.svg"); tip: @tr("Close"); clicked => { OrchestratorBridge.close(); } }
         }
         HorizontalLayout {
             spacing: 8px;
-            Switch { checked <=> OrchestratorBridge.enabled; accessible-label: "AI routing"; }
-            Text { text: "AI routing"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
+            // i18n: Orchestrator dialog, accessibility label of the switch that turns AI routing on (noun: an AI model picks which agent gets a request)
+            Switch { checked <=> OrchestratorBridge.enabled; accessible-label: @tr("AI routing"); }
+            // i18n: Orchestrator dialog, label beside the switch that turns AI routing on (noun)
+            Text { text: @tr("AI routing"); color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         HorizontalLayout {
             spacing: 8px;
-            Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: "Fallback only"; }
-            Text { text: "Fallback only"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
+            // i18n: Orchestrator dialog, accessibility label of the switch: use AI routing only when name matching finds no agent
+            Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: @tr("Fallback only"); }
+            // i18n: Orchestrator dialog, label beside the switch: use AI routing only when name matching finds no agent
+            Text { text: @tr("Fallback only"); color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         Text {
-            text: "Confidence  " + Math.round(OrchestratorBridge.confidence * 100) / 100;
+            // i18n: Orchestrator dialog, label over the slider (noun: how sure the routing model must be); {} is the value, 0.50 to 0.99
+            text: @tr("Confidence  {}", Math.round(OrchestratorBridge.confidence * 100) / 100);
             color: Palette.chrome-text;
             font-size: 12 * Look.unit;
         }
@@ -69,26 +76,39 @@ export component OrchestratorDialog inherits Modal {
             maximum: 0.99;
             step: 0.01;
             value <=> OrchestratorBridge.confidence;
-            accessible-label: "Confidence";
+            // i18n: Orchestrator dialog, accessibility label of the confidence slider (noun)
+            accessible-label: @tr("Confidence");
         }
         HorizontalLayout {
             spacing: 10px;
             VerticalLayout {
                 spacing: 4px;
                 horizontal-stretch: 1;
-                Text { text: "Provider"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
-                ComboBox { model: OrchestratorBridge.providers; current-index <=> OrchestratorBridge.provider-index; accessible-label: "Provider"; }
+                // i18n: Orchestrator dialog, label over the list of AI providers (noun)
+                Text { text: @tr("Provider"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
+                // i18n: Orchestrator dialog, accessibility label of the AI provider list (noun)
+                ComboBox { model: OrchestratorBridge.providers; current-index <=> OrchestratorBridge.provider-index; accessible-label: @tr("Provider"); }
             }
             VerticalLayout {
                 spacing: 4px;
                 horizontal-stretch: 1;
-                Text { text: "Effort"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
-                ComboBox { model: OrchestratorBridge.efforts; current-index <=> OrchestratorBridge.effort-index; accessible-label: "Effort"; }
+                // i18n: Orchestrator dialog, label over the reasoning effort list (noun: how hard the model thinks)
+                Text { text: @tr("Effort"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
+                // i18n: Orchestrator dialog, accessibility label of the reasoning effort list (noun)
+                ComboBox { model: OrchestratorBridge.efforts; current-index <=> OrchestratorBridge.effort-index; accessible-label: @tr("Effort"); }
             }
         }
-        Text { text: "Model override"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
-        Field { text <=> OrchestratorBridge.model; placeholder-text: "Default"; accessible-label: "Model override"; }
-        Text { text: "Timeout (ms)"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
+        // i18n: Orchestrator dialog, label over the field that names a model to use instead of the provider's default (noun)
+        Text { text: @tr("Model override"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
+        Field {
+            text <=> OrchestratorBridge.model;
+            // i18n: Orchestrator dialog, placeholder of the model override field: empty means the provider's default model (noun/adjective)
+            placeholder-text: @tr("Default");
+            // i18n: Orchestrator dialog, accessibility label of the model override field (noun)
+            accessible-label: @tr("Model override");
+        }
+        // i18n: Orchestrator dialog, label over the timeout box (noun); ms is milliseconds
+        Text { text: @tr("Timeout (ms)"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
         HorizontalLayout {
             alignment: start;
             SpinBox {
@@ -97,7 +117,8 @@ export component OrchestratorDialog inherits Modal {
                 maximum: 60000;
                 step-size: 250;
                 value <=> OrchestratorBridge.timeout-ms;
-                accessible-label: "Timeout (ms)";
+                // i18n: Orchestrator dialog, accessibility label of the timeout box (noun); ms is milliseconds
+                accessible-label: @tr("Timeout (ms)");
             }
         }
         if OrchestratorBridge.last-decision != "": Rectangle {
@@ -105,17 +126,20 @@ export component OrchestratorDialog inherits Modal {
             background: Palette.window;
             VerticalLayout {
                 padding: 9px;
-                Text { text: "Last decision: " + OrchestratorBridge.last-decision; color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
+                // i18n: Orchestrator dialog, line at the bottom; {} is what the routing model decided last (which agent it picked and why)
+                Text { text: @tr("Last decision: {}", OrchestratorBridge.last-decision); color: Palette.muted; font-size: 11 * Look.unit; wrap: word-wrap; }
             }
         }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/close.svg"); tip: "Cancel"; clicked => { OrchestratorBridge.close(); } }
+            // i18n: Orchestrator dialog, tooltip of the button that closes without saving (verb)
+            IconButton { icon: @image-url("icons/close.svg"); tip: @tr("Cancel"); clicked => { OrchestratorBridge.close(); } }
             IconButton {
                 icon: @image-url("icons/save.svg");
-                tip: "Save";
+                // i18n: Orchestrator dialog, tooltip of the save button (verb)
+                tip: @tr("Save");
                 enabled: OrchestratorBridge.loaded && !OrchestratorBridge.loading;
                 clicked => { OrchestratorBridge.save(); }
             }

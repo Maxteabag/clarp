@@ -7,6 +7,7 @@
 // `mic.recording = true` on a $state object the button reads.
 
 import { Timing } from '@core/protocol.js';
+import { t as tr } from './i18n.svelte.js';
 import { clog, trace } from '../lib/net.js';
 import { app, flash } from './app.svelte.js';
 import {
@@ -158,7 +159,7 @@ function startCapture() {
       : new MediaRecorder(mediaStream);
   } catch (e) {
     clog('recorderFail', `MediaRecorder: ${e && e.name}: ${e && e.message}`);
-    flash(`recorder: ${e.message}`, 3000);
+    flash(tr('mic.recorder_error', { error: e.message }), 3000);
     return;
   }
   recorder.ondataavailable = e => {
@@ -170,7 +171,7 @@ function startCapture() {
   try { recorder.start(Timing.MEDIA_RECORDER_TIMESLICE_MS); }
   catch (e) {
     clog('recorderFail', `start: ${e && e.name}: ${e && e.message}`);
-    flash(`recorder start: ${e.message}`, 3000);
+    flash(tr('mic.recorder_start_error', { error: e.message }), 3000);
     return;
   }
   mic.capturing = true;
@@ -196,7 +197,7 @@ function stopCapture() {
     teardownMic();
     recordedChunks = [];
     try { machine.settle(); } catch (_) {}
-    flash('Recorder stalled — tap again', 2500);
+    flash(tr('mic.recorder_stalled'), 2500);
   }, Timing.CAPTURE_STOP_WATCHDOG_MS);
 }
 
@@ -218,7 +219,7 @@ async function onCaptureEnd() {
     if (blob.size === 0 && dur >= MIN_UTTER_MS) {
       clog('captureZeroByte', 'reacquiring mic');
       teardownMic();
-      flash('Mic stalled — tap again', 2500);
+      flash(tr('mic.mic_stalled'), 2500);
     }
     if (pendingText) commitPending();
     else {
@@ -230,7 +231,7 @@ async function onCaptureEnd() {
 
   // Delay the 'Transcribing' flash so quick clips don't trigger it.
   const transcribingTimer = setTimeout(
-    () => flash('Transcribing…', 1500),
+    () => flash(tr('mic.transcribing'), 1500),
     Timing.TRANSCRIBING_FLASH_MS,
   );
   let text = '', endsTerminal = false;
@@ -257,10 +258,10 @@ async function onCaptureEnd() {
       }
     } else {
       const t = await r.text();
-      flash(`stt ${r.status}: ${t.slice(0, 80)}`, 3500);
+      flash(tr('mic.stt_status', { status: String(r.status), error: t.slice(0, 80) }), 3500);
     }
   } catch (err) {
-    flash(`stt failed: ${err.message}`, 3500);
+    flash(tr('mic.stt_failed', { error: err.message }), 3500);
   } finally {
     clearTimeout(timeout);
   }
@@ -319,11 +320,11 @@ function vadTick() {
 export async function startAlwaysOn() {
   if (alwaysOn) return;
   try { await ensureMic(); }
-  catch (e) { flash(`mic permission: ${e.message || e.name}`, 4500); return; }
+  catch (e) { flash(tr('mic.permission', { error: e.message || e.name }), 4500); return; }
   alwaysOn = true;
   singleShot = false;
   mic.recording = true;
-  flash('Always-on (Whisper)', 1500);
+  flash(tr('mic.always_on'), 1500);
   vadTick();
 }
 
@@ -338,7 +339,7 @@ export function stopAlwaysOn() {
   // clip is in hand; clearing it here first meant the recorder was never
   // stopped and tap-to-record silently discarded every clip (issue #13).
   stopCapture();
-  flash('Listening off', 1500);
+  flash(tr('mic.listening_off'), 1500);
 }
 
 export async function micTap() {
@@ -346,11 +347,11 @@ export async function micTap() {
   // the transcript at once instead of waiting out the hands-free grace timer.
   if (alwaysOn) { stopAlwaysOn(); return; }
   try { await ensureMic(); }
-  catch (e) { flash(`mic permission: ${e.message || e.name}`, 4500); return; }
+  catch (e) { flash(tr('mic.permission', { error: e.message || e.name }), 4500); return; }
   singleShot = true;
   alwaysOn = true;
   mic.recording = true;
-  flash('Recording (tap to send)', 1500);
+  flash(tr('mic.recording'), 1500);
   if (!mic.capturing) startCapture();
   vadTick();
 }

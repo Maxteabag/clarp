@@ -64,18 +64,24 @@ export component ReportView inherits Modal {
                 VerticalLayout {
                     horizontal-stretch: 1;
                     spacing: 2px;
-                    Text { text: root.title == "" ? "Report" : root.title; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; overflow: elide; }
+                    // i18n: report viewer, title when the report has none (noun: a written report an agent published)
+                    Text { text: root.title == "" ? @tr("Report") : root.title; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; overflow: elide; }
                     if root.summary != "": Text { text: root.summary; color: Palette.muted; font-size: 12 * Look.unit; overflow: elide; }
                 }
                 Text { text: root.kind != "" ? root.kind : root.html ? "HTML" : "MARKDOWN"; color: Palette.faint; font-size: 11 * Look.unit; vertical-alignment: center; }
-                KeyHint { key: "↑/↓"; label: "Scroll"; emphasised: true; }
-                if root.links > 0: KeyHint { key: root.links == 1 ? "1" : "1-" + Math.min(9, root.links); label: root.links == 1 ? "Open link" : "Open links"; emphasised: true; clicked => { root.open-link(0); } }
-                if root.browser: KeyHint { key: "B"; label: "Open in browser"; emphasised: true; clicked => { root.open-browser(); } }
-                KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
+                // i18n: report viewer, key hint at the top beside ↑/↓ (verb): scroll the report
+                KeyHint { key: "↑/↓"; label: @tr("Scroll"); emphasised: true; }
+                // i18n: report viewer, key hint beside the number keys (verb phrase): open one of the report's links by its number; the count is how many links it has
+                if root.links > 0: KeyHint { key: root.links == 1 ? "1" : "1-" + Math.min(9, root.links); label: @tr("Open link" | "Open links" % root.links); emphasised: true; clicked => { root.open-link(0); } }
+                // i18n: report viewer, key hint beside B (verb phrase): open the report in the web browser
+                if root.browser: KeyHint { key: "B"; label: @tr("Open in browser"); emphasised: true; clicked => { root.open-browser(); } }
+                // i18n: report viewer, key hint beside Esc (verb): close the report
+                KeyHint { key: "Esc"; label: @tr("Close"); emphasised: true; clicked => { root.done(); } }
             }
             Rectangle { height: 1px; background: Palette.border; }
             if root.blocks.length == 0: Text {
-                text: "Nothing to show";
+                // i18n: report viewer, empty state when the report has no content
+                text: @tr("Nothing to show");
                 color: Palette.muted;
                 font-size: 13 * Look.unit;
             }

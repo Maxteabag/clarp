@@ -29,6 +29,7 @@ export struct TeamMemberView {
 // TeamsPanel.qml: the team list, and the selected team's members and
 // messages. Team actions (edit, leader nudging, delete) are icon buttons in
 // its header; create, edit, add member and delete open dialogs.
+// i18n-screen: teams
 export component Teams inherits Rectangle {
     in property <[TeamView]> teams;
     in property <[TeamMessageView]> messages;
@@ -62,19 +63,26 @@ export component Teams inherits Rectangle {
             padding-right: 12px;
             spacing: 9px;
             Text {
-                text: "TEAMS";
+                // i18n: Teams page, title at the top (noun), written in capitals where the script has them
+                text: @tr("TEAMS");
                 color: Palette.text;
                 font-size: 17 * Look.unit;
                 font-weight: 600;
                 letter-spacing: 1.5px;
                 vertical-alignment: center;
             }
-            Text { text: root.teams.length + " teams"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+            // i18n: Teams page, count beside the title; {n} is how many teams there are
+            Text { text: @tr("{n} team" | "{n} teams" % root.teams.length); color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
             if root.loading: Spinner { width: 18px; height: 18px; y: 18px; indeterminate: true; }
             Button {
-                text: root.grouped ? "Grouped" : "Flat";
-                accessible-label: "Switch team grouping";
+                text: root.grouped
+                    // i18n: Teams page, header button showing the current layout of the team list: teams nested under their parent team (adjective); clicking switches to Flat
+                    ? @tr("Grouped")
+                    // i18n: Teams page, header button showing the current layout of the team list: all teams in one plain list (adjective); clicking switches to Grouped
+                    : @tr("Flat");
+                // i18n: Teams page, accessibility label of the Grouped/Flat button (an action: switch between nested and flat team list)
+                accessible-label: @tr("Switch team grouping");
                 y: 11px;
                 height: 32px;
                 clicked => { root.toggle-grouping(); }
@@ -82,13 +90,15 @@ export component Teams inherits Rectangle {
             IconButton {
                 y: 13px;
                 icon: @image-url("icons/plus.svg");
-                label: "New team";
+                // i18n: Teams page, header icon button tooltip and accessibility label: creates a new team
+                label: @tr("New team");
                 clicked => { root.create(); }
             }
             IconButton {
                 y: 13px;
                 icon: @image-url("icons/refresh.svg");
-                label: "Refresh teams";
+                // i18n: Teams page, header icon button tooltip and accessibility label: reloads the team list (an action)
+                label: @tr("Refresh teams");
                 clicked => { root.refresh(); }
             }
         }
@@ -178,21 +188,27 @@ export component Teams inherits Rectangle {
                             if root.selected != "": IconButton {
                                 y: 13px;
                                 icon: @image-url("icons/edit.svg");
-                                label: "Edit team";
+                                // i18n: Teams page, selected team's header, icon button tooltip and accessibility label: opens the edit dialog (an action)
+                                label: @tr("Edit team");
                                 clicked => { root.edit(); }
                             }
                             if root.selected != "": IconButton {
                                 y: 13px;
                                 icon: root.nudging ? @image-url("icons/nudge.svg") : @image-url("icons/nudge-off.svg");
                                 tint: root.nudging ? Palette.accent : Palette.muted;
-                                label: root.nudging ? "Disable leader nudging" : "Enable leader nudging";
+                                label: root.nudging
+                                    // i18n: Teams page, selected team's header, icon button tooltip (an action): stops prompting the team leader to act on new team activity or stalled work
+                                    ? @tr("Disable leader nudging")
+                                    // i18n: Teams page, selected team's header, icon button tooltip (an action): starts prompting the team leader to act on new team activity or stalled work
+                                    : @tr("Enable leader nudging");
                                 clicked => { root.toggle-nudging(); }
                             }
                             if root.selected != "": IconButton {
                                 y: 13px;
                                 icon: @image-url("icons/delete.svg");
                                 tint: Palette.danger;
-                                label: "Delete team…";
+                                // i18n: Teams page, selected team's header, icon button tooltip (an action): opens a confirmation to delete the team
+                                label: @tr("Delete team…");
                                 clicked => { root.delete(); }
                             }
                         }
@@ -221,7 +237,8 @@ export component Teams inherits Rectangle {
                                         y: 3px;
                                         size: 19px;
                                         icon: @image-url("icons/rail-close.svg");
-                                        label: "Remove member " + member.name;
+                                        // i18n: Teams page, member chip, small close button tooltip and accessibility label (an action); {} is the agent's name
+                                        label: @tr("Remove member {}", member.name);
                                         clicked => { root.remove-member(member.id); }
                                     }
                                 }
@@ -235,8 +252,10 @@ export component Teams inherits Rectangle {
                                 border-color: Palette.border;
                                 background: add-touch.has-hover ? Palette.hover : transparent;
                                 accessible-role: button;
-                                accessible-label: "Add team member";
-                                add := Text { text: "+ member"; color: Palette.chrome-text; font-size: 11 * Look.unit; }
+                                // i18n: Teams page, accessibility label of the "+ member" button after the member chips (an action: add an agent to the team)
+                                accessible-label: @tr("Add team member");
+                                // i18n: Teams page, small button after the member chips: adds an agent to the team; keep it short, the + means add
+                                add := Text { text: @tr("+ member"); color: Palette.chrome-text; font-size: 11 * Look.unit; }
                                 add-touch := TouchArea { clicked => { root.add-member(); } }
                             }
                         }
@@ -255,7 +274,8 @@ export component Teams inherits Rectangle {
                                     spacing: 5px;
                                     HorizontalLayout {
                                         Text { text: message.source; color: Palette.chrome-text; font-size: 12 * Look.unit; font-weight: 600; horizontal-stretch: 1; vertical-alignment: center; }
-                                        if message.session != "": Button { text: "Open chat"; clicked => { root.open-chat(message.session); } }
+                                        // i18n: Teams page, button on a team message (verb): opens the chat with the agent that sent it
+                                        if message.session != "": Button { text: @tr("Open chat"); clicked => { root.open-chat(message.session); } }
                                     }
                                     Text { text: message.text; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
                                 }
@@ -266,7 +286,11 @@ export component Teams inherits Rectangle {
                 if root.messages.length == 0 && !root.loading: Text {
                     y: parent.height / 2;
                     horizontal-alignment: center;
-                    text: root.selected != "" ? "No team messages yet" : "Choose a team";
+                    text: root.selected != ""
+                        // i18n: Teams page, empty state in the message list when the selected team has no messages
+                        ? @tr("No team messages yet")
+                        // i18n: Teams page, empty state when no team is selected: asks the user to pick one from the list
+                        : @tr("Choose a team");
                     color: Palette.muted;
                     font-size: 12 * Look.unit;
                 }
@@ -276,6 +300,7 @@ export component Teams inherits Rectangle {
 }
 
 // Create team: a name (Enter or the check creates it).
+// i18n-screen: create team
 export component TeamCreateDialog inherits Modal {
     callback create(string);
     callback done();
@@ -286,23 +311,30 @@ export component TeamCreateDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Create team"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        Text { text: "Team name"; color: Palette.muted; font-size: 12 * Look.unit; }
+        // i18n: Create team dialog, title
+        Text { text: @tr("Create team"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        // i18n: Create team dialog, label above the name field (noun)
+        Text { text: @tr("Team name"); color: Palette.muted; font-size: 12 * Look.unit; }
         name := Field {
-            placeholder-text: "e.g. Release crew";
-            accessible-label: "Team name";
+            // i18n: Create team dialog, placeholder in the name field: an example team name
+            placeholder-text: @tr("e.g. Release crew");
+            // i18n: Create team dialog, accessibility label of the name field (noun)
+            accessible-label: @tr("Team name");
             accepted => { root.create(self.text); }
         }
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
-            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Create"; clicked => { root.create(name.text); } }
+            // i18n: Team dialog, close icon button tooltip (verb): closes the dialog without changes
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("Cancel"); clicked => { root.done(); } }
+            // i18n: Create team dialog, check icon button tooltip (verb): creates the team
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: @tr("Create"); clicked => { root.create(name.text); } }
         }
     }
 }
 
 // Edit team: name, colour and leader (one of its members, or none).
+// i18n-screen: edit team
 export component TeamEditDialog inherits Modal {
     in property <[string]> leaders;
     in-out property <int> leader-index;
@@ -319,28 +351,38 @@ export component TeamEditDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 8px;
-        Text { text: "Edit team"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        Text { text: "Name"; color: Palette.muted; font-size: 12 * Look.unit; }
-        name := Field { accessible-label: "Name"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
-        Text { text: "Color"; color: Palette.muted; font-size: 12 * Look.unit; }
-        colour := Field { placeholder-text: "#8f96bc"; accessible-label: "Color"; accepted => { root.save(name.text, colour.text, root.leader-index); } }
-        Text { text: "Leader"; color: Palette.muted; font-size: 12 * Look.unit; }
+        // i18n: Edit team dialog, title
+        Text { text: @tr("Edit team"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        // i18n: Edit team dialog, label above the team name field (noun)
+        Text { text: @tr("Name"); color: Palette.muted; font-size: 12 * Look.unit; }
+        // i18n: Edit team dialog, accessibility label of the team name field (noun)
+        name := Field { accessible-label: @tr("Name"); accepted => { root.save(name.text, colour.text, root.leader-index); } }
+        // i18n: Edit team dialog, label above the team colour field (noun); the colour is typed as a hex code like #8f96bc
+        Text { text: @tr("Color"); color: Palette.muted; font-size: 12 * Look.unit; }
+        // i18n: Edit team dialog, accessibility label of the team colour field (noun)
+        colour := Field { placeholder-text: "#8f96bc"; accessible-label: @tr("Color"); accepted => { root.save(name.text, colour.text, root.leader-index); } }
+        // i18n: Edit team dialog, label above the picker of the team's leader (noun: the member agent who leads the team)
+        Text { text: @tr("Leader"); color: Palette.muted; font-size: 12 * Look.unit; }
         ComboBox {
             model: root.leaders;
             current-index <=> root.leader-index;
-            accessible-label: "Leader";
+            // i18n: Edit team dialog, accessibility label of the leader picker (noun)
+            accessible-label: @tr("Leader");
         }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
-            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Save"; clicked => { root.save(name.text, colour.text, root.leader-index); } }
+            // i18n: Team dialog, close icon button tooltip (verb): closes the dialog without changes
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("Cancel"); clicked => { root.done(); } }
+            // i18n: Edit team dialog, check icon button tooltip (verb): saves the changes
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: @tr("Save"); clicked => { root.save(name.text, colour.text, root.leader-index); } }
         }
     }
 }
 
 // Add team member: one of the roster's agents.
+// i18n-screen: add team member
 export component TeamMemberDialog inherits Modal {
     in property <[string]> agents;
     in-out property <int> agent-index;
@@ -352,19 +394,25 @@ export component TeamMemberDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Add team member"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        Text { text: "Agent"; color: Palette.muted; font-size: 12 * Look.unit; }
-        ComboBox { model: root.agents; current-index <=> root.agent-index; accessible-label: "Agent"; }
+        // i18n: Add team member dialog, title
+        Text { text: @tr("Add team member"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        // i18n: Add team member dialog, label above the picker of agents (noun)
+        Text { text: @tr("Agent"); color: Palette.muted; font-size: 12 * Look.unit; }
+        // i18n: Add team member dialog, accessibility label of the agent picker (noun)
+        ComboBox { model: root.agents; current-index <=> root.agent-index; accessible-label: @tr("Agent"); }
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
-            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: "Add"; clicked => { root.add(root.agent-index); } }
+            // i18n: Team dialog, close icon button tooltip (verb): closes the dialog without changes
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("Cancel"); clicked => { root.done(); } }
+            // i18n: Add team member dialog, check icon button tooltip (verb): adds the chosen agent to the team
+            IconButton { icon: @image-url("icons/check.svg"); tint: Palette.accent; label: @tr("Add"); clicked => { root.add(root.agent-index); } }
         }
     }
 }
 
 // Delete team?: removes the team and its history.
+// i18n-screen: delete team
 export component TeamDeleteDialog inherits Modal {
     in property <string> team;
     callback confirm();
@@ -375,14 +423,18 @@ export component TeamDeleteDialog inherits Modal {
     VerticalLayout {
         padding: 20px;
         spacing: 10px;
-        Text { text: "Delete team?"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        Text { text: "This removes the team and its history."; color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
+        // i18n: Delete team dialog, title: asks to confirm deleting the team
+        Text { text: @tr("Delete team?"); color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
+        // i18n: Delete team dialog, explanation under the title
+        Text { text: @tr("This removes the team and its history."); color: Palette.chrome-text; font-size: 13 * Look.unit; wrap: word-wrap; }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {
             spacing: 6px;
             alignment: end;
-            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { root.done(); } }
-            IconButton { icon: @image-url("icons/delete.svg"); tint: Palette.danger; label: "Delete " + root.team; clicked => { root.confirm(); } }
+            // i18n: Team dialog, close icon button tooltip (verb): closes the dialog without changes
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("Cancel"); clicked => { root.done(); } }
+            // i18n: Delete team dialog, red delete icon button tooltip (an action); {} is the team's name
+            IconButton { icon: @image-url("icons/delete.svg"); tint: Palette.danger; label: @tr("Delete {}", root.team); clicked => { root.confirm(); } }
         }
     }
 }

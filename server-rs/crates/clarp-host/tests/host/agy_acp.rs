@@ -6,7 +6,7 @@
 
 use super::*;
 
-const FAKE: &str = include_str!("../../../clarp-shim/tests/fake_acp/agy.py");
+pub(super) const FAKE: &str = include_str!("../../../clarp-shim/tests/fake_acp/agy.py");
 
 #[test]
 fn an_agent_on_antigravity_over_acp_answers_and_continues_its_conversation() {
@@ -66,49 +66,36 @@ fn an_agent_on_antigravity_over_acp_answers_and_continues_its_conversation() {
     assert_eq!(replies.len(), 2, "{replies:?}");
 }
 
-/// Begins a move and waits until it is done or failed: its last state.
-fn moved(host: &Host, session: &str, backend: &str, id: &str) -> Value {
-    let ask = json!({"session": session, "backend": backend, "model": "", "request_id": id});
-    let (status, began) = host.ask("POST", "/agent-transit", Some(&ask));
-    assert_eq!(status, 202, "{began}");
-    let transit = began["transit_id"].as_str().unwrap().to_string();
-    let mut last = Value::Null;
-    wait_for("the move to end", || {
-        last = host.get(&format!(
-            "/agent-transit?session={session}&transit_id={transit}"
-        ));
-        matches!(last["phase"].as_str(), Some("done" | "failed"))
-    });
-    last
-}
-
 /// The mark the Host's own record of a conversation begins with, where a turn opens with it.
 const RECORD: &str = "--- Clarp restored conversation ---";
 
-/// A Host whose Antigravity is the stand-in, for both cards, in a home of the test's own.
-fn antigravity(name: &str) -> (Place, Host) {
-    let place = Place::new(name);
+/// A Host running the ACP peer in a home of the test's own.
+fn open_antigravity(place: &Place) -> Host {
     let agy = place.root.join("agy");
-    program(&agy, FAKE);
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let host = place.start_in("", &[], &world);
-    (place, host)
+    place.start_in("", &[], &world)
 }
 
 /// The lines of a file the stand-in wrote, each a JSON object.
-fn written(place: &Place, file: &str) -> Vec<Value> {
-    std::fs::read_to_string(place.root.join(file))
-        .unwrap_or_default()
-        .lines()
+pub(super) fn written(place: &Place, file: &str) -> Vec<Value> {
+    let contents = match std::fs::read_to_string(place.root.join(file)) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!("reading {file}: {error}"),
+    };
+    // A concurrent append may be between writing the JSON and its terminating newline.
+    contents
+        .split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
 
 /// What the stand-in was sent over ACP of one method.
-fn asked(place: &Place, method: &str) -> Vec<Value> {
+pub(super) fn asked(place: &Place, method: &str) -> Vec<Value> {
     written(place, "acp.log")
         .into_iter()
         .filter(|message| message["method"] == method)
@@ -125,84 +112,187 @@ fn idle(host: &Host, session: &str) -> bool {
 }
 
 /// The text of the `n`th prompt the stand-in was sent over ACP.
-fn prompt_text(place: &Place, n: usize) -> String {
+pub(super) fn prompt_text(place: &Place, n: usize) -> String {
     asked(place, "session/prompt")[n]["params"]["prompt"][0]["text"]
         .as_str()
         .unwrap()
         .to_string()
 }
 
-#[test]
-fn a_move_between_antigravity_and_its_acp_card_goes_on_in_the_same_conversation() {
-    let (place, host) = antigravity("agy-same-store");
-    let options = host.get("/agent-model-options");
-    assert_eq!(
-        options["providers"]["agy-acp"]["runs_through"], "agy",
-        "{options}"
-    );
-    assert_eq!(options["providers"]["agy-acp"]["supports_steer"], false);
-    let made = host.post("/agents", json!({"name": "Mover", "backend": "agy"}));
+/// Seed a stopped fleet with a legacy backend and a pinned model, keeping its real
+/// journal and native conversation. Exercise each side of the durable switch.
+fn legacy_fleet(name: &str, archived: bool) -> (Place, Host, String) {
+    let place = Place::new(name);
+    program(&place.root.join("agy"), FAKE);
+    let host = open_antigravity(&place);
+    let made = host.post("/agents", json!({"name":"Mover","backend":"agy"}));
     let session = made["session"].as_str().unwrap().to_string();
-    host.send(&session, "remember the word lantern", "m-1");
-    wait_for("the turn on agy", || {
-        written(&place, "print.log").len() == 1 && idle(&host, &session)
-    });
-
-    // To the ACP card: the same store, so nothing is carried and the conversation is kept.
-    let there = moved(&host, &session, "agy-acp", "move-1");
-    assert_eq!(there["phase"], "done", "{there}");
-    assert_eq!(there["carried"]["turns"], 0, "{there}");
+    let row = |host: &Host| {
+        host.get("/agents/snapshot?include_archived=1")["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["session"] == session)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row(&host)["backend"], "agy-acp");
+    host.send(&session, "remember the word lantern", "old-message");
+    wait_for("the seed conversation", || host.state(&session) == "done");
+    if archived {
+        host.post("/agent-archive", json!({"session":session,"archived":true}));
+    }
+    let before = row(&host);
     assert!(
-        host.conversation(&session).iter().any(
+        before["conversation_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty())
+    );
+    let history = host.conversation(&session);
+    assert_eq!(before["backend_session_id"], "conv-new");
+    assert_eq!(before["archived_at"].is_number(), archived);
+    assert!(
+        history
+            .iter()
+            .any(|(role, text)| role == "user" && text == "remember the word lantern")
+    );
+    assert!(
+        place
+            .root
+            .join(".gemini/antigravity-cli/conversations/conv-new.db")
+            .is_file()
+    );
+    host.kill();
+    let id = before["agent_id"].as_str().unwrap();
+    let mut record = kept_records(&place, "agent").remove(id).unwrap();
+    record["backend"] = json!("agy");
+    record["model"] = json!("claude-b");
+    keep_record(&place, "agent", id, &record);
+    std::fs::remove_file(place.root.join("acp.log")).unwrap();
+    let migrated = |host: &Host| {
+        wait_for("legacy fleet record to move", || {
+            let lineage = host.get(&format!("/agent-helper-state?session={session}"));
+            let current = row(host);
+            lineage["backend"] == "agy-acp"
+                && current["backend"] == "agy-acp"
+                && current["busy"] == false
+        });
+    };
+    // The catalog sees another model during startup. The same-store
+    // retirement must still carry the exact selection to the ACP actor.
+    let partial_models = place.root.join("partial-models");
+    std::fs::write(&partial_models, "").unwrap();
+    let host = open_antigravity(&place);
+    migrated(&host);
+    std::fs::remove_file(&partial_models).unwrap();
+    let after = row(&host);
+    for key in [
+        "agent_id",
+        "session",
+        "conversation_id",
+        "backend_session_id",
+        "archived_at",
+        "archived_by",
+    ] {
+        assert_eq!(before[key], after[key], "{key}");
+    }
+    let current = host.conversation(&session);
+    assert!(current.starts_with(&history), "{current:?}");
+    assert!(
+        current.iter().any(
             |(role, text)| role == "system" && text.ends_with("The same conversation goes on.")
         ),
-        "{:?}",
-        host.conversation(&session)
+        "{current:?}"
     );
+    if !archived {
+        assert!(!place.root.join("print.log").exists());
+        return (place, host, session);
+    }
+
+    // A crash can leave the agent journal switched while the fleet still names the old
+    // backend. Reopen this precise combination and verify the repair is idempotent.
+    host.kill();
+    let switched = kept_records(&place, "agent").remove(id).unwrap();
+    assert_eq!(switched["backend"], "agy-acp");
+    assert_eq!(switched["model"], record["model"]);
+    assert_eq!(switched["archived_at_ms"], record["archived_at_ms"]);
+    assert_eq!(switched["archived_by"], record["archived_by"]);
+    keep_record(&place, "agent", id, &record);
+    let host = open_antigravity(&place);
+    migrated(&host);
+    assert_eq!(
+        host.conversation(&session),
+        current,
+        "a replayed switch added a chat row"
+    );
+    let visible = host.get("/agents/snapshot?include_archived=0");
+    assert!(
+        !visible["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|agent| agent["agent_id"] == id)
+    );
+    assert_eq!(row(&host)["archived_at"], before["archived_at"]);
+    assert_eq!(
+        row(&host)["backend_session_id"],
+        before["backend_session_id"]
+    );
+    assert!(!place.root.join("print.log").exists());
+    (place, host, session)
+}
+
+#[test]
+fn an_archived_legacy_agent_resumes_its_own_conversation_over_acp() {
+    let (place, host, session) = legacy_fleet("agy-same-store", true);
+    // A Transit request using the retired spelling resolves to the current tool.
+    let (status, refused) = host.ask(
+        "POST",
+        "/agent-transit",
+        Some(&json!({
+            "session":session, "backend":"agy", "model":"claude-b"
+        })),
+    );
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(refused["error"], "same_backend_and_model");
+    host.post(
+        "/agent-archive",
+        json!({"session":session,"archived":false}),
+    );
+    let opened = asked(&place, "session/new").len();
     host.send(&session, "what was the word?", "m-2");
-    wait_for("the turn over ACP", || {
+    wait_for("the resumed answer", || {
         asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
     });
-    // It resumes agy's own conversation, natively, with no record of the Host's at its head.
     assert_eq!(
         asked(&place, "session/resume")[0]["params"]["sessionId"],
-        "conv-print"
+        "conv-new"
     );
-    assert!(asked(&place, "session/new").is_empty());
+    assert_eq!(asked(&place, "session/new").len(), opened);
+    assert!(asked(&place, "session/set_config_option").iter().any(
+        |message| message["params"]["sessionId"] == "conv-new"
+            && message["params"]["configId"] == "model"
+            && message["params"]["value"] == "claude-b"
+    ));
     let text = prompt_text(&place, 0);
     assert!(
-        !text.contains(RECORD) && !text.contains("lantern"),
+        text.contains("what was the word?") && !text.contains(RECORD) && !text.contains("lantern"),
         "{text}"
     );
-
-    // And back: agy continues the same conversation by its id.
-    let back = moved(&host, &session, "agy", "move-2");
-    assert_eq!(back["phase"], "done", "{back}");
-    assert_eq!(back["carried"]["turns"], 0, "{back}");
-    host.send(&session, "and once more", "m-3");
-    wait_for("the turn on agy again", || {
-        written(&place, "print.log").len() == 2 && idle(&host, &session)
-    });
-    let second = &written(&place, "print.log")[1];
-    assert_eq!(second["conversation"], "conv-print", "{second}");
-    assert!(
-        !second["prompt"].as_str().unwrap().contains(RECORD),
-        "{second}"
-    );
+    assert_eq!(host.conversation(&session).last().unwrap().1, "Hello");
+    let id = row_id(&host, &session);
+    host.kill();
+    let persisted = &kept_records(&place, "agent")[&id];
+    assert_eq!(persisted["backend"], "agy-acp");
+    assert_eq!(persisted["session"], session);
+    assert_eq!(persisted["model"], "claude-b");
+    assert!(!place.root.join("print.log").exists());
 }
 
 #[test]
 fn a_conversation_lost_after_a_same_store_move_goes_on_with_the_hosts_record() {
-    // From agy to the ACP card, where agy answers that it no longer knows the conversation: that
-    // turn fails and marks it, and the next one opens a new conversation with the Host's record.
-    let (place, host) = antigravity("agy-same-store-lost");
-    let made = host.post("/agents", json!({"name": "Forgetful", "backend": "agy"}));
-    let session = made["session"].as_str().unwrap().to_string();
-    host.send(&session, "remember the word lantern", "m-1");
-    wait_for("the turn on agy", || {
-        written(&place, "print.log").len() == 1 && idle(&host, &session)
-    });
-    assert_eq!(moved(&host, &session, "agy-acp", "move-1")["phase"], "done");
+    let (place, host, session) = legacy_fleet("agy-same-store-lost", false);
+    let opened = asked(&place, "session/new").len();
     std::fs::write(place.root.join("scenario"), "resume-lost").unwrap();
     host.send(&session, "what was the word?", "m-2");
     wait_for("the resume agy refuses", || {
@@ -214,41 +304,18 @@ fn a_conversation_lost_after_a_same_store_move_goes_on_with_the_hosts_record() {
     wait_for("a turn in a new conversation", || {
         asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
     });
-    assert_eq!(asked(&place, "session/new").len(), 1);
+    assert_eq!(asked(&place, "session/new").len(), opened + 1);
+    assert_eq!(
+        asked(&place, "session/prompt")[0]["params"]["sessionId"],
+        "conv-replacement"
+    );
     let text = prompt_text(&place, 0);
     assert!(
         text.contains(RECORD) && text.contains("remember the word lantern"),
         "{text}"
     );
 
-    // From the ACP card to agy, where agy has let the conversation go: agy is not told its id,
-    // and its turn opens with the Host's record.
-    let (place, host) = antigravity("agy-same-store-lost-back");
-    let made = host.post(
-        "/agents",
-        json!({"name": "Forgetful", "backend": "agy-acp"}),
-    );
-    let session = made["session"].as_str().unwrap().to_string();
-    host.send(&session, "remember the word lantern", "m-1");
-    wait_for("the turn over ACP", || {
-        asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
-    });
-    assert_eq!(moved(&host, &session, "agy", "move-1")["phase"], "done");
-    let kept = place
-        .root
-        .join(".gemini/antigravity-cli/conversations/conv-new.db");
-    std::fs::remove_file(&kept).unwrap();
-    host.send(&session, "what was the word?", "m-2");
-    wait_for("the turn on agy", || {
-        written(&place, "print.log").len() == 1 && idle(&host, &session)
-    });
-    let turn = &written(&place, "print.log")[0];
-    assert_eq!(turn["conversation"], false, "{turn}");
-    let text = turn["prompt"].as_str().unwrap();
-    assert!(
-        text.contains(RECORD) && text.contains("remember the word lantern"),
-        "{text}"
-    );
+    assert!(!place.root.join("print.log").exists());
 }
 
 /// The names of the machine's environment a real Antigravity needs: its program, its home and
@@ -337,10 +404,21 @@ fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
-    let ask =
-        json!({"name": "Thinker", "backend": "agy-acp", "model": "claude-b", "effort": "high"});
+    let ask = json!({
+        "name": "Thinker", "backend": "agy-acp", "model": "gemini-4-neon-medium"
+    });
     let (status, made) = host.ask("POST", "/agents", Some(&ask));
     assert_eq!(status, 200, "{made}");
+    let options = host.get("/agent-model-options");
+    assert!(options["providers"].get("agy").is_none());
+    assert_eq!(options["providers"]["agy-acp"]["runs_through"], "agy");
+    assert!(
+        options["providers"]["agy-acp"]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|model| model["id"] == "gemini-4-neon-medium")
+    );
     let session = made["session"].as_str().unwrap().to_string();
     host.send(&session, "think hard", "m-1");
     wait_for("the turn to finish", || host.state(&session) == "done");
@@ -354,20 +432,27 @@ fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
     assert_eq!(
         set,
         [
-            json!(["model", "claude-b"]),
-            json!(["thought_level", "high"])
+            json!(["model", "gemini-4-neon"]),
+            json!(["thought_level", "medium"])
         ]
     );
 
-    // The `agy` card folds an effort into its model's name, and still refuses both apart.
-    let (status, refused) = host.ask(
+    let (status, alias) = host.ask(
         "POST",
         "/agents",
-        Some(&json!({"name": "Folded", "backend": "agy", "model": "gemini-4-carbon-high", "effort": "high"})),
+        Some(&json!({
+            "name":"Alias", "backend":"agy","model":"claude-b","effort":"high"
+        })),
     );
-    assert_eq!(status, 400, "{refused}");
-    assert!(
-        refused.to_string().contains("effort compatibility"),
-        "{refused}"
-    );
+    assert_eq!(status, 200, "{alias}");
+    let snapshot = host.get("/agents/snapshot");
+    for created in [&made, &alias] {
+        let row = snapshot["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == created["session"])
+            .unwrap();
+        assert_eq!(row["backend"], "agy-acp");
+    }
 }

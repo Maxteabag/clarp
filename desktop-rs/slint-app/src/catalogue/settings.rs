@@ -8,15 +8,40 @@ use clarp_core::reading_theme::{self, FontOverride};
 use clarp_engine::Change;
 use serde_json::Value;
 
-use super::{Choice, Setting, e, keyed, shown};
+use clarp_core::tr;
+
+use super::{Choice, Setting, e, en, keyed, shown};
 use crate::{App, AppWindow};
 
-const ACTIVITY: [(&str, &str); 4] = [
-    ("Grouped", "One collapsible work row per turn."),
-    ("Always visible", "Every tool call as its own row."),
-    ("Group old", "Recent calls shown; older ones grouped."),
-    ("Hide when done", "Visible only while the turn runs."),
-];
+/// Tool activity's options, in the app's language: (label, the line about it).
+fn activity_options() -> [(String, String); 4] {
+    [
+        (
+            // i18n: Settings > Tool activity, option (adjective): every turn's tool calls folded into one row
+            tr!("Grouped"),
+            // i18n: Settings > Tool activity, the line under the option "Grouped"
+            tr!("One collapsible work row per turn."),
+        ),
+        (
+            // i18n: Settings > Tool activity, option: every tool call is always shown
+            tr!("Always visible"),
+            // i18n: Settings > Tool activity, the line under the option "Always visible"
+            tr!("Every tool call as its own row."),
+        ),
+        (
+            // i18n: Settings > Tool activity, option (imperative-like name): older tool calls are grouped, recent ones shown
+            tr!("Group old"),
+            // i18n: Settings > Tool activity, the line under the option "Group old"
+            tr!("Recent calls shown; older ones grouped."),
+        ),
+        (
+            // i18n: Settings > Tool activity, option: tool calls are hidden once the turn is finished
+            tr!("Hide when done"),
+            // i18n: Settings > Tool activity, the line under the option "Hide when done"
+            tr!("Visible only while the turn runs."),
+        ),
+    ]
+}
 /// This device shows the quiet line where agent messages were (#653).
 pub const COORDINATION_LINE: &str = "conversation/coordinationLine";
 /// The double-press windows offered, in milliseconds.
@@ -67,31 +92,63 @@ fn preference(app: &Rc<App>, key: &str, on: bool, timestamps: bool) {
 fn chats() -> Vec<Setting> {
     vec![
         Setting::toggle(
-            keyed(e("timestamps", "Timestamps", "chats", "Time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
+            keyed(e(
+                "timestamps",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Time beside each message.
+                en::tr!("Timestamps"),
+                "chats",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Timestamps” saying what it does
+                en::tr!("Time beside each message."),
+                shown!["time", "date", "clock", "message times", "stamps"],
+            ), &["setting:timestampsVisible"]),
             "CHATS",
             |app| app.prefs.borrow().timestamps,
             |app, _, on| preference(app, "conversation/timestampsVisible", on, true),
         )
         .default("off"),
         Setting::toggle(
-            e("show-when-ready", "Show when ready", "chats", "Show replies once complete.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
+            e(
+                "show-when-ready",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Show replies once complete.
+                en::tr!("Show when ready"),
+                "chats",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Show when ready” saying what it does
+                en::tr!("Show replies once complete."),
+                &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"],
+            ),
             "CHATS",
             |app| app.engine.borrow().show_when_ready(),
             |app, _, on| app.engine.borrow_mut().set_show_when_ready(on),
         ),
         Setting::stored_toggle(
-            e("reduced-motion", "Reduce Motion", "appearance", "Disable animations and shimmer.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"]),
+            e(
+                "reduced-motion",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Disable animations and shimmer.
+                en::tr!("Reduce Motion"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Reduce Motion” saying what it does
+                en::tr!("Disable animations and shimmer."),
+                &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"],
+            ),
             "CHATS",
             "appearance/reducedMotion",
             false,
         ),
         Setting::choice(
             keyed(
-                e("activity", "Tool activity", "chats", "How tool calls appear in chat.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"]),
+                e(
+                    "activity",
+                    // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: How tool calls appear in chat.
+                    en::tr!("Tool activity"),
+                    "chats",
+                    // i18n: Settings page and Ctrl+K, the line under the setting “Tool activity” saying what it does
+                    en::tr!("How tool calls appear in chat."),
+                    &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"],
+                ),
                 &["tools"],
             ),
             "CHATS",
-            |_| ACTIVITY.iter().enumerate().map(|(i, (label, about))| Choice::new(i.to_string(), *label).about(*about)).collect(),
+            |_| activity_options().into_iter().enumerate().map(|(i, (label, about))| Choice::new(i.to_string(), label).about(about)).collect(),
             |app| app.engine.borrow().activity_mode().clamp(0, clarp_core::presentation::HIDE_WHEN_DONE).to_string(),
             |app, _, value| {
                 if let Ok(mode) = value.parse() {
@@ -159,9 +216,11 @@ fn chats() -> Vec<Setting> {
         Setting::stored_toggle(
             e(
                 "live-status-line",
-                "Live status line",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Show current step and Stop above the composer.
+                en::tr!("Live status line"),
                 "chats",
-                "Show current step and Stop above the composer.",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Live status line” saying what it does
+                en::tr!("Show current step and Stop above the composer."),
                 &["status line", "stop hint", "activity bar under chat", "working indicator", "live status", "current tool", "progress line", "elapsed time"],
             ),
             "CHATS",
@@ -172,9 +231,11 @@ fn chats() -> Vec<Setting> {
             keyed(
                 e(
                     "show-queue",
-                    "Show the queue",
+                    // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Show waiting messages strip above composer.
+                    en::tr!("Show the queue"),
                     "chats",
-                    "Show waiting messages strip above composer.",
+                    // i18n: Settings page and Ctrl+K, the line under the setting “Show the queue” saying what it does
+                    en::tr!("Show waiting messages strip above composer."),
                     &["queue", "queue strip", "waiting messages", "messages waiting", "send now", "hide queue", "show queue", "toggle"],
                 ),
                 &["toggle-queue"],
@@ -187,9 +248,11 @@ fn chats() -> Vec<Setting> {
         Setting::stored_toggle(
             e(
                 "send-animation",
-                "Send animation",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Animate sent messages into the chat.
+                en::tr!("Send animation"),
                 "appearance",
-                "Animate sent messages into the chat.",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Send animation” saying what it does
+                en::tr!("Animate sent messages into the chat."),
                 &["send", "sending", "message animation", "fly", "flight", "telegram", "bubble", "composer", "toggle"],
             ),
             "CHATS",
@@ -201,9 +264,11 @@ fn chats() -> Vec<Setting> {
         Setting::toggle(
             e(
                 "all-hosts",
-                "Show chats from all Hosts",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: List chats from all paired Hosts.
+                en::tr!("Show chats from all Hosts"),
                 "chats",
-                "List chats from all paired Hosts.",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Show chats from all Hosts” saying what it does
+                en::tr!("List chats from all paired Hosts."),
                 &["hosts", "all hosts", "paired hosts", "other hosts", "every host", "merge hosts", "servers", "multiple hosts", "combined list"],
             ),
             "CHATS",
@@ -217,9 +282,11 @@ fn chats() -> Vec<Setting> {
         Setting::toggle(
             e(
                 "host-badges",
-                "Show the Host on each chat",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Show Host badge on rows and headers.
+                en::tr!("Show the Host on each chat"),
                 "chats",
-                "Show Host badge on rows and headers.",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Show the Host on each chat” saying what it does
+                en::tr!("Show Host badge on rows and headers."),
                 &["host badge", "host name", "which host", "badges", "host label", "server name", "where it lives"],
             ),
             "CHATS",
@@ -233,7 +300,15 @@ fn chats() -> Vec<Setting> {
         // The Host's setting, on Hosts that send live items (§6).
         Setting::toggle(
             keyed(
-                e("tool-explanations", "Tool explanations (Host)", "chats", "The Host's plain-language explanation of each tool row.", &["explain", "explanations", "plain english", "narration", "tool labels", "toggle"]),
+                e(
+                    "tool-explanations",
+                    // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: The Host's plain-language explanation of each tool row.
+                    en::tr!("Tool explanations (Host)"),
+                    "chats",
+                    // i18n: Settings page and Ctrl+K, the line under the setting “Tool explanations (Host)” saying what it does
+                    en::tr!("The Host's plain-language explanation of each tool row."),
+                    &["explain", "explanations", "plain english", "narration", "tool labels", "toggle"],
+                ),
                 &["toggle-explanations"],
             ),
             "CHATS",
@@ -260,9 +335,11 @@ fn experiments() -> Vec<Setting> {
         Setting::stored_toggle(
             e(
                 "scroll-dashcam",
-                "Scroll dashcam",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Record recent scroll positions to report jump bugs.
+                en::tr!("Scroll dashcam"),
                 "diagnostics",
-                "Record recent scroll positions to report jump bugs.",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Scroll dashcam” saying what it does
+                en::tr!("Record recent scroll positions to report jump bugs."),
                 &["dashcam", "scroll", "flash", "jump", "diagnostics", "debug", "recorder", "jitter"],
             ),
             "DIAGNOSTICS",
@@ -270,19 +347,44 @@ fn experiments() -> Vec<Setting> {
             false,
         ),
         Setting::toggle(
-            keyed(e("narration", "Plain-English tools", "experiment", "Explain tool calls in plain English (uses AI).", &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"]), &["tool-narration"]),
+            keyed(e(
+                "narration",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Explain tool calls in plain English (uses AI).
+                en::tr!("Plain-English tools"),
+                "experiment",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Plain-English tools” saying what it does
+                en::tr!("Explain tool calls in plain English (uses AI)."),
+                &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"],
+            ), &["tool-narration"]),
             "EXPERIMENTS",
             |app| app.engine.borrow().narrator_enabled(),
             |app, _, on| app.engine.borrow_mut().set_narrator_enabled(on),
         ),
         Setting::choice(
-            e("tool-detail", "Tool detail", "experiment", "Explanation detail level.", &["detail level", "explanation", "verbosity", "narration", "audience", "explanations"]),
+            e(
+                "tool-detail",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: Explanation detail level.
+                en::tr!("Tool detail"),
+                "experiment",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Tool detail” saying what it does
+                en::tr!("Explanation detail level."),
+                &["detail level", "explanation", "verbosity", "narration", "audience", "explanations"],
+            ),
             "EXPERIMENTS",
             |_| {
                 clarp_engine::Engine::narrator_detail_levels()
                     .iter()
                     .enumerate()
-                    .map(|(i, name)| Choice::new(i.to_string(), *name).about(if i == 0 { "No AI" } else { "Uses AI" }))
+                    .map(|(i, name)| {
+                        let about = if i == 0 {
+                            // i18n: Settings > Tool detail, the line beside the first level: it explains tools without an AI model
+                            tr!("No AI")
+                        } else {
+                            // i18n: Settings > Tool detail, the line beside the other levels: an AI model writes the explanations
+                            tr!("Uses AI")
+                        };
+                        Choice::new(i.to_string(), detail_level_name(i, name)).about(about)
+                    })
                     .collect()
             },
             |app| app.engine.borrow().narrator_detail_level().clamp(0, 4).to_string(),
@@ -295,16 +397,64 @@ fn experiments() -> Vec<Setting> {
     ]
 }
 
+/// A tool-detail level's name in the app's language (`clarp_core::narrator`
+/// keeps them in English).
+fn detail_level_name(level: usize, english: &str) -> String {
+    match level {
+        // i18n: Settings > Tool detail, level 1 of 5 (noun): explanations written for developers, the original tool calls
+        0 => tr!("Developer"),
+        // i18n: Settings > Tool detail, level 2 of 5 (adjective): actions with commands and paths
+        1 => tr!("Technical"),
+        // i18n: Settings > Tool detail, level 3 of 5 (adjective): actions with key technical details
+        2 => tr!("Balanced"),
+        // i18n: Settings > Tool detail, level 4 of 5: everyday language, no code or paths
+        3 => tr!("Plain English"),
+        // i18n: Settings > Tool detail, level 5 of 5 (a playful name): explained so simply a grandmother would follow, no technical terms
+        4 => tr!("Grandma"),
+        _ => super::local(english),
+    }
+}
+
+/// An agent picture size's name in the app's language (`avatar_view` keeps
+/// them in English).
+fn avatar_size_name(id: &str, english: &str) -> String {
+    match id {
+        // i18n: Settings > Agent picture size, option (adjective): the small portrait size
+        "small" => tr!("size" => "Small"),
+        // i18n: Settings > Agent picture size, option (adjective): the medium portrait size
+        "medium" => tr!("size" => "Medium"),
+        // i18n: Settings > Agent picture size, option (adjective): the large portrait size
+        "large" => tr!("size" => "Large"),
+        _ => super::local(english),
+    }
+}
+
 fn startup() -> Vec<Setting> {
     vec![
         Setting::stored_toggle(
-            e("new-agent-on-startup", "Start a new agent when opening Clarp", "startup", "Opens the new-agent hub each time Clarp starts.", &["startup", "launch", "on open", "new session", "boot", "toggle"]),
+            e(
+                "new-agent-on-startup",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Opens the new-agent hub each time Clarp starts.
+                en::tr!("Start a new agent when opening Clarp"),
+                "startup",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Start a new agent when opening Clarp” saying what it does
+                en::tr!("Opens the new-agent hub each time Clarp starts."),
+                &["startup", "launch", "on open", "new session", "boot", "toggle"],
+            ),
             "STARTUP",
             "launch/newAgentOnStartup",
             false,
         ),
         Setting::stored_toggle(
-            e("anonymous-agents", "Anonymous agents by default", "agent", "New agents start without a contact's name and persona.", &["anonymous", "nameless", "persona", "identity", "contact", "toggle"]),
+            e(
+                "anonymous-agents",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: New agents start without a contact's name and persona.
+                en::tr!("Anonymous agents by default"),
+                "agent",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Anonymous agents by default” saying what it does
+                en::tr!("New agents start without a contact's name and persona."),
+                &["anonymous", "nameless", "persona", "identity", "contact", "toggle"],
+            ),
             "AGENT IDENTITY",
             "launch/anonymousAgents",
             true,
@@ -335,14 +485,30 @@ fn set_font_size(app: &App, size: Option<f64>) {
 fn appearance() -> Vec<Setting> {
     vec![
         Setting::stored_toggle(
-            e("nav-rail", "Activity bar", "layout", "The icon strip on the far left: Chats, Updates, Teams and Settings.", shown!["navigation rail", "nav rail", "rail", "left bar", "left side", "icons", "icon bar", "activity rail", "sidebar icons", "destinations"]),
+            e(
+                "nav-rail",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: The icon strip on the far left: Chats, Updates, Teams and Settings.
+                en::tr!("Activity bar"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Activity bar” saying what it does
+                en::tr!("The icon strip on the far left: Chats, Updates, Teams and Settings."),
+                shown!["navigation rail", "nav rail", "rail", "left bar", "left side", "icons", "icon bar", "activity rail", "sidebar icons", "destinations"],
+            ),
             "APPEARANCE",
             "appearance/navRail",
             true,
         )
         .then(|app, window| window.set_nav_rail_visible(flag(app, "appearance/navRail", true))),
         Setting::toggle(
-            keyed(e("explorer", "Explorer", "layout", "The list of agents and chats beside the conversation.", shown!["sidebar", "side bar", "side panel", "panel", "agents list", "chat list", "left panel"]), &["sidebar"]),
+            keyed(e(
+                "explorer",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: The list of agents and chats beside the conversation.
+                en::tr!("Explorer"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Explorer” saying what it does
+                en::tr!("The list of agents and chats beside the conversation."),
+                shown!["sidebar", "side bar", "side panel", "panel", "agents list", "chat list", "left panel"],
+            ), &["sidebar"]),
             "APPEARANCE",
             |app| app.window.upgrade().is_some_and(|w| w.get_sidebar_visible()),
             |app, window, on| {
@@ -353,7 +519,15 @@ fn appearance() -> Vec<Setting> {
         )
         .default("on"),
         Setting::stored_toggle(
-            keyed(e("compact-explorer", "Compact explorer", "layout", "Shows only each chat's avatar and name in the explorer.", &["dense", "condensed", "small rows", "avatar only", "sidebar", "toggle", "density"]), &["toggle-compact"]),
+            keyed(e(
+                "compact-explorer",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Shows only each chat's avatar and name in the explorer.
+                en::tr!("Compact explorer"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Compact explorer” saying what it does
+                en::tr!("Shows only each chat's avatar and name in the explorer."),
+                &["dense", "condensed", "small rows", "avatar only", "sidebar", "toggle", "density"],
+            ), &["toggle-compact"]),
             "APPEARANCE",
             "explorer/compact",
             false,
@@ -363,12 +537,25 @@ fn appearance() -> Vec<Setting> {
             crate::avatar_view::remake();
         }),
         Setting::choice(
-            e("avatar-size", "Agent picture size", "layout", "How large agents' portraits are in the explorer; opens a list of sizes.", &["avatar", "avatars", "portrait", "portraits", "profile picture", "photo", "face", "picture size", "bigger", "smaller"]),
+            e(
+                "avatar-size",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: How large agents' portraits are in the explorer; opens a list of sizes.
+                en::tr!("Agent picture size"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Agent picture size” saying what it does
+                en::tr!("How large agents' portraits are in the explorer; opens a list of sizes."),
+                &["avatar", "avatars", "portrait", "portraits", "profile picture", "photo", "face", "picture size", "bigger", "smaller"],
+            ),
             "APPEARANCE",
             |_| {
                 crate::avatar_view::CHOICES
                     .iter()
-                    .map(|(id, label, sizes)| Choice::new(*id, format!("{label} · {} px", sizes.row)).about(format!("{} px in the explorer, {} px compact", sizes.row, sizes.compact)))
+                    .map(|(id, label, sizes)| {
+                        // i18n: Settings > Agent picture size, an option; {0} is the size's name (Small, Medium, Large), {1} its size in pixels
+                        let shown = tr!("{0} · {1} px", avatar_size_name(id, label), sizes.row);
+                        // i18n: Settings > Agent picture size, the line under an option; {0} and {1} are sizes in pixels in the normal and the compact explorer
+                        Choice::new(*id, shown).about(tr!("{0} px in the explorer, {1} px compact", sizes.row, sizes.compact))
+                    })
                     .collect()
             },
             |app| crate::avatar_view::current(app).to_owned(),
@@ -376,34 +563,74 @@ fn appearance() -> Vec<Setting> {
         )
         .default("medium"),
         Setting::stored_toggle(
-            keyed(e("live-preview", "Explorer live preview", "layout", "Opens the chat under the explorer's cursor while you move through the list.", &["preview", "peek", "follow cursor", "sidebar", "toggle", "browse"]), &["toggle-preview"]),
+            keyed(e(
+                "live-preview",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Opens the chat under the explorer's cursor while you move through the list.
+                en::tr!("Explorer live preview"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Explorer live preview” saying what it does
+                en::tr!("Opens the chat under the explorer's cursor while you move through the list."),
+                &["preview", "peek", "follow cursor", "sidebar", "toggle", "browse"],
+            ), &["toggle-preview"]),
             "APPEARANCE",
             "explorer/livePreview",
             false,
         ),
         Setting::toggle(
-            keyed(e("workspace-bar", "Workspace bar", "layout", "The strip of workspace tabs along the top.", shown!["workspaces", "tabs", "tab bar", "top bar", "strip"]), &["setting:workspaceBarVisible"]),
+            keyed(e(
+                "workspace-bar",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: The strip of workspace tabs along the top.
+                en::tr!("Workspace bar"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Workspace bar” saying what it does
+                en::tr!("The strip of workspace tabs along the top."),
+                shown!["workspaces", "tabs", "tab bar", "top bar", "strip"],
+            ), &["setting:workspaceBarVisible"]),
             "APPEARANCE",
             |app| app.prefs.borrow().workspace_bar,
             |app, _, on| preference(app, "appearance/workspaceBar", on, false),
         )
         .default("on"),
         Setting::stored_toggle(
-            keyed(e("shortcut-bar", "Shortcut bar", "layout", "The key hints along the bottom of the window.", shown!["keybindings", "key bindings", "hints", "status bar", "bottom bar", "shortcuts", "footer"]), &["shortcut-bar"]),
+            keyed(e(
+                "shortcut-bar",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: The key hints along the bottom of the window.
+                en::tr!("Shortcut bar"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Shortcut bar” saying what it does
+                en::tr!("The key hints along the bottom of the window."),
+                shown!["keybindings", "key bindings", "hints", "status bar", "bottom bar", "shortcuts", "footer"],
+            ), &["shortcut-bar"]),
             "APPEARANCE",
             "appearance/shortcutsVisible",
             true,
         )
         .then(|app, window| window.set_shortcuts_visible(flag(app, "appearance/shortcutsVisible", true))),
         Setting::stored_toggle(
-            e("minimal-ui", "Minimal UI", "layout", "Hides chips, switches and other chrome for a quieter window.", shown!["zen", "focus mode", "distraction free", "clean", "simple", "chrome", "declutter"]),
+            e(
+                "minimal-ui",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Hides chips, switches and other chrome for a quieter window.
+                en::tr!("Minimal UI"),
+                "layout",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Minimal UI” saying what it does
+                en::tr!("Hides chips, switches and other chrome for a quieter window."),
+                shown!["zen", "focus mode", "distraction free", "clean", "simple", "chrome", "declutter"],
+            ),
             "APPEARANCE",
             "appearance/minimalUi",
             false,
         )
         .then(|app, window| window.set_minimal_ui(flag(app, "appearance/minimalUi", false))),
         Setting::choice(
-            e("reading-theme", "Reading theme", "appearance", "The colours and typeface of the whole window; opens a list to pick one.", &["theme", "colours", "colors", "color scheme", "colour scheme", "dark mode", "light mode", "font", "typeface", "appearance", "skin", "contrast"]),
+            e(
+                "reading-theme",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: The colours and typeface of the whole window; opens a list to pick one.
+                en::tr!("Reading theme"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Reading theme” saying what it does
+                en::tr!("The colours and typeface of the whole window; opens a list to pick one."),
+                &["theme", "colours", "colors", "color scheme", "colour scheme", "dark mode", "light mode", "font", "typeface", "appearance", "skin", "contrast"],
+            ),
             "APPEARANCE",
             |_| {
                 reading_theme::themes()
@@ -420,21 +647,40 @@ fn appearance() -> Vec<Setting> {
         .default(reading_theme::default_theme_id()),
         // The picker shows the font in the chat, so it opens over the chats.
         Setting::action(
-            e("font", "Font", "appearance", "The chat's typeface and size for this reading theme; opens the font picker.", &["typeface", "font family", "monospace", "serif", "sans", "choose font"]),
+            e(
+                "font",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: The chat's typeface and size for this reading theme; opens the font picker.
+                en::tr!("Font"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Font” saying what it does
+                en::tr!("The chat's typeface and size for this reading theme; opens the font picker."),
+                &["typeface", "font family", "monospace", "serif", "sans", "choose font"],
+            ),
             "APPEARANCE",
             |app, window| crate::font_view::open(app, window),
         )
         .detail(|app| {
             let (_, chosen, font, _) = font(app);
             match (&chosen, &font.missing) {
-                (_, Some(missing)) => format!("{missing} is not installed · using {} · {} px", font.family, font.size),
-                (Some(_), None) => format!("{} · {} px · your choice", font.family, font.size),
-                (None, None) => format!("{} · {} px · theme default", font.family, font.size),
+                // i18n: Settings > Font, the row's value when the chosen font is missing; {0} the missing font, {1} the font used instead, {2} the size in pixels
+                (_, Some(missing)) => tr!("{0} is not installed · using {1} · {2} px", missing, font.family, font.size),
+                // i18n: Settings > Font, the row's value for a font the user chose; {0} the font, {1} its size in pixels
+                (Some(_), None) => tr!("{0} · {1} px · your choice", font.family, font.size),
+                // i18n: Settings > Font, the row's value for the reading theme's own font; {0} the font, {1} its size in pixels
+                (None, None) => tr!("{0} · {1} px · theme default", font.family, font.size),
             }
         }),
         // From the theme's own size, + is one pixel larger; Delete goes back to it.
         Setting::number(
-            e("font-size", "Font size", "appearance", "How large the chat's text is for this reading theme; opens a list of sizes.", &["text size", "font size", "bigger text", "smaller text", "larger text", "type size", "letters", "reading size", "zoom text"]),
+            e(
+                "font-size",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a number setting). What it does: How large the chat's text is for this reading theme; opens a list of sizes.
+                en::tr!("Font size"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Font size” saying what it does
+                en::tr!("How large the chat's text is for this reading theme; opens a list of sizes."),
+                &["text size", "font size", "bigger text", "smaller text", "larger text", "type size", "letters", "reading size", "zoom text"],
+            ),
             "APPEARANCE",
             |app| {
                 let (_, chosen, _, theme_size) = font(app);
@@ -449,13 +695,22 @@ fn appearance() -> Vec<Setting> {
         .detail(|app| {
             let (_, chosen, _, theme_size) = font(app);
             match chosen.and_then(|c| c.size) {
-                Some(size) => format!("{size} px"),
-                None => format!("{theme_size} px · theme default"),
+                Some(size) => super::shown_number(size, 1.0, "px"),
+                // i18n: Settings > Font size, the row's value when it is the reading theme's own size; {} is the size in pixels
+                None => tr!("{} px · theme default", theme_size),
             }
         })
         .reset_with(|app, _| set_font_size(app, None)),
         Setting::action(
-            e("reset-font", "Reset font to theme default", "appearance", "Goes back to the reading theme's own typeface and size.", &["font", "typeface", "revert", "default font", "undo font", "restore"]),
+            e(
+                "reset-font",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Goes back to the reading theme's own typeface and size.
+                en::tr!("Reset font to theme default"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Reset font to theme default” saying what it does
+                en::tr!("Goes back to the reading theme's own typeface and size."),
+                &["font", "typeface", "revert", "default font", "undo font", "restore"],
+            ),
             "APPEARANCE",
             |app, _| {
                 let theme = app.engine.borrow().reading_theme();
@@ -465,12 +720,26 @@ fn appearance() -> Vec<Setting> {
         .detail(|app| {
             let (theme_id, chosen, _, theme_size) = font(app);
             let theme = reading_theme::theme(&theme_id);
-            if chosen.is_some() { format!("Back to {} · {theme_size} px", crate::view::theme_font(theme)) } else { "Already the theme default".to_owned() }
+            if chosen.is_some() {
+                // i18n: Settings > Reset font to theme default, the row's value: what the reset goes back to; {0} the theme's font, {1} its size in pixels
+                tr!("Back to {0} · {1} px", crate::view::theme_font(theme), theme_size)
+            } else {
+                // i18n: Settings > Reset font to theme default, the row's value when nothing is changed
+                tr!("Already the theme default")
+            }
         }),
         // The whole window's scale (the chats with it): a number from where
         // it is, Ctrl+Alt+PageUp / PageDown a step, kept as a preference.
         Setting::number(
-            e("ui-scale", "Interface size", "appearance", "How large the whole interface is drawn; opens a list of sizes.", &["zoom", "scale", "size", "bigger", "smaller", "larger", "dpi", "everything bigger"]),
+            e(
+                "ui-scale",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a number setting). What it does: How large the whole interface is drawn; opens a list of sizes.
+                en::tr!("Interface size"),
+                "appearance",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Interface size” saying what it does
+                en::tr!("How large the whole interface is drawn; opens a list of sizes."),
+                &["zoom", "scale", "size", "bigger", "smaller", "larger", "dpi", "everything bigger"],
+            ),
             "APPEARANCE",
             |app| clarp_core::prefs::number_of(app.engine.borrow().settings(), "uiscale"),
             |app, window, scale| crate::look::set_pref(app, window, "uiscale", &super::number_text(scale, 0.05)),
@@ -479,7 +748,7 @@ fn appearance() -> Vec<Setting> {
             0.05,
             "",
         )
-        .detail(|app| format!("{:.0}%", clarp_core::prefs::number_of(app.engine.borrow().settings(), "uiscale") * 100.0))
+        .detail(|app| super::shown_number((clarp_core::prefs::number_of(app.engine.borrow().settings(), "uiscale") * 100.0).round(), 1.0, "%"))
         .default("1.15"),
     ]
 }
@@ -487,7 +756,8 @@ fn appearance() -> Vec<Setting> {
 /// The voice providers the Host offers, as (id, label); `with_none` adds
 /// "No fallback" first.
 fn providers(tts: &clarp_core::json::Object, with_none: bool) -> Vec<Choice> {
-    let mut out = if with_none { vec![Choice::new("none", "No fallback")] } else { Vec::new() };
+    // i18n: Settings > Voice fallback, the first option: no second voice when the main one fails
+    let mut out = if with_none { vec![Choice::new("none", tr!("No fallback"))] } else { Vec::new() };
     for provider in tts.get("providers").and_then(Value::as_array).into_iter().flatten() {
         let text = |key: &str| provider.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
         let id = text("id");
@@ -507,13 +777,29 @@ fn tts(app: &App, key: &str) -> String {
 fn voice() -> Vec<Setting> {
     vec![
         Setting::toggle(
-            keyed(e("spoken-replies", "Spoken replies", "audio", "Reads agents' replies aloud.", &["voice", "mute", "unmute", "speech", "tts", "audio", "sound", "read aloud", "voice replies", "toggle"]), &["mute"]),
+            keyed(e(
+                "spoken-replies",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Reads agents' replies aloud.
+                en::tr!("Spoken replies"),
+                "audio",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Spoken replies” saying what it does
+                en::tr!("Reads agents' replies aloud."),
+                &["voice", "mute", "unmute", "speech", "tts", "audio", "sound", "read aloud", "voice replies", "toggle"],
+            ), &["mute"]),
             "VOICE & AUDIO",
             |app| !app.engine.borrow().muted(),
             |app, _, on| app.engine.borrow_mut().set_muted(!on),
         ),
         Setting::choice(
-            e("voice-provider", "Voice provider", "audio", "The Host's text-to-speech service; opens a list to pick one.", &["tts", "speech", "voice", "elevenlabs", "kokoro", "speaker"]),
+            e(
+                "voice-provider",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: The Host's text-to-speech service; opens a list to pick one.
+                en::tr!("Voice provider"),
+                "audio",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Voice provider” saying what it does
+                en::tr!("The Host's text-to-speech service; opens a list to pick one."),
+                &["tts", "speech", "voice", "elevenlabs", "kokoro", "speaker"],
+            ),
             "VOICE & AUDIO",
             |app| providers(app.engine.borrow().tts_provider_status(), false),
             |app| tts(app, "provider"),
@@ -525,10 +811,19 @@ fn voice() -> Vec<Setting> {
         .detail(|app| {
             let now = tts(app, "provider");
             let label = providers(app.engine.borrow().tts_provider_status(), false).into_iter().find(|c| c.value == now).map(|c| c.label);
-            label.unwrap_or_else(|| if now.is_empty() { "Unknown".into() } else { now })
+            // i18n: Settings > Voice provider, the row's value when the Host has not said which provider it uses
+            label.unwrap_or_else(|| if now.is_empty() { tr!("Unknown") } else { now })
         }),
         Setting::choice(
-            e("voice-fallback", "Voice fallback", "audio", "The voice the Host uses when the main provider fails; opens a list.", &["backup voice", "tts fallback", "secondary", "speech", "voice"]),
+            e(
+                "voice-fallback",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: The voice the Host uses when the main provider fails; opens a list.
+                en::tr!("Voice fallback"),
+                "audio",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Voice fallback” saying what it does
+                en::tr!("The voice the Host uses when the main provider fails; opens a list."),
+                &["backup voice", "tts fallback", "secondary", "speech", "voice"],
+            ),
             "VOICE & AUDIO",
             |app| providers(app.engine.borrow().tts_provider_status(), true),
             |app| Some(tts(app, "fallback")).filter(|f| !f.is_empty()).unwrap_or_else(|| "none".into()),
@@ -538,7 +833,15 @@ fn voice() -> Vec<Setting> {
             },
         ),
         Setting::stored_toggle(
-            e("pause-mobile-push", "Pause phone alerts while active on desktop", "notifications", "Holds phone notifications while you are using this window.", &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"]),
+            e(
+                "pause-mobile-push",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Holds phone notifications while you are using this window.
+                en::tr!("Pause phone alerts while active on desktop"),
+                "notifications",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Pause phone alerts while active on desktop” saying what it does
+                en::tr!("Holds phone notifications while you are using this window."),
+                &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"],
+            ),
             "NOTIFICATIONS",
             "notifications/pauseMobileWhileDesktopActive",
             true,
@@ -557,7 +860,15 @@ fn run_command(action: &'static str) -> impl Fn(&Rc<App>, &AppWindow) {
 fn host() -> Vec<Setting> {
     vec![
         Setting::action(
-            e("connection", "Host connection", "host", "The Clarp Host this window talks to, and its address and state.", &["host", "server", "connect", "url", "address", "status"]),
+            e(
+                "connection",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: The Clarp Host this window talks to, and its address and state.
+                en::tr!("Host connection"),
+                "host",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Host connection” saying what it does
+                en::tr!("The Clarp Host this window talks to, and its address and state."),
+                &["host", "server", "connect", "url", "address", "status"],
+            ),
             "HOST",
             run_command("connection"),
         )
@@ -570,14 +881,32 @@ fn host() -> Vec<Setting> {
             format!("{}  ·  {}", engine.base_url(), engine.connection_state())
         }),
         Setting::action(
-            e("orchestrator", "Orchestrator settings", "host", "The orchestrator that routes your messages to agents.", &["orchestrator", "routing", "router", "dispatch", "hands-free"]),
+            e(
+                "orchestrator",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: The orchestrator that routes your messages to agents.
+                en::tr!("Orchestrator settings"),
+                "host",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Orchestrator settings” saying what it does
+                en::tr!("The orchestrator that routes your messages to agents."),
+                &["orchestrator", "routing", "router", "dispatch", "hands-free"],
+            ),
             "HOST",
             run_command("orchestrator"),
         )
-        .label_from(|_| "Orchestrator".to_owned())
-        .detail(|_| "Open".to_owned()),
+        // i18n: Settings > Host, the orchestrator row's label (noun): the orchestrator that routes messages to agents
+        .label_from(|_| tr!("Orchestrator"))
+        // i18n: Settings > Host, the orchestrator row's value, a button-like word (verb): opens the orchestrator settings
+        .detail(|_| tr!("verb" => "Open")),
         Setting::toggle(
-            e("shared-filesystem", "Shared filesystem", "host", "Lets the app open the Host's files directly (a trusted Host on this machine).", &["files", "local folders", "filesystem", "trusted host", "disk", "toggle"]),
+            e(
+                "shared-filesystem",
+                // i18n: Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Lets the app open the Host's files directly (a trusted Host on this machine).
+                en::tr!("Shared filesystem"),
+                "host",
+                // i18n: Settings page and Ctrl+K, the line under the setting “Shared filesystem” saying what it does
+                en::tr!("Lets the app open the Host's files directly (a trusted Host on this machine)."),
+                &["files", "local folders", "filesystem", "trusted host", "disk", "toggle"],
+            ),
             "HOST",
             |app| app.engine.borrow().shared_filesystem(),
             |app, _, on| app.engine.borrow_mut().set_shared_filesystem(on),
@@ -587,9 +916,26 @@ fn host() -> Vec<Setting> {
 
 fn keyboard() -> Vec<Setting> {
     vec![Setting::choice(
-        e("double-press", "Double-press window", "keyboard", "How quickly the second press of a double press (Right Right) must follow; opens a list.", &["double press", "double tap", "double click", "key timing", "delay", "speed", "milliseconds"]),
+        e(
+            "double-press",
+            // i18n: Settings page and Ctrl+K, a setting's name, the row label (a choice that opens a list). What it does: How quickly the second press of a double press (Right Right) must follow; opens a list.
+            en::tr!("Double-press window"),
+            "keyboard",
+            // i18n: Settings page and Ctrl+K, the line under the setting “Double-press window” saying what it does
+            en::tr!("How quickly the second press of a double press (Right Right) must follow; opens a list."),
+            &["double press", "double tap", "double click", "key timing", "delay", "speed", "milliseconds"],
+        ),
         "KEYBOARD",
-        |_| DOUBLE_PRESS.iter().map(|ms| Choice::new(ms.to_string(), format!("{ms} ms")).about(if *ms == 300 { "The usual" } else { "" })).collect(),
+        |_| {
+            DOUBLE_PRESS
+                .iter()
+                .map(|ms| {
+                    // i18n: Settings > Double-press window, the line beside the usual value (300 ms)
+                    let about = if *ms == 300 { tr!("The usual") } else { String::new() };
+                    Choice::new(ms.to_string(), super::shown_number(*ms as f64, 1.0, "ms")).about(about)
+                })
+                .collect()
+        },
         |app| {
             let setting = app.engine.borrow().settings().get("keymap/doublePressMs").and_then(Value::as_i64);
             crate::keymap::double_press_window(setting).as_millis().to_string()

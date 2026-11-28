@@ -53,7 +53,20 @@ export component DisplayCellCard inherits Rectangle {
                 vertical-alignment: center;
             }
             if root.cell.subagent: Text {
-                text: root.cell.phase == "activity" ? "sub-agent" : root.cell.phase;
+                // The Host's phase code in the reader's language; an unknown
+                // code is shown as sent.
+                text:
+                    // i18n: chat, activity cell of a helper agent, tag before its name: the row is a sub-agent's activity (noun)
+                    root.cell.phase == "activity" ? @tr("sub-agent")
+                    // i18n: chat, activity cell of a helper agent, tag before its name: the helper has started (a state)
+                    : root.cell.phase == "started" ? @tr("started")
+                    // i18n: chat, activity cell of a helper agent, tag before its name: the helper is working (a state)
+                    : root.cell.phase == "running" ? @tr("running")
+                    // i18n: chat, activity cell of a helper agent, tag before its name: the helper has finished (a state)
+                    : root.cell.phase == "finished" ? @tr("finished")
+                    // i18n: chat, activity cell of a helper agent, tag before its name: the helper failed (a state)
+                    : root.cell.phase == "failed" ? @tr("failed")
+                    : root.cell.phase;
                 color: root.phase-color;
                 font-family: "JetBrains Mono";
                 font-size: ChatText.note;
@@ -108,7 +121,8 @@ export component DisplayCellCard inherits Rectangle {
                 }
             }
             if root.cell.more > 0: Text {
-                text: "+" + root.cell.more + " more";
+                // i18n: chat, activity cell, last line when lines are hidden; {n} is how many more lines there are
+                text: @tr("+{n} more" | "+{n} more" % root.cell.more);
                 color: Palette.muted;
                 font-family: "JetBrains Mono";
                 font-size: ChatText.note;
@@ -127,11 +141,13 @@ export component TypingIndicator inherits Rectangle {
     border-radius: 2px;
     background: Palette.window;
     accessible-role: text;
-    accessible-label: "Agent is working";
+    // i18n: chat, accessibility label of the "Working…" indicator under the last message while the agent works
+    accessible-label: @tr("Agent is working");
     HorizontalLayout {
         alignment: center;
         spacing: 5px;
-        Text { text: "Working…"; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; }
+        // i18n: chat, indicator under the last message while the agent works and its reply is not shown yet (a state)
+        Text { text: @tr("Working…"); color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; }
         for index in 3: Rectangle {
             width: 6px;
             height: 6px;

@@ -95,7 +95,7 @@ Per reason (`<reason>` = device_offline, auth_expired, wrong_address, server_sto
 tailscale_off, host_asleep, unknown):
 
 - `host_down.device_offline.title` "This device is offline" · `.body` "Clarp will reconnect when the network is back."
-- `host_down.auth_expired.title` "{host} needs pairing again" · `.body` "This device is no longer signed in to {host}."
+- `host_down.auth_expired.title` "Signed out of {host}" · `.body` "This device is no longer signed in to {host}."
 - `host_down.wrong_address.title` "{host} isn't at this address" · `.body` "The address may have changed."
 - `host_down.server_stopped.title` "{host} isn't answering" · `.body` "The computer is on, but Clarp isn't running on it."
 - `host_down.tailscale_off.title` "{host} isn't answering" · `.body` "Tailscale doesn't seem to be connected on this device."

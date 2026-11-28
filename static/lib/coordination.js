@@ -9,11 +9,15 @@
 // setting changed here or on another device answers `replace_required`. A chat's own Show reads
 // it again with `coordination=show` for that visit and never caches it.
 
+import { english } from './i18n-en.js';
+
 export const COORDINATION_FEATURE = 'hidden_coordination';
 export const VISIBILITIES = ['show', 'hide'];
 export const OVERRIDES = ['default', 'show', 'hide'];
-/** One chat's own choice as the chat's menu and profile name it ('default' follows the Host's). */
-export const OVERRIDE_LABELS = { default: 'Follow Settings', show: 'Show', hide: 'Hide' };
+/** One chat's own choice as the chat's menu and profile name it ('default' follows the Host's):
+ * catalog keys for t(); OVERRIDE_LABELS has the English. */
+export const OVERRIDE_KEYS = { default: 'chat_choices.follow', show: 'chat_choices.show', hide: 'chat_choices.hide' };
+export const OVERRIDE_LABELS = Object.fromEntries(OVERRIDES.map(v => [v, english(OVERRIDE_KEYS[v])]));
 
 /** The policy an answer was read under, {hidden, source, visibility}, or null. */
 export function normalizeEcho(value) {
@@ -36,25 +40,22 @@ export function normalizeCount(value) {
   return { messages, exchanges, agents, capped };
 }
 
-function plural(n, word) { return `${n} ${word}${n === 1 ? '' : 's'}`; }
-
 /** '3 messages between agents', '100+ messages between agents' when capped; '' for none. */
-export function countLine(value) {
+export function countLine(value, tr = english) {
   const count = normalizeCount(value);
   if (!count) return '';
   // Capped with no message counted (the run was cut before one): say it without a number.
-  if (count.capped) return count.messages ? `${count.messages}+ messages between agents` : 'Messages between agents';
-  if (count.messages) return `${plural(count.messages, 'message')} between agents`;
-  return `${plural(count.exchanges, 'exchange')} between agents`;
+  if (count.capped) return count.messages ? tr('hidden_run.messages_capped', { count: count.messages }) : tr('hidden_run.messages_uncounted');
+  if (count.messages) return tr('hidden_run.messages', { count: count.messages });
+  return tr('hidden_run.exchanges', { count: count.exchanges });
 }
 
-/** The named agents of a run, 'with Mike and Rachel', or ''. */
-export function countAgents(value) {
+/** The named agents of a run, 'with Mike and Rachel', or ''. `list` joins the names. */
+export function countAgents(value, tr = english, list = names => new Intl.ListFormat('en').format(names)) {
   const count = normalizeCount(value);
   const names = count ? [...new Set(count.agents.map(a => a.name).filter(Boolean))] : [];
   if (!names.length) return '';
-  if (names.length === 1) return `with ${names[0]}`;
-  return `with ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return tr('hidden_run.with', { names: list(names) });
 }
 
 /**

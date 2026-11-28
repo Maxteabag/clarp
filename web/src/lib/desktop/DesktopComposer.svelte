@@ -15,7 +15,7 @@
   let value = $state('');
   // An agent that moved to another Host takes no turn here: the composer is held, the chat
   // stays readable (contract 125).
-  let held = $derived((app.tick, movedLine(statusFor(app.session).moved)));
+  let held = $derived((app.tick, movedLine(statusFor(app.session).moved, t)));
 
   // The serving Host does not answer, or this device has no network: the chat is its saved
   // messages, the draft stays, and sending waits (docs/design/host-not-answering.md).
@@ -69,7 +69,7 @@
 
 <div id="chatBar" class="chat-bar">
   {#if held}
-    <div class="chat-row"><div class="chat-held" role="status">{held}. It takes no messages here.</div></div>
+    <div class="chat-row"><div class="chat-held" role="status">{t('composer.held', { moved: held })}</div></div>
   {:else}
   <div class="chat-row">
     <input
@@ -85,7 +85,7 @@
       onfocus={onFocus}
       onblur={onBlur}
     />
-    <button class="chat-send" aria-label="Send" disabled={readOnly} onclick={submit}>
+    <button class="chat-send" aria-label={t('composer.send')} disabled={readOnly} onclick={submit}>
       <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
         <path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/>
       </svg>

@@ -20,7 +20,7 @@
   let { id, full = false } = $props();
 
   let rec = $derived(reach.hosts[id] || null);
-  let label = $derived(rec?.label || 'This Host');
+  let label = $derived(rec?.label || t('chat_settings.this_host'));
   let back = $derived(!!rec && !rec.down && rec.backUntil > reach.now);
   let action = $derived(rec ? reasonAction(rec.reason) : '');
   let icon = $derived(back ? 'cloud' : reasonIcon(rec?.reason));

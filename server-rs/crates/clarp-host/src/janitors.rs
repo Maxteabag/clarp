@@ -1558,11 +1558,25 @@ async fn set_policy(State(app): State<App>, body: Bytes) -> Response {
     let Some(body) = object(&body) else {
         return bad("Expected a JSON object");
     };
+    let configuration = body.get("configuration").unwrap_or(&Value::Null);
+    // A policy that names Antigravity can be saved before any client has opened its picker.
+    if configuration["model_chain"]
+        .as_array()
+        .is_some_and(|chain| {
+            chain.iter().any(|model| {
+                model["provider"].as_str().is_some_and(|provider| {
+                    clarp_backend::canonical_id(provider) == clarp_backend::agy_acp::ID
+                })
+            })
+        })
+    {
+        app.models.found_once(app.clock.now_ms()).await;
+    }
     let result = app
         .janitors
         .with(&app, |book, world, _| {
             book.model_policy.configure(
-                body.get("configuration").unwrap_or(&Value::Null),
+                configuration,
                 body.get("expected_revision").unwrap_or(&Value::Null),
                 world,
                 &book.configs,

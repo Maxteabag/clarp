@@ -482,7 +482,8 @@ component OptionRow inherits Rectangle {
                 // Its key, only while it works.
                 if root.show-number: Text { text: root.number; color: root.emphasised ? Palette.accent : Palette.accent.with-alpha(0.6); font-size: ChatText.note; font-weight: 700; vertical-alignment: center; }
                 Text { text: root.label; color: root.enabled || root.chosen ? Palette.text : Palette.muted; font-size: ChatText.detail; font-weight: root.chosen ? 600 : 400; overflow: elide; }
-                if root.recommended: Text { text: "Recommended"; color: Palette.success; font-size: ChatText.caption; vertical-alignment: center; }
+                // i18n: decision card in the chat, small tag after the answer option the agent recommends (adjective)
+                if root.recommended: Text { text: @tr("Recommended"); color: Palette.success; font-size: ChatText.caption; vertical-alignment: center; }
             }
             if root.detail != "": Text { text: root.detail; color: Palette.muted; font-size: ChatText.note; overflow: elide; }
         }
@@ -524,7 +525,8 @@ component OwnAnswer inherits HorizontalLayout {
             if field.text == "": Text {
                 x: 8px;
                 height: parent.height;
-                text: "Write my own answer";
+                // i18n: decision card in the chat, placeholder of the last option's text field, where the user types an answer of their own instead of picking one
+                text: @tr("Write my own answer");
                 color: Palette.faint;
                 font-size: ChatText.detail;
                 vertical-alignment: center;
@@ -538,7 +540,8 @@ component OwnAnswer inherits HorizontalLayout {
                 font-size: ChatText.detail;
                 single-line: true;
                 vertical-alignment: center;
-                accessible-label: "Write my own answer";
+                // i18n: decision card in the chat, accessibility label of the text field for an answer of the user's own
+                accessible-label: @tr("Write my own answer");
                 edited => {
                     ArtifactBridge.draft-edited(root.artifact.id, self.text);
                     if (!root.chosen) {
@@ -567,7 +570,9 @@ component OwnAnswer inherits HorizontalLayout {
         }
     }
     if !root.artifact.pending: Text {
-        text: root.chosen ? root.artifact.draft : "Write my own answer";
+        text: root.chosen ? root.artifact.draft
+            // i18n: answered decision card in the chat, the last option (not chosen): an answer of the user's own
+            : @tr("Write my own answer");
         color: root.chosen ? Palette.text : Palette.faint;
         font-size: ChatText.detail;
         overflow: elide;
@@ -761,7 +766,11 @@ component ProgressBody inherits VerticalLayout {
         }
         Text {
             text: root.artifact.current != "" ? root.artifact.current
-                : root.artifact.progress-value >= 0.999 ? "All steps done" : "Nothing under way";
+                : root.artifact.progress-value >= 0.999
+                // i18n: plan or workflow card in the chat, line under the progress bar when every step is finished
+                ? @tr("All steps done")
+                // i18n: plan or workflow card in the chat, line under the progress bar when no step is running right now
+                : @tr("Nothing under way");
             color: root.artifact.current == "" ? Palette.muted : root.artifact.progress-value >= 0 ? Palette.text : Palette.warning;
             font-size: ChatText.detail;
             overflow: elide;
@@ -987,13 +996,19 @@ component FormButtonView inherits Rectangle {
     border-color: Palette.text;
     accessible-role: button;
     accessible-label: root.leaf.text;
-    accessible-description: root.leaf.on ? "Chosen" : "";
+    accessible-description: root.leaf.on
+        // i18n: form card in the chat, accessibility description of the button the user pressed as their answer (past participle: this one was chosen)
+        ? @tr("Chosen")
+        : "";
     accessible-enabled: root.live;
     accessible-action-default => { if (root.live) { ArtifactBridge.form-press(root.card, root.leaf.key); } }
     label := Text {
         width: parent.width;
         height: parent.height;
-        text: (root.leaf.on ? "✓ " : "") + (root.leaf.busy ? "Sending…" : root.leaf.text);
+        text: (root.leaf.on ? "✓ " : "") + (root.leaf.busy
+            // i18n: form card in the chat, text of a pressed button while its answer is being sent to the agent (in progress)
+            ? @tr("Sending…")
+            : root.leaf.text);
         color: !root.lit ? Palette.faint : root.leaf.style == "secondary" ? Palette.text : Palette.window;
         font-size: ChatText.detail;
         font-weight: 600;
@@ -1045,7 +1060,8 @@ component FormLeafView inherits VerticalLayout {
         alignment: start;
         spacing: 8px;
         Text { text: root.leaf.text; color: Palette.muted; font-size: ChatText.detail; wrap: word-wrap; }
-        if root.leaf.required && !root.read-only: Text { text: "Required"; color: Palette.faint; font-size: ChatText.note; vertical-alignment: center; }
+        // i18n: form card in the chat, small note after a field's caption: the field must be filled in before sending (adjective)
+        if root.leaf.required && !root.read-only: Text { text: @tr("Required"); color: Palette.faint; font-size: ChatText.note; vertical-alignment: center; }
     }
     if root.leaf.kind == "field" && root.read-only: Text {
         text: root.leaf.value != "" ? root.leaf.value : "—";
@@ -1148,6 +1164,7 @@ component FormLeafView inherits VerticalLayout {
     if root.leaf.kind == "button" && root.side-by-side: FormButtonView { card: root.card; leaf: root.leaf; }
 }
 
+// i18n-screen: form confirmation
 // A button's question before its answer is sent (OK or Cancel). Escape and
 // a click outside cancel; Enter does nothing, as a button is pressed only by
 // a click.
@@ -1168,9 +1185,11 @@ export component FormConfirmDialog inherits Modal {
                 border-radius: 6px;
                 background: cancel-area.has-hover ? Palette.control.brighter(0.15) : Palette.sunken;
                 accessible-role: button;
-                accessible-label: "Cancel";
+                // i18n: form confirmation dialog, accessibility label of the button that closes the question without sending the answer (verb)
+                accessible-label: @tr("Cancel");
                 accessible-action-default => { ArtifactBridge.form-confirm-answer(false); }
-                cancel-label := Text { text: "Cancel"; color: Palette.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
+                // i18n: form confirmation dialog, button that closes the question without sending the answer (verb)
+                cancel-label := Text { text: @tr("Cancel"); color: Palette.text; font-size: 12px; horizontal-alignment: center; vertical-alignment: center; }
                 cancel-area := TouchArea { mouse-cursor: pointer; clicked => { ArtifactBridge.form-confirm-answer(false); } }
             }
             Rectangle {
@@ -1189,6 +1208,7 @@ export component FormConfirmDialog inherits Modal {
     }
 }
 
+// i18n-screen: artifacts
 // A native form in its card (iOS RenderSpecFormController): its rows, then
 // the line saying what holds Send back (or how the answer went) and Send.
 component FormBody inherits VerticalLayout {
@@ -1201,14 +1221,19 @@ component FormBody inherits VerticalLayout {
     property <string> card;
     init => { self.card = root.artifact.id; }
     spacing: 6px;
-    if root.artifact.spec-state == "loading": Text { text: "Loading the form…"; color: Palette.muted; font-size: ChatText.detail; }
-    if root.artifact.spec-state == "newer": Text { text: "This form needs a newer version of Clarp."; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
-    if root.artifact.spec-state == "unreadable": Text { text: "This form can't be shown. Ask the agent to publish it again."; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
+    // i18n: form card in the chat, shown while the form's content loads
+    if root.artifact.spec-state == "loading": Text { text: @tr("Loading the form…"); color: Palette.muted; font-size: ChatText.detail; }
+    // i18n: form card in the chat, shown when the form uses features this app version does not know; "Clarp" stays as is
+    if root.artifact.spec-state == "newer": Text { text: @tr("This form needs a newer version of Clarp."); color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
+    // i18n: form card in the chat, shown when the form's content is broken; tells the user to ask the agent to publish the form again
+    if root.artifact.spec-state == "unreadable": Text { text: @tr("This form can't be shown. Ask the agent to publish it again."); color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
     if root.artifact.spec-state == "failed": HorizontalLayout {
         alignment: start;
         spacing: 10px;
-        Text { text: "The form could not be loaded."; color: Palette.warning; font-size: ChatText.detail; vertical-alignment: center; }
-        KeyHint { chat: true; label: "Try again"; emphasised: true; clicked => { ArtifactBridge.form-retry(root.artifact.id); } }
+        // i18n: form card in the chat, shown when loading the form failed (a Try again button follows)
+        Text { text: @tr("The form could not be loaded."); color: Palette.warning; font-size: ChatText.detail; vertical-alignment: center; }
+        // i18n: form card in the chat, button after "The form could not be loaded.": loads the form again (verb)
+        KeyHint { chat: true; label: @tr("Try again"); emphasised: true; clicked => { ArtifactBridge.form-retry(root.artifact.id); } }
     }
     if root.artifact.spec-state == "form": VerticalLayout {
         spacing: 0px;
@@ -1262,7 +1287,10 @@ component FormBody inherits VerticalLayout {
             accessible-label: root.artifact.spec-send;
             accessible-action-default => { ArtifactBridge.form-send(root.artifact.id); }
             send-label := Text {
-                text: root.artifact.spec-sending ? "Sending…" : root.artifact.spec-send;
+                text: root.artifact.spec-sending
+                    // i18n: form card in the chat, text of the form's send button while the answers are being sent to the agent (in progress)
+                    ? @tr("Sending…")
+                    : root.artifact.spec-send;
                 color: root.artifact.spec-can-send && !root.artifact.spec-sending ? Palette.window : Palette.faint;
                 font-size: ChatText.detail;
                 font-weight: 600;
@@ -1388,7 +1416,17 @@ export component ArtifactCard inherits Rectangle {
             spacing: 8px;
             Text { text: root.artifact.revision; color: Palette.text; font-family: "JetBrains Mono"; font-size: ChatText.body; font-weight: 600; overflow: elide; horizontal-stretch: 1; }
             Text {
-                text: root.artifact.release-state == "ready" ? "✓ Released" : root.artifact.release-state == "failed" ? "✕ Failed" : root.artifact.release-state == "active" ? "● Rolling out" : "○ Release";
+                text: root.artifact.release-state == "ready"
+                    // i18n: release card in the chat, state after the revision: the release is out (past participle)
+                    ? "✓ " + @tr("Released")
+                    : root.artifact.release-state == "failed"
+                    // i18n: release card in the chat, state after the revision: the release failed (past tense)
+                    ? "✕ " + @tr("Failed")
+                    : root.artifact.release-state == "active"
+                    // i18n: release card in the chat, state after the revision: the release is being installed now (in progress)
+                    ? "● " + @tr("Rolling out")
+                    // i18n: release card in the chat, state after the revision before it has started: names the card as a release (noun, not the verb)
+                    : "○ " + @tr("noun" => "Release");
                 color: root.artifact.release-state == "ready" ? Palette.success : root.artifact.release-state == "failed" ? Palette.danger : root.artifact.release-state == "active" ? Palette.warning : Palette.muted;
                 font-size: ChatText.detail;
                 vertical-alignment: center;
@@ -1427,7 +1465,8 @@ export component ArtifactCard inherits Rectangle {
         }
         // The bar's count says it already.
         if root.artifact.progress != "" && root.artifact.progress-count == "": Text { text: root.artifact.progress; color: Palette.text; font-size: ChatText.detail; }
-        if root.artifact.form: Text { text: "Interactive form unavailable"; color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
+        // i18n: card in the chat for an interactive HTML form, shown when this app cannot show the form
+        if root.artifact.form: Text { text: @tr("Interactive form unavailable"); color: Palette.warning; font-size: ChatText.detail; wrap: word-wrap; }
         // Its keys as hints (a decision shows them, and its send's status,
         // in its own row), and how its action went.
         if root.artifact.kind != "decision" && root.artifact.kind != "question" && (root.artifact.hints.length > 0 || root.artifact.status-text != ""): HorizontalLayout {
