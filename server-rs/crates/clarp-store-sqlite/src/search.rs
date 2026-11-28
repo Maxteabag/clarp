@@ -16,7 +16,8 @@
 //! their own and stay). Every word asked for must be in a row, each as the start of a word, so
 //! "møte" finds "møtet" and "Oslo" finds "Oslofjorden".
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::fmt;
 use std::path::Path;
 
@@ -63,6 +64,17 @@ const CLOSE: char = '\u{2}';
 const SNIPPET_WORDS: i64 = 16;
 /// The most hits one page has.
 pub const MOST: usize = 100;
+/// The most places of matches one chat's search gives: the newest this many.
+pub const MOST_POSITIONS: usize = 2000;
+/// The rows of a chat that match: the chat's rows, among the matches found once. At 330 000
+/// rows (`measure_an_index_of_a_large_hosts_size`, 28 Nov 2026, on a build machine others
+/// used too) this took 0.4 to 1.4 s for "the", "k" and "ka", in a chat of 475 rows as in one of
+/// 30 000, in both runs. Walking every match and keeping the chat's took 0.2 to 1.1 s in one
+/// run and 41 s for "k" in the other; a look per row of the chat took 20 s for "the" in a
+/// chat of 466 rows.
+const MATCHES_IN_CHAT: &str = "SELECT h.row_id, h.revision, h.ts_ms FROM hit h \
+     WHERE h.agent_id IN (SELECT value FROM json_each(?2)) \
+     AND h.id IN (SELECT rowid FROM words WHERE words MATCH ?1)";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchError {
@@ -145,6 +157,60 @@ pub struct Found {
     /// One of the agents searched is not wholly in the index yet: what is older than what was
     /// read of it may be missing.
     pub partial: bool,
+    /// What it tells of all the matches beside its page, as [`Asked::whole`] asked.
+    pub whole: Matched,
+}
+
+/// All the matches of the agents asked, as much of them as [`Whole`] asked.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Matched {
+    /// Not asked, or the index has no tables yet.
+    #[default]
+    Not,
+    /// How many rows match.
+    Count(u64),
+    /// How many rows match, and where the newest [`MOST_POSITIONS`] of them stand, in chat
+    /// order (oldest first).
+    Positions { total: u64, newest: Vec<Position> },
+}
+
+impl Matched {
+    /// How many rows match, where that was counted.
+    pub fn total(&self) -> Option<u64> {
+        match self {
+            Self::Not => None,
+            Self::Count(total) | Self::Positions { total, .. } => Some(*total),
+        }
+    }
+
+    /// More rows match than the positions hold: the older ones are left out.
+    pub fn truncated(&self) -> bool {
+        match self {
+            Self::Positions { total, newest } => {
+                *total > u64::try_from(newest.len()).unwrap_or(u64::MAX)
+            }
+            Self::Not | Self::Count(_) => false,
+        }
+    }
+}
+
+/// Where a matching row stands in its chat: its id, the revision its words are of, its time.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Position {
+    pub row_id: String,
+    pub revision: u64,
+    pub ts_ms: i64,
+}
+
+/// What a search tells of all the matches of the agents asked, beside its page: nothing (a
+/// search of every chat), how many there are, or how many and where each one stands (a search
+/// of one chat, for a bar that steps from match to match in it).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Whole {
+    #[default]
+    Not,
+    Count,
+    Positions,
 }
 
 /// What a search asks.
@@ -157,6 +223,8 @@ pub struct Asked<'a> {
     pub limit: usize,
     /// The cursor an earlier page gave.
     pub before: Option<&'a str>,
+    /// What it tells of all the matches beside its page.
+    pub whole: Whole,
 }
 
 /// The index as its one writer has it.
@@ -430,6 +498,7 @@ impl SearchReader {
             [&agents],
             |row| row.get(0),
         )?;
+        let whole = whole(&tx, query, &agents, asked.whole)?;
         tx.finish()?;
         let more = hits.len() > limit;
         hits.truncate(limit);
@@ -440,8 +509,70 @@ impl SearchReader {
             hits: hits.into_iter().map(|(_, hit)| hit).collect(),
             next,
             partial: behind > 0,
+            whole,
         })
     }
+}
+
+/// How many rows of these agents match, and where the newest [`MOST_POSITIONS`] of them stand,
+/// as [`Whole`] asks; in the snapshot the page was read in, and in one walk over the matches.
+///
+/// Chat order is the rows' time as `/log` shows it, and of rows of one millisecond their
+/// revision. `/log` writes rows as they happen, so that is its order; a conversation brought
+/// whole, stamped with one time, was written in its order too. The index's own numbering is
+/// not enough: history is read into it newest page first, so of one millisecond it numbers
+/// the older rows last. So the newest are chosen in chat order too, not by that numbering: a
+/// conversation of more than [`MOST_POSITIONS`] rows of one millisecond keeps its newest.
+fn whole(
+    tx: &rusqlite::Transaction<'_>,
+    query: &str,
+    agents: &str,
+    whole: Whole,
+) -> Result<Matched, SearchError> {
+    let keep = match whole {
+        Whole::Not => return Ok(Matched::Not),
+        Whole::Count => 0,
+        Whole::Positions => MOST_POSITIONS,
+    };
+    let mut statement = tx.prepare(MATCHES_IN_CHAT)?;
+    let mut rows = statement.query(params![query, agents])?;
+    let mut total: u64 = 0;
+    // The newest `keep` in chat order so far, the oldest of them on top.
+    let mut newest: BinaryHeap<Reverse<(i64, u64, String)>> = BinaryHeap::new();
+    while let Some(row) = rows.next()? {
+        total += 1;
+        if keep == 0 {
+            continue;
+        }
+        let place = (row.get::<_, i64>(2)?, unsigned(row.get(1)?));
+        let full = newest.len() >= keep;
+        if full
+            && newest
+                .peek()
+                .is_some_and(|Reverse(oldest)| (oldest.0, oldest.1) >= place)
+        {
+            continue;
+        }
+        newest.push(Reverse((place.0, place.1, row.get(0)?)));
+        if full {
+            newest.pop();
+        }
+    }
+    if whole == Whole::Count {
+        return Ok(Matched::Count(total));
+    }
+    // Oldest first.
+    let newest = newest
+        .into_sorted_vec()
+        .into_iter()
+        .rev()
+        .map(|Reverse((ts_ms, revision, row_id))| Position {
+            row_id,
+            revision,
+            ts_ms,
+        })
+        .collect();
+    Ok(Matched::Positions { total, newest })
 }
 
 /// What a search answers before the index has its tables: nothing yet, all of it to come.
@@ -612,6 +743,7 @@ mod tests {
                 agents: &allowed,
                 limit: 50,
                 before: None,
+                whole: Whole::Not,
             })
             .unwrap()
             .hits
@@ -639,6 +771,7 @@ mod tests {
                 agents: &allowed,
                 limit: 10,
                 before: None,
+                whole: Whole::Not,
             })
             .unwrap();
         let hit = &found.hits[0];
@@ -785,6 +918,7 @@ mod tests {
                     agents: &allowed,
                     limit: 3,
                     before: before.as_deref(),
+                    whole: Whole::Not,
                 })
                 .unwrap();
             assert!(found.hits.len() <= 3);
@@ -798,6 +932,169 @@ mod tests {
     }
 
     #[test]
+    fn a_chat_is_told_how_many_rows_match_and_where_each_stands_oldest_first() {
+        let (mut index, _scratch) = index();
+        let rows = [
+            row("c1", 1_000, 1, "Oslo first"),
+            row("c2", 2_000, 2, "nothing here"),
+            // Two rows of one millisecond: in the order they were kept.
+            row("c3", 3_000, 3, "Oslofjorden second"),
+            row("c4", 3_000, 4, "oslo third"),
+        ];
+        index.apply("chat", &rows, &mark(4)).unwrap();
+        index
+            .apply("other", &[row("x1", 2_500, 1, "Oslo elsewhere")], &mark(1))
+            .unwrap();
+        let allowed = agents(&["chat"]);
+        let asked = Asked {
+            words: "oslo",
+            agents: &allowed,
+            limit: 1,
+            before: None,
+            whole: Whole::Positions,
+        };
+        let found = index.search(asked).unwrap();
+        // The page is as without positions: the newest hit, and a cursor.
+        assert_eq!(found.hits.len(), 1);
+        assert_eq!(found.hits[0].row_id, "c4");
+        assert!(found.next.is_some());
+        assert_eq!(found.whole.total(), Some(3));
+        assert!(!found.whole.truncated());
+        let Matched::Positions { newest, .. } = found.whole else {
+            panic!("{:?}", found.whole);
+        };
+        let ids: Vec<&str> = newest.iter().map(|p| p.row_id.as_str()).collect();
+        assert_eq!(ids, ["c1", "c3", "c4"]);
+        assert_eq!((newest[0].revision, newest[0].ts_ms), (1, 1_000));
+
+        let counted = index
+            .search(Asked {
+                whole: Whole::Count,
+                ..asked
+            })
+            .unwrap();
+        assert_eq!(counted.whole, Matched::Count(3));
+        let plain = index
+            .search(Asked {
+                whole: Whole::Not,
+                ..asked
+            })
+            .unwrap();
+        assert_eq!(plain.whole, Matched::Not);
+        let none = index
+            .search(Asked {
+                agents: &[],
+                ..asked
+            })
+            .unwrap();
+        assert_eq!(
+            none.whole,
+            Matched::Positions {
+                total: 0,
+                newest: Vec::new()
+            }
+        );
+    }
+
+    #[test]
+    fn rows_of_one_millisecond_read_newest_page_first_stand_in_chat_order() {
+        let (mut index, _scratch) = index();
+        // A conversation brought whole, stamped with one time, read as history is: its newest
+        // page first, then the page before.
+        let newer = [row("b3", 7_000, 3, "kayak"), row("b4", 7_000, 4, "kayak")];
+        let older = [row("b1", 7_000, 1, "kayak"), row("b2", 7_000, 2, "kayak")];
+        index.apply("brought", &newer, &mark(4)).unwrap();
+        index.apply("brought", &older, &mark(4)).unwrap();
+        let allowed = agents(&["brought"]);
+        let found = index
+            .search(Asked {
+                words: "kayak",
+                agents: &allowed,
+                limit: 5,
+                before: None,
+                whole: Whole::Positions,
+            })
+            .unwrap();
+        let Matched::Positions { newest, .. } = found.whole else {
+            panic!("{:?}", found.whole);
+        };
+        let ids: Vec<&str> = newest.iter().map(|p| p.row_id.as_str()).collect();
+        assert_eq!(ids, ["b1", "b2", "b3", "b4"]);
+    }
+
+    #[test]
+    fn more_rows_of_one_millisecond_than_positions_keep_the_newest_in_chat_order() {
+        let (mut index, _scratch) = index();
+        let count = MOST_POSITIONS + 5;
+        // Brought whole with one time, read newest page first: the index numbers the oldest
+        // rows last.
+        let rows: Vec<Row> = (1..=count)
+            .map(|n| row(&format!("w{n}"), 9_000, n as u64, "canoe"))
+            .collect();
+        let split = count - 1_000;
+        index
+            .apply("whole", &rows[split..], &mark(count as u64))
+            .unwrap();
+        index
+            .apply("whole", &rows[..split], &mark(count as u64))
+            .unwrap();
+        let allowed = agents(&["whole"]);
+        let found = index
+            .search(Asked {
+                words: "canoe",
+                agents: &allowed,
+                limit: 5,
+                before: None,
+                whole: Whole::Positions,
+            })
+            .unwrap();
+        assert_eq!(found.whole.total(), Some(count as u64));
+        assert!(found.whole.truncated());
+        let Matched::Positions { newest, .. } = found.whole else {
+            panic!("{:?}", found.whole);
+        };
+        let revisions: Vec<u64> = newest.iter().map(|at| at.revision).collect();
+        let expected: Vec<u64> = (6..=count as u64).collect();
+        assert_eq!(revisions, expected);
+    }
+
+    #[test]
+    fn a_chat_with_more_matches_than_positions_keeps_the_newest() {
+        let (mut index, _scratch) = index();
+        let extra = 5;
+        let rows: Vec<Row> = (0..MOST_POSITIONS + extra)
+            .map(|n| row(&format!("r{n}"), 1_000 + n as i64, n as u64 + 1, "lots"))
+            .collect();
+        index
+            .apply("busy", &rows, &mark(rows.len() as u64))
+            .unwrap();
+        let allowed = agents(&["busy"]);
+        let found = index
+            .search(Asked {
+                words: "lots",
+                agents: &allowed,
+                limit: 5,
+                before: None,
+                whole: Whole::Positions,
+            })
+            .unwrap();
+        assert_eq!(found.whole.total(), Some((MOST_POSITIONS + extra) as u64));
+        assert!(found.whole.truncated());
+        let Matched::Positions {
+            newest: positions, ..
+        } = found.whole
+        else {
+            panic!("{:?}", found.whole);
+        };
+        assert_eq!(positions.len(), MOST_POSITIONS);
+        assert_eq!(positions[0].row_id, format!("r{extra}"));
+        assert_eq!(
+            positions.last().unwrap().row_id,
+            format!("r{}", MOST_POSITIONS + extra - 1)
+        );
+    }
+
+    #[test]
     fn nothing_to_search_for_and_a_strange_cursor_are_refused_in_words() {
         let (index, _scratch) = index();
         let allowed = agents(&["a1"]);
@@ -806,6 +1103,7 @@ mod tests {
             agents: &allowed,
             limit: 5,
             before,
+            whole: Whole::Not,
         };
         assert!(matches!(
             index.search(asked("  \"?! ", None)),
@@ -847,6 +1145,7 @@ mod tests {
                 agents: &allowed,
                 limit: 5,
                 before: None,
+                whole: Whole::Not,
             })
             .unwrap();
         let marked: Vec<&str> = found.hits[0]
@@ -869,6 +1168,7 @@ mod tests {
                     agents: &allowed,
                     limit: 5,
                     before: None,
+                    whole: Whole::Not,
                 })
                 .unwrap()
                 .partial
@@ -955,6 +1255,7 @@ mod tests {
             agents: &allowed,
             limit: 5,
             before: None,
+            whole: Whole::Not,
         };
         // A file with nothing in it yet, as the writer's open has just made it.
         let empty = scratch.0.join("empty.db");
@@ -1065,6 +1366,36 @@ mod tests {
             }
         }
         let writing = started.elapsed();
+        // One long chat besides: a tenth of the rows, the newest.
+        const LONG: usize = ROWS / 10;
+        let mut written = 0;
+        while written < LONG {
+            let page: Vec<Row> = (0..PAGE.min(LONG - written))
+                .map(|_| {
+                    let mut text = String::with_capacity(per_row + 16);
+                    while text.len() < per_row {
+                        let draw = (next() % 1_000_000) as f64 / 1_000_000.0;
+                        let at = (draw * draw * draw * vocabulary.len() as f64) as usize;
+                        text.push_str(&vocabulary[at.min(vocabulary.len() - 1)]);
+                        text.push(' ');
+                    }
+                    row_number += 1;
+                    written += 1;
+                    row(
+                        &format!("r-{row_number}"),
+                        1_700_000_000_000 + row_number as i64 * 1_000,
+                        row_number as u64,
+                        &text,
+                    )
+                })
+                .collect();
+            let mark = Mark {
+                revision: row_number as u64,
+                complete: written >= LONG,
+                ..Mark::default()
+            };
+            index.apply("agent-long", &page, &mark).unwrap();
+        }
         index
             .db
             .execute_batch("PRAGMA wal_checkpoint(TRUNCATE)")
@@ -1084,6 +1415,7 @@ mod tests {
                         agents: all,
                         limit: 20,
                         before: None,
+                        whole: Whole::Not,
                     })
                     .unwrap()
                     .hits
@@ -1121,6 +1453,58 @@ mod tests {
                 "search {words:?} in the oldest chat alone: {:.1} ms, {found} hits",
                 took.as_secs_f64() * 1000.0
             );
+        }
+        // One chat's matches, as its search bar asks them: walking every match and keeping
+        // the chat's, against the chat's rows among the matches found once, over a short old
+        // chat and the long new one, for a common word, a one-letter start, a short start of
+        // many words and a rare one. (A look per row of the chat took 20 s for "the" in the
+        // short chat: left out.)
+        let plans = [
+            (
+                "every match",
+                "SELECT h.row_id FROM words CROSS JOIN hit h ON h.id = words.rowid \
+                 WHERE words MATCH ?1 AND h.agent_id IN (SELECT value FROM json_each(?2))",
+            ),
+            ("chat rows, matches once", MATCHES_IN_CHAT),
+        ];
+        for chat in ["agent-0000", "agent-long"] {
+            let agents = json_list(&[chat.to_string()]);
+            for words in ["the", "k", "ka", "zanzibarquest"] {
+                let query = fts_query(words).unwrap();
+                for (name, sql) in plans {
+                    let started = std::time::Instant::now();
+                    let mut statement = reader.db.prepare(sql).unwrap();
+                    let found = statement
+                        .query_map(params![query, agents], |_| Ok(()))
+                        .unwrap()
+                        .count();
+                    println!(
+                        "positions {words:?} in {chat}, {name}: {:.1} ms, {found} rows",
+                        started.elapsed().as_secs_f64() * 1000.0
+                    );
+                }
+            }
+        }
+        // As the reader answers it.
+        for chat in ["agent-0000", "agent-long"] {
+            let one = vec![chat.to_string()];
+            for words in ["the", "k", "ka", "zanzibarquest"] {
+                let started = std::time::Instant::now();
+                let found = reader
+                    .search(Asked {
+                        words,
+                        agents: &one,
+                        limit: 20,
+                        before: None,
+                        whole: Whole::Positions,
+                    })
+                    .unwrap();
+                println!(
+                    "search {words:?} in {chat} with positions: {:.1} ms, total {:?}",
+                    started.elapsed().as_secs_f64() * 1000.0,
+                    found.whole.total()
+                );
+            }
         }
     }
 
