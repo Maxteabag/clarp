@@ -18,6 +18,9 @@ use clarp_engine::publications::{Kind, Publication};
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::{App, AppWindow, MessageImage, PublicationFilter, PublicationRow, PublicationsBridge, commands};
+use clarp_core::tr;
+
+// i18n-screen: artifacts
 
 pub const OVERLAY: &str = "publications";
 
@@ -151,47 +154,84 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
     }
 }
 
-fn badge(kind: Kind) -> &'static str {
+fn badge(kind: Kind) -> String {
+    // Each: a tile's tiny kind badge in the artifacts gallery, at most 4 letters, capitals.
     match kind {
-        Kind::Image => "IMG",
-        Kind::Video => "VID",
-        Kind::Audio => "AUD",
-        Kind::Document => "DOC",
-        Kind::Data => "DATA",
-        Kind::Decision => "ASK",
-        Kind::Other => "•••",
+        // i18n: artifacts gallery, tiny badge on a picture tile (abbreviation of image, max 4 letters)
+        Kind::Image => tr!("IMG"),
+        // i18n: artifacts gallery, tiny badge on a video tile (abbreviation, max 4 letters)
+        Kind::Video => tr!("VID"),
+        // i18n: artifacts gallery, tiny badge on an audio tile (abbreviation, max 4 letters)
+        Kind::Audio => tr!("AUD"),
+        // i18n: artifacts gallery, tiny badge on a document tile (abbreviation, max 4 letters)
+        Kind::Document => tr!("DOC"),
+        // i18n: artifacts gallery, tiny badge on a table or chart tile (max 4 letters)
+        Kind::Data => tr!("badge" => "DATA"),
+        // i18n: artifacts gallery, tiny badge on a decision or question tile (a question to the user, max 4 letters)
+        Kind::Decision => tr!("ASK"),
+        Kind::Other => "•••".to_owned(),
+    }
+}
+
+/// The empty gallery under a kind filter: "No images from this agent".
+fn empty_of(kind: Kind) -> String {
+    match kind {
+        // i18n: artifacts gallery, empty state under the Images filter
+        Kind::Image => tr!("No images from this agent"),
+        // i18n: artifacts gallery, empty state under the Videos filter
+        Kind::Video => tr!("No videos from this agent"),
+        // i18n: artifacts gallery, empty state under the Audio filter
+        Kind::Audio => tr!("No audio from this agent"),
+        // i18n: artifacts gallery, empty state under the Documents filter
+        Kind::Document => tr!("No documents from this agent"),
+        // i18n: artifacts gallery, empty state under the Data filter (tables and charts)
+        Kind::Data => tr!("No data from this agent"),
+        // i18n: artifacts gallery, empty state under the Decisions filter
+        Kind::Decision => tr!("No decisions from this agent"),
+        // i18n: artifacts gallery, empty state under the Other filter
+        Kind::Other => tr!("No other from this agent"),
     }
 }
 
 fn kind_word(item: &Publication) -> String {
     match item.kind {
-        Kind::Image => "Image".into(),
-        Kind::Video => "Video".into(),
-        Kind::Audio => "Audio".into(),
-        Kind::Data => "Data".into(),
-        Kind::Decision if item.artifact_type == "question" => "Question".into(),
-        Kind::Decision => "Decision".into(),
+        // i18n: artifacts gallery, a tile's kind (noun)
+        Kind::Image => tr!("Image"),
+        // i18n: artifacts gallery, a tile's kind (noun)
+        Kind::Video => tr!("Video"),
+        // i18n: artifacts gallery, filter chip: audio files (noun)
+        Kind::Audio => tr!("Audio"),
+        // i18n: artifacts gallery, filter chip: tables and charts (noun)
+        Kind::Data => tr!("Data"),
+        // i18n: artifacts gallery, a tile's kind: a question to the user (noun)
+        Kind::Decision if item.artifact_type == "question" => tr!("Question"),
+        // i18n: artifacts gallery, a tile's kind: a decision to make (noun)
+        Kind::Decision => tr!("Decision"),
         _ if !item.artifact_type.is_empty() => {
             let words = item.artifact_type.replace('_', " ");
             let mut chars = words.chars();
             chars.next().map(|c| c.to_uppercase().collect::<String>() + chars.as_str()).unwrap_or_default()
         }
-        _ => "File".into(),
+        // i18n: file card, the file's kind when neither its name nor its type says one (noun)
+        _ => tr!("File"),
     }
 }
 
-/// When, in the reader's time: "14:05" today, "26 Nov 14:05" this year,
-/// "26 Nov 2025" before.
+/// When, in the reader's time and language: "14:05" today, "Nov 26
+/// 14:05" this year, "Nov 26, 2025" before.
 fn when(ms: i64) -> String {
     use chrono::{Datelike, Local, TimeZone};
+    use clarp_core::i18n::{self, format};
     let Some(at) = Local.timestamp_millis_opt(ms).single().filter(|_| ms > 0) else { return String::new() };
     let now = Local::now();
+    let tag = i18n::current();
+    let time = || format::time(tag, at.time(), format::Clock::H24);
     if at.date_naive() == now.date_naive() {
-        at.format("%H:%M").to_string()
+        time()
     } else if at.year() == now.year() {
-        at.format("%-d %b %H:%M").to_string()
+        format!("{} {}", format::day_month(tag, at.date_naive()), time())
     } else {
-        at.format("%-d %b %Y").to_string()
+        format::date(tag, at.date_naive())
     }
 }
 
@@ -242,7 +282,8 @@ fn picture(url: &str, side: u32) -> Picture {
 
 /// The filters: everything (0), then each kind (1-7).
 fn filters(chosen: Option<Kind>) -> Vec<PublicationFilter> {
-    let mut all = vec![PublicationFilter { label: "All".into(), key: "0".into(), chosen: chosen.is_none() }];
+    // i18n: artifacts gallery, filter chip: every kind (adjective used as a noun)
+    let mut all = vec![PublicationFilter { label: tr!("filter" => "All").into(), key: "0".into(), chosen: chosen.is_none() }];
     all.extend(Kind::ALL.iter().enumerate().map(|(index, kind)| PublicationFilter {
         label: kind.label().into(),
         key: (index + 1).to_string().into(),
@@ -285,28 +326,39 @@ fn fill(app: &App, window: &AppWindow) {
         .collect();
     let name = engine.chat_name(&session);
     let footer = if !state.known {
-        "Not loaded: this agent's Host is not connected".to_owned()
+        // i18n: artifacts gallery footer: the agent's Host is not connected, so nothing is shown
+        tr!("Not loaded: this agent's Host is not connected")
     } else if state.loading && shown.is_empty() {
-        "Loading…".to_owned()
+        // i18n: artifacts gallery footer while it loads
+        tr!("Loading…")
     } else if shown.is_empty() && !state.has_more {
         match state.kind {
-            Some(kind) => format!("No {} from this agent", kind.label().to_lowercase()),
-            None => "Nothing published by this agent yet".to_owned(),
+            Some(kind) => empty_of(kind),
+            // i18n: artifacts gallery, empty state: the agent has published nothing
+            None => tr!("Nothing published by this agent yet"),
         }
     } else if state.loading {
-        format!("{} shown · loading older…", shown.len())
+        // i18n: artifacts gallery footer: how many are shown while older ones load; {n} is the count
+        tr!("{n} shown · loading older…" | "{n} shown · loading older…" % shown.len())
     } else if state.has_more {
-        format!("{} shown · older ones not loaded yet", shown.len())
+        // i18n: artifacts gallery footer: how many are shown, more exist (End loads them); {n} is the count
+        tr!("{n} shown · older ones not loaded yet" | "{n} shown · older ones not loaded yet" % shown.len())
     } else {
-        format!("All {} shown", shown.len())
+        // i18n: artifacts gallery footer: every item is shown; {n} is the count
+        tr!("All {n} shown" | "All {n} shown" % shown.len())
     };
     // Each list says for itself what failed; End asks again.
-    let error = [("Images", &state.media_error), ("Artifacts", &state.artifacts_error)]
-        .into_iter()
-        .filter(|(_, why)| !why.is_empty())
-        .map(|(what, why)| format!("{what} could not be read further: {why}. End tries again."))
-        .collect::<Vec<_>>()
-        .join("\n");
+    let error = [
+        // i18n: artifacts gallery error: the pictures list stopped loading; {} is the reason (End is the keyboard key)
+        (tr!("Images could not be read further: {}. End tries again.", state.media_error), &state.media_error),
+        // i18n: artifacts gallery error: the artifacts list stopped loading; {} is the reason (End is the keyboard key)
+        (tr!("Artifacts could not be read further: {}. End tries again.", state.artifacts_error), &state.artifacts_error),
+    ]
+    .into_iter()
+    .filter(|(_, why)| !why.is_empty())
+    .map(|(line, _)| line)
+    .collect::<Vec<_>>()
+    .join("\n");
     drop(engine);
 
     bridge.set_agent(name.into());
@@ -536,14 +588,46 @@ fn activate(app: &App, window: &AppWindow, index: i32) {
 /// The hints the shortcut bar shows while the panel has the keyboard.
 pub fn hints(window: &AppWindow) -> Vec<crate::Hint> {
     let bridge = window.global::<PublicationsBridge>();
-    let pairs: &[(&str, &str)] = if bridge.get_playing() {
-        &[("Space", "Play/pause"), ("←/→", "5 s"), ("J/L", "10 s"), ("M", "Mute"), ("F", "Fullscreen"), ("Esc", "Close")]
+    // Shortcut bar labels in the artifacts gallery; the keys beside them stay as they are.
+    let pairs: Vec<(&str, String)> = if bridge.get_playing() {
+        vec![
+            // i18n: artifacts gallery video player, shortcut bar label: Space plays or pauses (imperative)
+            ("Space", tr!("Play/pause")),
+            // i18n: artifacts gallery video player, shortcut bar label: arrows jump 5 seconds
+            ("←/→", tr!("{} s", 5)),
+            // i18n: artifacts gallery video player, shortcut bar label: J/L jump 10 seconds
+            ("J/L", tr!("{} s", 10)),
+            // i18n: artifacts gallery video player, shortcut bar label: M mutes the sound (imperative verb)
+            ("M", tr!("verb" => "Mute")),
+            // i18n: artifacts gallery video player, shortcut bar label: F toggles full screen (noun)
+            ("F", tr!("Fullscreen")),
+            // i18n: shortcut bar label: Esc closes the panel (imperative verb)
+            ("Esc", tr!("verb" => "Close")),
+        ]
     } else if bridge.get_viewing() >= 0 {
-        &[("←/→", "Previous / next"), ("Esc", "Back")]
+        vec![
+            // i18n: artifacts gallery picture viewer, shortcut bar label: arrows show the previous or next picture
+            ("←/→", tr!("Previous / next")),
+            // i18n: shortcut bar label: Esc goes back (imperative)
+            ("Esc", tr!("verb" => "Back")),
+        ]
     } else {
-        &[("J/K", "Move"), ("Enter", "Open"), ("0-7", "Kind"), ("End", "Older"), ("R", "Reload"), ("Esc", "Close")]
+        vec![
+            // i18n: artifacts gallery, shortcut bar label: J/K move the selection (imperative verb)
+            ("J/K", tr!("verb" => "Move")),
+            // i18n: artifacts gallery, shortcut bar label: Enter opens the selected item (imperative verb)
+            ("Enter", tr!("verb" => "Open")),
+            // i18n: artifacts gallery, shortcut bar label: 0-7 pick the kind filter (noun)
+            ("0-7", tr!("filter" => "Kind")),
+            // i18n: artifacts gallery, shortcut bar label: End loads older items (adjective as a short hint)
+            ("End", tr!("Older")),
+            // i18n: artifacts gallery, shortcut bar label: R reads the list again (imperative verb)
+            ("R", tr!("verb" => "Reload")),
+            // i18n: shortcut bar label: Esc closes the panel (imperative verb)
+            ("Esc", tr!("verb" => "Close")),
+        ]
     };
-    pairs.iter().map(|(keys, label)| crate::Hint { keys: (*keys).into(), label: (*label).into() }).collect()
+    pairs.into_iter().map(|(keys, label)| crate::Hint { keys: keys.into(), label: label.into() }).collect()
 }
 
 /// A key while the panel shows; false for one it leaves alone.
