@@ -20,6 +20,7 @@ pub use place::{here, poisoned_dir, profile};
 
 /// The word that makes the shim run a turn of Antigravity over ACP.
 pub const DRIVER: &str = "agy-acp-turn";
+pub const READ_ONLY: &str = "--read-only";
 
 /// The largest picture sent as a picture. A larger one stays a path in the text.
 pub const IMAGE_MOST: u64 = 10 * 1024 * 1024;

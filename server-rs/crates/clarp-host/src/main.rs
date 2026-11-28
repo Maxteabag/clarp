@@ -605,6 +605,7 @@ async fn serve(config: Config) -> Result<(), String> {
         // opening reads and writes behind the first reservation attempt.
         app.hub.event_numbers_ready().await;
         unopened.begin();
+        clarp_host::agent_transit::retire_legacy_agy(&app);
         // The tests make a start fail after the Host has begun to answer (issue 935): once the
         // file named exists.
         #[cfg(debug_assertions)]
