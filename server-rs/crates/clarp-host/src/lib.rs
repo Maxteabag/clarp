@@ -64,7 +64,6 @@ pub mod harness_providers;
 pub mod heard;
 pub mod heartbeat;
 mod held;
-mod helper_defaults;
 pub mod helper_source;
 pub mod hidden_coordination;
 pub mod hub;
