@@ -256,8 +256,16 @@ function tickWhileNeeded() {
 let servingIds = [];
 
 /** The serving Host's server id (and previous ones), from /server-info: a different id is not it. */
+// The serving Host's name, kept so a page that loads while it refuses or is gone can still name
+// it. localStorage is this origin's, so one key is enough.
+const SERVING_LABEL_KEY = 'clarp.reach.servingLabel.v1';
+function keptServingLabel() {
+  try { return localStorage.getItem(SERVING_LABEL_KEY) || ''; } catch (_) { return ''; }
+}
+
 export function setServingIdentity({ serverId = '', previous = [], label = '' } = {}) {
   servingIds = [serverId, ...previous].filter(Boolean);
+  if (label) { try { localStorage.setItem(SERVING_LABEL_KEY, label); } catch (_) {} }
   trackHost(PRIMARY, {
     label: label || reach.hosts[PRIMARY]?.label || location.host,
     url: location.origin, key: serverId || location.origin, via: 'serving',
@@ -294,7 +302,7 @@ async function probeServing() {
 }
 
 trackHost(PRIMARY, {
-  label: typeof location !== 'undefined' ? location.host : '',
+  label: keptServingLabel() || (typeof location !== 'undefined' ? location.host : ''),
   url: typeof location !== 'undefined' ? location.origin : '',
   key: '', via: 'serving', probe: probeServing,
 });
