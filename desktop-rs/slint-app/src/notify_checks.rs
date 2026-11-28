@@ -283,14 +283,22 @@ pub fn notify_daemon_check(_out: String) {
             press(PRESSED_ID.load(Ordering::Relaxed), "choice:accepted");
             true
         })),
-        ("older card answered", Box::new(|_, _window, elapsed| {
+        ("ambiguous click ignored", Box::new(|_, _window, elapsed| {
             if elapsed < DELAY * 2 {
                 return false;
             }
+            check(super::posts("/decisions/d-a3/resolve").is_empty(), "a click during replacement does not answer the older card");
+            check(super::posts("/decisions/d-b3/resolve").is_empty(), "a click during replacement does not answer the newer card");
+            press(PRESSED_ID.load(Ordering::Relaxed), "choice:accepted");
+            true
+        })),
+        ("settled replacement answers its own question", Box::new(|_, _window, _| {
             let newer = super::posts("/decisions/d-b3/resolve");
-            check(newer.is_empty(), &format!("a button of the older popup resolves nothing on the newer question: {newer:?}"));
-            let older = super::posts("/decisions/d-a3/resolve");
-            check(older.first().is_some_and(|r| r["body"]["choice"] == "accepted"), &format!("it answers the older question it was pressed on, still pending: {older:?}"));
+            if newer.is_empty() {
+                return false;
+            }
+            check(newer.len() == 1 && newer[0]["body"]["choice"] == "accepted", "the settled popup answers only its own question");
+            check(super::posts("/decisions/d-a3/resolve").is_empty(), "the older question was never answered");
             true
         })),
     ];
