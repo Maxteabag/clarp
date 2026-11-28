@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 220;
+pub const HOST_CONTRACT: u64 = 222;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -579,6 +579,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("opencode_provider_usage", 215),
     // The local tools token reaches HTTP routes with the agent's own identity and privacy.
     ("agent_token_api", 216),
+    ("scoped_helper_defaults", 222),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -2646,6 +2647,22 @@ pub(crate) async fn make_agent_as(
             .by_session(session)
             .map(|member| member.record.clone())
     });
+    if replaces.is_none()
+        && request.test != Some(true)
+        && !["resume_session_id", "fork_session_id", "codex_provider"]
+            .iter()
+            .any(|key| plain(key).is_some_and(|v| !v.trim().is_empty()))
+        && clarp_kernel::helpers::parse_role(request.role.as_deref().unwrap_or(""))
+            == Some("helper")
+        && let Some(scope) = &app.config.helper_defaults
+        && let Some(parent) = &request.parent
+        && let Some(selection) =
+            scope.for_parent(&app.fleet.directory(), parent, request.cwd.as_deref())
+    {
+        request.backend = Some(selection.backend.clone());
+        request.model = Some(selection.model.clone());
+        request.effort = Some(selection.effort.clone());
+    }
     let backend = request
         .backend
         .as_deref()
