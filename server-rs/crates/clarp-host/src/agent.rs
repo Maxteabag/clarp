@@ -828,6 +828,7 @@ pub struct TerminalFacts {
 /// The way to an agent's thread.
 #[derive(Clone)]
 pub struct AgentHandle {
+    pub(crate) switch_read: Arc<crate::availability::SwitchRead>,
     tx: mpsc::Sender<Ask>,
     view: watch::Receiver<Arc<View>>,
     close: Arc<CloseState>,
@@ -2122,6 +2123,7 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
         glanced: None,
     };
     let handle = AgentHandle {
+        switch_read: Arc::default(),
         tx,
         view,
         close: Arc::default(),
@@ -7522,7 +7524,7 @@ mod mailbox_tests {
         }));
         (
             AgentHandle {
-                tx,
+                switch_read: Arc::default(),                tx,
                 view,
                 close: Arc::default(),
                 alive: Arc::default(),
