@@ -193,3 +193,75 @@ pub fn lightness(color: &str) -> f64 {
     let (r, g, b) = rgb(color).unwrap_or((0.0, 0.0, 0.0));
     (r.max(g).max(b) + r.min(g).min(b)) / 2.0
 }
+
+/// A theme's name or description (`reading_themes.json`) in the app's
+/// language; the file's English is the key.
+pub fn local(english: &str) -> String {
+    if english.is_empty() {
+        return String::new();
+    }
+    crate::i18n::translate("", english, "", None, &[])
+}
+
+/// The themes' names and descriptions as catalog strings: the file holds
+/// them, so tools/i18n-export finds them here. Font, product and app names
+/// in them stay as they are.
+#[allow(dead_code)]
+// i18n-screen: settings
+fn catalog_strings() -> Vec<String> {
+    use crate::tr;
+    vec![
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Terminal"),
+        // i18n: Settings > Appearance, description of the "Terminal" reading theme (font and product names stay as they are)
+        tr!("JetBrains Mono on the dark palette. The default."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Paper"),
+        // i18n: Settings > Appearance, description of the "Paper" reading theme (font and product names stay as they are)
+        tr!("Literata on warm sepia paper, as in the CloudEpub reader. Light and low-glare."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Dusk"),
+        // i18n: Settings > Appearance, description of the "Dusk" reading theme (font and product names stay as they are)
+        tr!("Literata in warm off-white on the dark palette. A book at night."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Hyperlegible"),
+        // i18n: Settings > Appearance, description of the "Hyperlegible" reading theme (font and product names stay as they are)
+        tr!("Atkinson Hyperlegible sans on the dark palette. Built for low vision and tired eyes."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Sepia"),
+        // i18n: Settings > Appearance, description of the "Sepia" reading theme (font and product names stay as they are)
+        tr!("Atkinson Hyperlegible on warm sepia, for long reading by day. Brown-black text; status colours stay apart for colour-blind eyes."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Graphite"),
+        // i18n: Settings > Appearance, description of the "Graphite" reading theme (font and product names stay as they are)
+        tr!("Atkinson Hyperlegible in off-white on warm charcoal, never pure black. Low glare for evenings and dim rooms."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Night"),
+        // i18n: Settings > Appearance, description of the "Night" reading theme (font and product names stay as they are)
+        tr!("A serif in warm parchment tones on brown-black, with little blue. For reading in the dark."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("High contrast"),
+        // i18n: Settings > Appearance, description of the "High contrast" reading theme (font and product names stay as they are)
+        tr!("Atkinson Hyperlegible 18px, near-black on off-white. For bright rooms, glare and low-DPI screens."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Studio"),
+        // i18n: Settings > Appearance, description of the "Studio" reading theme (font and product names stay as they are)
+        tr!("Noto Sans 15px on neutral light grey: compact, for the explorer and dense chrome on a big monitor."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Hacker"),
+        // i18n: Settings > Appearance, description of the "Hacker" reading theme (font and product names stay as they are)
+        tr!("Phosphor green on black in JetBrains Mono, like an old terminal. Soft green text (not pure #00ff00) to keep the glare down; status colours stay apart for colour-blind eyes."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Word"),
+        // i18n: Settings > Appearance, description of the "Word" reading theme (font and product names stay as they are)
+        tr!("Like Microsoft Word: black text on a white page over Word's grey canvas, Word blue for the accent and hyperlinks, Calibri (or Carlito, its metric twin) when installed."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Teams"),
+        // i18n: Settings > Appearance, description of the "Teams" reading theme (font and product names stay as they are)
+        tr!("Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."),
+        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
+        tr!("Teams Dark"),
+        // i18n: Settings > Appearance, description of the "Teams Dark" reading theme (font and product names stay as they are)
+        tr!("Microsoft Teams dark: Segoe UI in off-white on Teams' near-black surfaces, a light lavender Teams purple and a brand-tinted own-message bubble."),
+    ]
+}

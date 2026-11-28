@@ -524,7 +524,7 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             app.switcher.borrow_mut().messages_only = true;
             // i18n: Ctrl+F message search, placeholder of the search field
             window.set_switcher_placeholder(tr!("Search messages in every chat").into());
-            window.set_switcher_empty(crate::search_view::EMPTY.into());
+            window.set_switcher_empty(crate::catalogue::local(crate::search_view::EMPTY).into());
             // i18n: Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
             window.set_switcher_hint(tr!("↑↓ move · Enter opens the chat at the message · Esc close").into());
             refresh_switcher(app, window);

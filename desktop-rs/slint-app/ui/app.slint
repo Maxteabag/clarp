@@ -139,7 +139,22 @@ component ShortcutBar inherits Rectangle {
             overflow: elide;
         }
         Text {
-            text: root.connection;
+            // The engine's state code, in the user's language (the same
+            // words as the Connection page's pill).
+            text:
+                // i18n: status bar, connection state: connected and up to date (adjective)
+                root.connection == "live" ? @tr("live")
+                // i18n: status bar, connection state: connecting to the Host now (a state)
+                : root.connection == "connecting" ? @tr("connecting")
+                // i18n: status bar, connection state: the connection dropped and is being made again (a state)
+                : root.connection == "reconnecting" ? @tr("reconnecting")
+                // i18n: status bar, connection state: the Host cannot be reached (adjective)
+                : root.connection == "offline" ? @tr("offline")
+                // i18n: status bar, connection state: the Host refused the token or code (adjective)
+                : root.connection == "unauthorized" ? @tr("unauthorized")
+                // i18n: status bar, connection state: a pairing code is being exchanged with the Host (a state)
+                : root.connection == "pairing" ? @tr("pairing")
+                : root.connection;
             color: root.connection == "live" ? Palette.success : Palette.warning;
             font-size: 11 * Look.unit;
             vertical-alignment: center;

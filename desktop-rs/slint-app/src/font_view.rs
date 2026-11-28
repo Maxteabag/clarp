@@ -129,7 +129,7 @@ fn show(app: &App, window: &AppWindow) {
     let bridge = window.global::<FontBridge>();
     PICKER.with(|p| {
         let p = p.borrow();
-        let label = reading::theme(&p.theme).get("label").and_then(serde_json::Value::as_str).unwrap_or_default().to_owned();
+        let label = clarp_core::reading_theme::local(reading::theme(&p.theme).get("label").and_then(serde_json::Value::as_str).unwrap_or_default());
         // i18n: font picker title; {} is the reading theme's name
         bridge.set_title(tr!("Font · {} theme", label).into());
         let saved = p.saved.as_ref().map(|s| s.family.as_str()).unwrap_or_default();

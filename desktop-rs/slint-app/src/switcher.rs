@@ -64,11 +64,11 @@ fn described(id: &str, target: String, key: &str) -> Item {
     Item {
         kind: Kind::Command,
         target,
-        label: entry.map_or(id, |e| e.label).into(),
+        label: entry.map_or_else(|| id.to_owned(), |e| e.label_text()),
         detail: String::new(),
         key: key.into(),
         group: entry.map_or("view", |e| e.group),
-        description: entry.map_or("", |e| e.description).into(),
+        description: entry.map_or_else(String::new, |e| e.description_text()),
         aliases: entry.map_or(&[][..], |e| e.aliases),
         value: String::new(),
         entry: entry.map_or("", |e| e.id),
@@ -248,7 +248,10 @@ pub fn rank(items: Vec<Item>, query: &str) -> Vec<Item> {
     let mut scored: Vec<(u32, usize, Item)> = items
         .into_iter()
         .filter_map(|item| {
-            let score = crate::catalogue::score(query, &item.label, item.aliases, &format!("{} {}", item.description, item.group))?;
+            // Shown in the app's language; a catalogue entry is also found by its English words.
+            let shown = crate::catalogue::score(query, &item.label, item.aliases, &format!("{} {}", item.description, item.group));
+            let english = crate::catalogue::find(item.entry).and_then(|e| crate::catalogue::entry_score(query, &e));
+            let score = shown.max(english)?;
             Some((score, crate::catalogue::order(item.entry), item))
         })
         .collect();
