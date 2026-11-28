@@ -445,6 +445,83 @@ fn an_agent_tokens_http_access_cannot_answer_an_owner_decision() {
 }
 
 #[test]
+fn a_delegated_agent_reads_the_decision_it_resolves_only_with_object_access() {
+    let place = Place::new("agent-token-private-decision");
+    let owners = place.root.join("owners.toml");
+    std::fs::write(
+        &owners,
+        "[agents]\ndecision_on_behalf_sessions = [\"decision-desk\"]\n",
+    )
+    .unwrap();
+    let admin = "fixture-private-decision-owner";
+    let codex = place.root.join("codex");
+    program(&codex, CODEX);
+    let host = place.start_in(
+        admin,
+        &["--speech-keys", owners.to_str().unwrap()],
+        &[("CLARP_CODEX_PROGRAM", codex.to_str().unwrap())],
+    );
+    let bound = bound_agent(&host, "Private case", &own_home(&place, "private-home"));
+    let desk = "decision-desk";
+    host.post(
+        "/agents",
+        json!({"name":"Decision desk","session":desk,"backend":"claude"}),
+    );
+    host.send(desk, "Ready", "desk-first-turn");
+    wait_for("the desk to finish", || host.state(desk) == "done");
+    let turn = first_turn_token(&place, &agent_id(&host, desk));
+    let marker = "private-fixture-question";
+    let asked = host.post(
+        "/decisions",
+        json!({"session":bound,"title":"Private case","question":marker}),
+    );
+    let artifact = &asked["artifact"];
+    let id = artifact["decision"]["decision_id"].as_str().unwrap();
+    let artifact_path = format!("/artifacts/{}", artifact["artifact_id"].as_str().unwrap());
+    let path = format!("/decisions/{id}/resolve");
+    let body = json!({"choice":"accepted","expected_revision":1,"on_behalf_session":desk});
+    let tools = clarp_host::tool_token(admin);
+    let resolve = || {
+        fetch(
+            &host,
+            &tools,
+            "POST",
+            &path,
+            &[
+                ("X-Clarp-Turn", &turn),
+                ("Content-Type", "application/json"),
+            ],
+            body.to_string().as_bytes(),
+        )
+    };
+
+    let blocked = resolve();
+    assert_eq!(blocked.status, 403, "{}", blocked.text());
+    assert!(!blocked.text().contains(marker));
+    let refusal: Value = serde_json::from_slice(&blocked.body).unwrap();
+    assert_eq!(refusal["error"], "bound_conversation");
+    assert!(refusal.get("artifact").is_none());
+    assert_eq!(
+        host.get(&artifact_path)["artifact"]["decision"]["status"],
+        "pending"
+    );
+
+    host.post(
+        "/agent-provider",
+        json!({"session":bound,"add_readers":[desk]}),
+    );
+    let granted = resolve();
+    assert_eq!(granted.status, 200, "{}", granted.text());
+    let result: Value = serde_json::from_slice(&granted.body).unwrap();
+    assert_eq!(result["artifact"]["artifact_id"], artifact["artifact_id"]);
+    assert_eq!(result["artifact"]["decision"]["question"], marker);
+    assert_eq!(
+        result["artifact"]["decision"]["resolved_by"],
+        "agent:decision-desk"
+    );
+}
+
+#[test]
 fn an_agent_makes_contacts_and_puts_away_its_own_helpers_from_its_own_turn() {
     let place = Place::new("tools-own-helpers");
     let admin = "tools-helpers-owner";
