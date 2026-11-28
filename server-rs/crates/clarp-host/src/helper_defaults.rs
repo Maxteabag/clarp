@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
@@ -15,7 +15,6 @@ pub(crate) struct Selection {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub(crate) struct ScopedDefaults {
     pub parent_ids: Vec<String>,
-    pub parent_directories: Vec<PathBuf>,
     pub selection: Selection,
 }
 
@@ -39,14 +38,7 @@ impl ScopedDefaults {
             if record.bound() || !seen.insert(&record.agent_id) {
                 return None;
             }
-            let cwd = Path::new(&record.cwd);
-            if self.parent_ids.contains(&record.agent_id)
-                || (!cwd.components().any(|part| part == Component::ParentDir)
-                    && self
-                        .parent_directories
-                        .iter()
-                        .any(|root| root.is_absolute() && cwd.starts_with(root)))
-            {
+            if self.parent_ids.contains(&record.agent_id) {
                 return Some(&self.selection);
             }
             if !record.is_helper() {

@@ -367,21 +367,24 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         std::fs::create_dir(dir).unwrap();
     }
     let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
+    let owner_id = {
+        let host = place.start();
+        let lead = host.post(
+            "/agents",
+            json!({"name":"lead","cwd":product,"backend":"scripted"}),
+        );
+        host.post(
+            "/agents",
+            json!({"name":"other","cwd":product,"backend":"scripted"}),
+        );
+        lead["agent"]["agent_id"].as_str().unwrap().to_owned()
+    };
     std::fs::write(
         place.root.join("helper-defaults.json"),
-        json!({
-            "parent_ids": [], "parent_directories": [product], "selection": selection
-        })
-        .to_string(),
+        json!({"parent_ids":[owner_id], "selection":selection}).to_string(),
     )
     .unwrap();
     let host = place.start_with("", &["--config", place.root.to_str().unwrap()]);
-    for (name, dir) in [("lead", &product), ("other", &unrelated)] {
-        host.post(
-            "/agents",
-            json!({"name":name,"cwd":dir,"backend":"scripted"}),
-        );
-    }
     for (name, parent) in [("child", "lead"), ("nested", "child"), ("control", "other")] {
         let made = host.post(
             "/agents",

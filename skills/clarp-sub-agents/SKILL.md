@@ -185,7 +185,7 @@ start, and the command exits 1.
    agent helper-state SESSION` shows the backend, model and effort selected for
    new children in `helper_defaults`. A Host can read `helper-defaults.json`
    in its own configuration directory at startup. Its `parent_ids` are agent
-   IDs, `parent_directories` are absolute directory roots, and `selection`
+   IDs of verified owners, and `selection`
    holds `backend`, `model` and `effort`. A helper also qualifies through its
    helper ancestry. Fresh Clarp helper starts and forks use that selection
    when flags are omitted. Explicit choices take precedence. Plain systemd
