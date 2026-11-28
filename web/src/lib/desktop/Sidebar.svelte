@@ -13,8 +13,10 @@
   import { orderChats } from '../chat-order.js';
   import { movedLine } from '@core/agent-moved.js';
   import { resolveAvatarUrl } from '@core/avatar.js';
-  import { mergeChats, PRIMARY, unreachable, unreachableLine } from '@core/all-hosts.js';
+  import { mergeChats, PRIMARY } from '@core/all-hosts.js';
+  import { COPY, sinceTime } from '@core/host-reach.js';
   import { hostsState, openOnHost, readHosts } from '../../stores/hosts.svelte.js';
+  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../../stores/reach.svelte.js';
   import HostBadge from '../HostBadge.svelte';
   import { input, orderedSessions, setRegion } from '../../stores/input.svelte.js';
 
@@ -57,6 +59,8 @@
         busy: !!s.busy,
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         unread: !remote && isUserNotificationUnread(row.sid),
+        // Its Host does not answer: the row stays, dimmed, with an offline dot.
+        hostDown: isDown(remote ? remote.id : SERVING),
         // Another Host's portraits need that Host's sign-in; the bundled ones are this app's.
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         // A moved agent's row says where it went (contract 125).
@@ -66,15 +70,10 @@
     });
   });
 
-  // '<Host> unreachable', quiet, only while more than one Host is read (@core/all-hosts.js).
-  let down = $derived.by(() => {
-    const ids = [PRIMARY, ...others.map(h => h.id)];
-    const states = Object.fromEntries(others.map(h => [h.id, hostsState.live[h.id]?.state]));
-    return unreachable(ids, states).map(id => {
-      const h = others.find(x => x.id === id);
-      return { id, text: unreachableLine(hostsState.live[id]?.name || h?.name || h?.url || 'A Host') };
-    });
-  });
+  // One line per Host that does not answer, opening its full panel (HostDownDialog). The serving
+  // Host's own line only while other Hosts are listed: alone, its chat shows the panel itself.
+  let down = $derived(downHosts([...(others.length ? [SERVING] : []), ...others.map(h => h.id)])
+    .map(h => ({ id: h.id, text: COPY.row(h.label, sinceTime(h.since, reach.now)) })));
 
   function open(chat) {
     if (chat.remote) openOnHost(chat.remote, chat.sid);
@@ -102,7 +101,9 @@
 
   {#if !collapsed}
     {#each down as line (line.id)}
-      <div class="side-unreachable" role="status">{line.text}</div>
+      <button type="button" class="side-unreachable" onclick={() => openPanel(line.id)}>
+        <span class="side-offline-dot" aria-hidden="true"></span>{line.text}
+      </button>
     {/each}
   {/if}
   <nav class="sidebar-list" aria-label="Conversations" bind:this={listEl}>
@@ -113,6 +114,7 @@
         class:selected={i === selected}
         onpointerenter={() => { if (input.region === 'sidebar') setRegion('panes'); }}
         class:remote={!!chat.remote}
+        class:host-down={chat.hostDown}
         title={(collapsed ? `${chat.name} — ${chat.line}` : chat.line)
                + (chat.remote ? ` · opens on ${chat.remote.name || chat.remote.url}` : '')}
         onclick={() => open(chat)}
@@ -124,7 +126,8 @@
           {#if !chat.avatar}
             <span class="avatar-letter">{chat.name.slice(0, 1)}</span>
           {/if}
-          <span class="side-dot" class:busy={chat.busy} class:unread={chat.unread}></span>
+          <span class="side-dot" class:busy={chat.busy && !chat.hostDown} class:unread={chat.unread}
+                class:offline={chat.hostDown}></span>
         </span>
         {#if !collapsed}
           <span class="side-copy">
@@ -227,11 +230,28 @@
    conversation actually open: you walk the list before choosing. */
 .side-unreachable {
   flex: 0 0 auto;
-  padding: 6px 14px;
-  font: 400 11px/1.3 var(--font-ui);
-  color: var(--washi-low);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 14px;
+  border: 0;
   border-bottom: 1px solid var(--ink-edge);
+  background: transparent;
+  font: 400 11px/1.3 var(--font-ui);
+  color: var(--washi-dim);
+  text-align: left;
+  cursor: pointer;
 }
+.side-unreachable:hover { color: var(--washi); background: var(--ink-soft-2); }
+.side-offline-dot {
+  flex: 0 0 auto;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--washi-low);
+}
+.sidebar .side-row.host-down { opacity: .55; }
+.side-dot.offline { background: var(--ink-soft); box-shadow: 0 0 0 2px var(--ink-soft), inset 0 0 0 2px var(--washi-low); }
 .sidebar .side-row.selected {
   outline: 1px solid var(--accent-blue);
   outline-offset: -1px;
