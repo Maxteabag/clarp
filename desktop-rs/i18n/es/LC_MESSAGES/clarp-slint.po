@@ -1865,6 +1865,10 @@ msgstr "Exportado a {}"
 msgid "External connections blocked"
 msgstr "Conexiones externas bloqueadas"
 
+#. orchestrator, extra-high reasoning effort
+msgid "Extra high"
+msgstr "Muy alto"
+
 #. artifact card kind label, small capitals: a file (noun)
 msgid "FILE"
 msgstr "ARCHIVO"
@@ -2171,6 +2175,10 @@ msgid ""
 "Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue)."
 msgstr ""
 "Oculta la franja de mensajes en espera encima del campo de mensaje, o la vuelve a mostrar (el ajuste Mostrar la cola)."
+
+#. orchestrator, high reasoning effort
+msgid "High"
+msgstr "Alto"
 
 #. Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
 msgid "High contrast"
@@ -2744,6 +2752,10 @@ msgid "Longest line of message text, in characters; 0 uses the pane's full width
 msgstr ""
 "Línea más larga del texto de los mensajes, en caracteres; 0 usa todo el ancho del panel"
 
+#. orchestrator, low reasoning effort
+msgid "Low"
+msgstr "Bajo"
+
 #. Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Vim mode, the which-key panel: what the keys "<Space> w j" do in the chat and the explorer
@@ -2795,9 +2807,10 @@ msgstr "Máximo de procesos persistentes entre todas las herramientas."
 msgid "Maximum kept processes in auto mode."
 msgstr "Máximo de procesos persistentes en modo automático."
 
+#. orchestrator, medium reasoning effort
 #. Settings > Text weight, an option (adjective): a font weight
 msgid "Medium"
-msgstr "Media"
+msgstr "Medio"
 
 #. Settings > Agent picture size, an option: the size's name and its size in pixels
 msgid "Medium · 44 px"
@@ -2857,6 +2870,10 @@ msgid ""
 "Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."
 msgstr ""
 "Microsoft Teams claro: Segoe UI casi negro sobre blanco, el acento morado de Teams y la burbuja lavanda de los mensajes propios, como en la app de escritorio de Teams."
+
+#. orchestrator, minimal reasoning effort
+msgid "Minimal"
+msgstr "Mínimo"
 
 #. Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Hides chips, switches and other chrome for a quieter window.
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Hide the chrome around the chat: titles, frames and bars
@@ -6018,6 +6035,10 @@ msgstr "Reactivar chat pospuesto"
 #. Settings > Colours, a colour setting's name, the row label (noun). What it colours: Colour of warnings and stopped answers
 msgid "Warning"
 msgstr "Advertencia"
+
+#. processes panel, a background job that watches other work
+msgid "Watcher"
+msgstr "Tarea de supervisión"
 
 #. Settings page and Ctrl+K, the line under the preference “Opening links” saying what it does.
 msgid "What a click on a link (or a link hint) does"

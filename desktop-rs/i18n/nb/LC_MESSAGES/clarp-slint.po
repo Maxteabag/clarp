@@ -443,7 +443,7 @@ msgstr "Artefakter"
 
 #. artifacts gallery error: the artifacts list stopped loading; {} is the reason (End is the keyboard key)
 msgid "Artifacts could not be read further: {}. End tries again."
-msgstr "Artefaktene kunne ikke leses videre: {}. End prøver igjen."
+msgstr "Kunne ikke laste inn flere artefakter: {}. Trykk på End for å prøve igjen."
 
 #. Settings page and Ctrl+K, the line under the preference “Confirm stop and release” saying what it does.
 msgid ""
@@ -1860,6 +1860,10 @@ msgstr "Eksportert til {}"
 msgid "External connections blocked"
 msgstr "Eksterne tilkoblinger er blokkert"
 
+#. orchestrator, extra-high reasoning effort
+msgid "Extra high"
+msgstr "Ekstra høy"
+
 #. artifact card kind label, small capitals: a file (noun)
 msgid "FILE"
 msgstr "FIL"
@@ -2165,6 +2169,10 @@ msgid ""
 msgstr ""
 "Skjuler stripen med ventende meldinger over meldingsfeltet, eller viser den igjen (innstillingen Vis køen)."
 
+#. orchestrator, high reasoning effort
+msgid "High"
+msgstr "Høy"
+
 #. Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
 msgid "High contrast"
 msgstr "Høy kontrast"
@@ -2305,7 +2313,7 @@ msgstr "Bilder"
 
 #. artifacts gallery error: the pictures list stopped loading; {} is the reason (End is the keyboard key)
 msgid "Images could not be read further: {}. End tries again."
-msgstr "Bildene kunne ikke leses videre: {}. End prøver igjen."
+msgstr "Kunne ikke laste inn flere bilder: {}. Trykk på End for å prøve igjen."
 
 #. Key bindings editor, button (verb): use the JSON in the box as the key profile
 msgid "Import"
@@ -2549,7 +2557,7 @@ msgstr "Taster i utforskeren"
 
 #. Keys help (?), title elsewhere; {} is the key context's name (e.g. Settings, Updates)
 msgid "Keys in {}"
-msgstr "Taster i {}"
+msgstr "Hurtigtaster – {}"
 
 #. Keys help (?), title while the keyboard is on an artifact card in the chat
 msgid "Keys on a card"
@@ -2732,6 +2740,10 @@ msgstr "Logg"
 msgid "Longest line of message text, in characters; 0 uses the pane's full width"
 msgstr "Lengste linje med meldingstekst, i tegn; 0 bruker hele rutens bredde"
 
+#. orchestrator, low reasoning effort
+msgid "Low"
+msgstr "Lav"
+
 #. Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Vim mode, the which-key panel: what the keys "<Space> w j" do in the chat and the explorer
@@ -2783,6 +2795,7 @@ msgstr "Maks antall prosesser holdt i gang for alle verktøy til sammen."
 msgid "Maximum kept processes in auto mode."
 msgstr "Maks antall prosesser holdt i gang i auto-modus."
 
+#. orchestrator, medium reasoning effort
 #. Settings > Text weight, an option (adjective): a font weight
 msgid "Medium"
 msgstr "Middels"
@@ -2844,6 +2857,10 @@ msgid ""
 "Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."
 msgstr ""
 "Microsoft Teams lys: Segoe UI i nesten svart på hvitt, Teams-lilla aksent og lavendelfarget boble for egne meldinger, som i Teams-skrivebordsappen."
+
+#. orchestrator, minimal reasoning effort
+msgid "Minimal"
+msgstr "Minimal"
 
 #. Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Hides chips, switches and other chrome for a quieter window.
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Hide the chrome around the chat: titles, frames and bars
@@ -4240,7 +4257,7 @@ msgstr "Påkrevd"
 
 #. Key bindings editor, button (verb phrase): put every key back to its default
 msgid "Reset defaults"
-msgstr "Gjenopprett standard"
+msgstr "Gjenopprett standardvalg"
 
 #. Settings page and Ctrl+K, a setting's name, the row label (an action row that opens or does something). What it does: Puts every preference back to its default; key bindings and chats stay.
 msgid "Reset every setting"
@@ -4265,7 +4282,7 @@ msgstr "Tilbakestill til standard"
 
 #. font picker, button: back to the theme's font and size; {0} the font's name, {1} its size in pixels
 msgid "Reset to theme default ({0} {1} px)"
-msgstr "Tilbakestill til temaets standard ({0} {1} px)"
+msgstr "Bruk temaskriften ({0} {1} px)"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats at 100% again.
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats at 100% again.
@@ -5988,6 +6005,10 @@ msgstr "Vekk chatten som slumrer"
 msgid "Warning"
 msgstr "Advarsel"
 
+#. processes panel, a background job that watches other work
+msgid "Watcher"
+msgstr "Overvåking"
+
 #. Settings page and Ctrl+K, the line under the preference “Opening links” saying what it does.
 msgid "What a click on a link (or a link hint) does"
 msgstr "Hva et klikk på en lenke (eller et lenkehint) gjør"
@@ -6177,9 +6198,9 @@ msgstr "Zoom {}"
 msgid "a message will likely fail"
 msgstr "en melding vil trolig mislykkes"
 
-#. chat list, when the agent is expected back; {} is a clock time ("14:05")
+#. chat list, when the agent is expected back; {} is the localized return time, including the day when needed
 msgid "back at {}"
-msgstr "tilbake kl. {}"
+msgstr "tilbake {}"
 
 #. chat list, when the agent is expected back; {} is a number of minutes (about)
 msgid "back in ~{} min"
@@ -6501,9 +6522,9 @@ msgstr "oversetter"
 msgid "unauthorized"
 msgstr "ingen tilgang"
 
-#. chat header, until when the agent is away; {} is a clock time ("14:05")
+#. chat header, until when the agent is away; {} is the localized return time, including the day when needed
 msgid "until {}"
-msgstr "til kl. {}"
+msgstr "til {}"
 
 #. agent status pill, shown in capitals where the script has them: the agent waits for the user (a state)
 msgid "waiting"
@@ -7252,8 +7273,7 @@ msgstr "↑↓ flytt · Enter kjør eller bytt · Esc lukk"
 #. Ctrl+K command palette, the key hint line at the bottom; key names stay, the words say what each key does
 msgid ""
 "↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close"
-msgstr ""
-"↑↓ flytt · Enter kjører en kommando, slår en innstilling av/på eller viser valgene · Esc lukk"
+msgstr "↑↓ bla · Enter kjør, bytt eller vis valg · Esc lukk"
 
 #. chat, wide table, clickable hint above it: scrolls the table sideways to its end; {n} is how many columns it has; the arrow points right
 msgid "→ {n} column"
@@ -8075,6 +8095,13 @@ msgstr "Av"
 msgctxt "scheduled task"
 msgid "On"
 msgstr "På"
+
+#. find bar in a chat, line under the field when the Host's search failed; {0} is why
+#. search page, note under the results: a Host whose search failed; {0} is "<Host>: why"
+#. context: search.not_searched
+msgctxt "search.not_searched"
+msgid "Not searched: {0}"
+msgstr "Søket omfatter ikke {0}"
 
 #. select-text page, before each of the user's own messages (pronoun, a colon follows)
 #. context: select text

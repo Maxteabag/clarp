@@ -69,7 +69,7 @@ fn job_view(engine: &clarp_engine::Engine, job: &Object) -> JobView {
         detail: text(job, "detail").into(),
         active: active_job(&status),
         failed: status == "failed",
-        status: status.to_uppercase().into(),
+        status: crate::processes_view::status_word(&status).to_uppercase().into(),
         progress: engine.background_job_progress(job) as f32,
         can_cancel: job.get("can_cancel") != Some(&Value::Bool(false)),
         id: id.into(),
@@ -110,7 +110,13 @@ fn artifact_view(engine: &clarp_engine::Engine, artifact: &Object) -> ArtifactVi
         id: text(artifact, "artifact_id").into(),
         kind: crate::artifacts_view::card_label(&kind).into(),
         failed: matches!(outcome.as_str(), "failed" | "failure" | "timed_out" | "action_required"),
-        outcome: outcome.into(),
+        outcome: match outcome.as_str() {
+            // i18n: updates, a successful artifact outcome
+            "success" => tr!("Successful"),
+            // i18n: updates, a failed artifact outcome
+            "failure" => tr!("Failed"),
+            other => crate::processes_view::status_word(other),
+        }.into(),
         // i18n: artifact card title when it has none (noun: something an agent published)
         title: first(artifact, &["file_name", "title"], &tr!("Artifact")).into(),
         summary: text(artifact, "summary").into(),

@@ -111,6 +111,7 @@ pub struct App {
     pub switcher: RefCell<SwitcherState>,
     /// The dialog over the window ("" for none).
     pub overlay: RefCell<String>,
+    auto_connection_page: std::cell::Cell<bool>,
     /// An agent the launch asked for, until the window starts it.
     pub launch: RefCell<Option<launch::Request>>,
     /// The artifact card the keyboard is on (J/K in the chat), "" for none.
@@ -512,8 +513,9 @@ impl App {
         let overlay = self.overlay.borrow().clone();
         if overlay.is_empty() && empty && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
             commands::open_overlay(self, &window, "connection");
+            self.auto_connection_page.set(true);
             window.invoke_open_connection_page();
-        } else if overlay == "connection" && state == "live" && !empty && changes.contains(&Change::Roster) {
+        } else if overlay == "connection" && self.auto_connection_page.get() && state == "live" && !empty && changes.contains(&Change::Roster) {
             commands::close_overlay(self, &window);
         }
         window.set_muted(engine.muted());
@@ -838,6 +840,7 @@ fn main() {
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
         overlay: RefCell::new(String::new()),
+        auto_connection_page: std::cell::Cell::new(false),
         launch: RefCell::new(None),
         artifact_cursor: RefCell::new(String::new()),
         artifact_choices: RefCell::default(),

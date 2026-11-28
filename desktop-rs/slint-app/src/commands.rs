@@ -1390,6 +1390,7 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
 // ---- dialogs -----------------------------------------------------------------
 
 pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
+    app.auto_connection_page.set(false);
     let previous = std::mem::replace(&mut *app.overlay.borrow_mut(), name.to_owned());
     if previous == "report" && name != "report" {
         app.engine.borrow_mut().set_artifact_in_view(None);

@@ -357,6 +357,7 @@ pub fn start_shot(path: String, session: String) {
     let started = Instant::now();
     let chosen = Cell::new(false);
     let command = Cell::new(std::env::var("CLARP_SHOT_COMMAND").ok().filter(|c| !c.is_empty()));
+    let expected_page = std::env::var("CLARP_SHOT_COMMAND").unwrap_or_default();
     let settled: Cell<Option<Instant>> = Cell::new(None);
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
         let Some(app) = crate::app() else { return };
@@ -380,7 +381,11 @@ pub fn start_shot(path: String, session: String) {
             return;
         }
         if let (Some(name), Some(window)) = (command.take(), crate::window()) {
-            check(crate::commands::run(&app, &window, &name), &format!("ran {name} before the shot"));
+            if name == "language-picker" {
+                crate::commands::open_picker(&app, &window, "language");
+            } else {
+                check(crate::commands::run(&app, &window, &name), &format!("ran {name} before the shot"));
+            }
             settled.set(Some(Instant::now()));
             return;
         }
@@ -388,6 +393,13 @@ pub fn start_shot(path: String, session: String) {
         settled.set(Some(since));
         if since.elapsed() < Duration::from_millis(600) {
             return;
+        }
+        if let Some(window) = crate::window() {
+            match expected_page.as_str() {
+                "connection" => check(window.get_overlay() == "connection", "connection page visible at capture"),
+                "language-picker" => check(window.get_switcher_open() && window.get_switcher_rows().row_count() >= 7, "language choices visible at capture"),
+                _ => {}
+            }
         }
         shot_to(&path);
         TIMER.with(|t| t.borrow_mut().take());

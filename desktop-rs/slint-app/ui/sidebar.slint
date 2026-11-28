@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
@@ -497,11 +497,12 @@ export component Sidebar inherits Rectangle {
         // Triage: Working, Needs you and Done split the fleet by where each
         // chat stands; Snoozed lists the chats put off (triage.rs). A row
         // wider than the explorer scrolls sideways.
-        if !root.minimal: scopes := Flickable {
+        if !root.minimal: scopes := ScrollView {
             vertical-stretch: 0;
-            height: 24px;
-            content-width: Math.max(self.width, chips.preferred-width + 20px);
-            content-height: self.height;
+            height: chips.preferred-width + 20px > self.width ? 40px : 24px;
+            vertical-scrollbar-policy: always-off;
+            content-width: Math.max(self.visible-width, chips.preferred-width + 20px);
+            content-height: 24px;
             accessible-role: AccessibleRole.list;
             accessible-id: "explorer-scopes";
             chips := HorizontalLayout {

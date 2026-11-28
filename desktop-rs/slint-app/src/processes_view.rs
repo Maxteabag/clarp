@@ -213,7 +213,7 @@ fn job_title(job: &Object) -> String {
 }
 
 /// A job's status in plain words (the Host's own word for one this app does not know).
-fn status_word(status: &str) -> String {
+pub(crate) fn status_word(status: &str) -> String {
     match status {
         // i18n: processes, a job's status (lowercase, a timer may follow)
         "running" => tr!("job status" => "running"),
@@ -230,7 +230,7 @@ fn status_word(status: &str) -> String {
         // i18n: processes, a job's status: ended by force (lowercase)
         "killed" => tr!("job status" => "killed"),
         // i18n: processes, a job's status the Host does not give (lowercase)
-        "" => tr!("job status" => "unknown"),
+        "" | "unknown" => tr!("job status" => "unknown"),
         other => other.to_owned(),
     }
 }
@@ -323,10 +323,16 @@ fn running_count(n: usize) -> String {
 fn job_row(engine: &clarp_engine::Engine, job: &Object, now: i64, all: bool) -> ProcessJob {
     let id = text(job, "job_id");
     let sub_agent = text(job, "kind") == "sub-agent";
-    let kind = if sub_agent { "sub-agent".to_owned() } else { text(job, "kind") };
+    let kind = match text(job, "kind").as_str() {
+        // i18n: processes panel, a background job that watches other work
+        "watcher" => tr!("Watcher"),
+        // i18n: processes panel, kind of a helper job
+        "sub-agent" => tr!("Sub-agent"),
+        other => other.to_owned(),
+    };
     let status = text(job, "status");
     let owner = if all { engine.chat_name(&text(job, "session")) } else { String::new() };
-    let state = if status == "queued" || (all && !status.is_empty()) { status.clone() } else { String::new() };
+    let state = if status == "queued" || (all && !status.is_empty()) { status_word(&status) } else { String::new() };
     let detail: Vec<String> = [owner, kind, state, text(job, "detail")].into_iter().filter(|p| !p.is_empty()).collect();
     let started = json::integer(job, "started_at");
     let heartbeat = json::integer(job, "heartbeat_at");

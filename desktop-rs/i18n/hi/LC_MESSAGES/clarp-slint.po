@@ -1861,6 +1861,10 @@ msgstr "{} में एक्सपोर्ट किया गया"
 msgid "External connections blocked"
 msgstr "बाहरी कनेक्शन ब्लॉक हैं"
 
+#. orchestrator, extra-high reasoning effort
+msgid "Extra high"
+msgstr "बहुत ज़्यादा"
+
 #. artifact card kind label, small capitals: a file (noun)
 msgid "FILE"
 msgstr "फ़ाइल"
@@ -2165,6 +2169,10 @@ msgid ""
 "Hides the strip of waiting messages above the composer, or shows it again (the setting Show the queue)."
 msgstr ""
 "मैसेज बॉक्स के ऊपर इंतज़ार कर रहे मैसेज की पट्टी छिपाता है, या फिर से दिखाता है (सेटिंग 'कतार दिखाएं')।"
+
+#. orchestrator, high reasoning effort
+msgid "High"
+msgstr "ज़्यादा"
 
 #. Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
 msgid "High contrast"
@@ -2729,6 +2737,10 @@ msgstr "लॉग"
 msgid "Longest line of message text, in characters; 0 uses the pane's full width"
 msgstr "मैसेज टेक्स्ट की सबसे लंबी लाइन, अक्षरों में; 0 पर पेन की पूरी चौड़ाई"
 
+#. orchestrator, low reasoning effort
+msgid "Low"
+msgstr "कम"
+
 #. Keys (key context “Chats”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Keys (key context “Chat”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It moves the keyboard to the pane below
 #. Vim mode, the which-key panel: what the keys "<Space> w j" do in the chat and the explorer
@@ -2780,6 +2792,7 @@ msgstr "सभी टूल में मिलाकर ज़्यादा �
 msgid "Maximum kept processes in auto mode."
 msgstr "ऑटो मोड में ज़्यादा से ज़्यादा इतनी प्रोसेस चालू रखी जाती हैं।"
 
+#. orchestrator, medium reasoning effort
 #. Settings > Text weight, an option (adjective): a font weight
 msgid "Medium"
 msgstr "मध्यम"
@@ -2842,6 +2855,10 @@ msgid ""
 "Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."
 msgstr ""
 "Microsoft Teams लाइट: सफ़ेद पर लगभग काले में Segoe UI, Teams का बैंगनी ऐक्सेंट और अपने मैसेज के लिए लैवेंडर बबल, Teams डेस्कटॉप ऐप की तरह।"
+
+#. orchestrator, minimal reasoning effort
+msgid "Minimal"
+msgstr "न्यूनतम"
 
 #. Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Hides chips, switches and other chrome for a quieter window.
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Hide the chrome around the chat: titles, frames and bars
@@ -5983,6 +6000,10 @@ msgstr "स्नूज़ की गई चैट जगाएं"
 #. Settings > Colours, a colour setting's name, the row label (noun). What it colours: Colour of warnings and stopped answers
 msgid "Warning"
 msgstr "चेतावनी"
+
+#. processes panel, a background job that watches other work
+msgid "Watcher"
+msgstr "निगरानी कार्य"
 
 #. Settings page and Ctrl+K, the line under the preference “Opening links” saying what it does.
 msgid "What a click on a link (or a link hint) does"

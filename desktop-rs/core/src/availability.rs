@@ -219,13 +219,15 @@ fn back(back_at: Option<i64>, clock: Clock) -> Option<String> {
         // i18n: chat list, when the agent is expected back; {} is a number of minutes (about)
         return Some(tr!("back in ~{} min", (seconds + 30) / 60));
     }
-    let local = chrono::Local.timestamp_millis_opt(back_at - clock.host_offset_ms).single()?;
-    // i18n: chat list, when the agent is expected back; {} is a clock time ("14:05")
-    Some(tr!("back at {}", clock_time(local.time())))
+    let when = return_moment(back_at, clock)?;
+    // i18n: chat list, when the agent is expected back; {} is the localized return time, including the day when needed
+    Some(tr!("back at {}", when))
 }
 
-fn clock_time(at: chrono::NaiveTime) -> String {
-    crate::i18n::format::time(crate::i18n::current(), at, crate::i18n::format::Clock::H24)
+fn return_moment(host_ms: i64, clock: Clock) -> Option<String> {
+    let at = chrono::Local.timestamp_millis_opt(host_ms - clock.host_offset_ms).single()?;
+    let now = chrono::Local.timestamp_millis_opt(clock.local_now_ms).single()?;
+    Some(crate::i18n::format::moment(crate::i18n::current(), at.naive_local(), now.date_naive(), crate::i18n::format::Clock::H24))
 }
 
 /// "last sign of life 4 min ago", or "just now" under a minute.
@@ -285,9 +287,9 @@ fn header_back(back_at: Option<i64>, clock: Clock) -> Option<String> {
         // i18n: chat header, how long until the agent is back; {} is a number of minutes (about)
         return Some(tr!("~{} min", (seconds + 30) / 60));
     }
-    let local = chrono::Local.timestamp_millis_opt(back_at - clock.host_offset_ms).single()?;
-    // i18n: chat header, until when the agent is away; {} is a clock time ("14:05")
-    Some(tr!("until {}", clock_time(local.time())))
+    let when = return_moment(back_at, clock)?;
+    // i18n: chat header, until when the agent is away; {} is the localized return time, including the day when needed
+    Some(tr!("until {}", when))
 }
 
 /// The open chat's header subtitle: why the agent cannot answer the user

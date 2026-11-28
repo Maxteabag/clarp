@@ -24,6 +24,7 @@ screens=(
     processes:agent-processes # processes / jobs
     profile:agent-profile     # agent profile
     orchestrator:orchestrator # orchestrator dialog
+    language-picker:language-picker
     connection:connection     # connection page
     new:new                   # new agent hub
     queue:manage-queue        # queued messages
