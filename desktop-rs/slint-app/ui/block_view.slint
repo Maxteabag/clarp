@@ -72,7 +72,7 @@ export component BlockView inherits Rectangle {
                 clicked => { root.wrap = !root.wrap; }
             }
             CopyIcon {
-                accessible-id: "block-view-copy";
+                key: "block-view-copy";
                 size: 18px;
                 text: root.code ? root.block.text : root.block.source;
                 label: root.code ? @tr("Copy code") : @tr("Copy table");

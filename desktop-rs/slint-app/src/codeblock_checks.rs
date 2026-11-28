@@ -1,8 +1,8 @@
-//! `--check codeblocks --out DIR`: a code block has a thin line over its
+//! `--check codeblocks --out DIR`: a code block has a header row over its
 //! code with its language's name and Copy and Expand icons; the copy puts
 //! the code on the clipboard and the icon says Copied, then Copy code
-//! again. Expand, or a click on the code, opens it over the window, wrapped, with wrap, copy and close
-//! icons; Escape closes it. A table wider than the chat has an expand icon
+//! again. Expand, or a click on the code, opens it over the window,
+//! wrapped, with wrap, copy and close icons; Escape closes it. A table wider than the chat has an expand icon
 //! over it that opens it over the window, where its copy copies the
 //! table's Markdown. Shots in the paper theme (`CLARP_CHECK_THEME` picks
 //! another). Needs the fake Host.

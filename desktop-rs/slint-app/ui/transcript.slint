@@ -647,10 +647,13 @@ export component CopyIcon inherits Rectangle {
     in property <string> text;
     in property <string> label: @tr("Copy code");
     in property <length> size: 16px * ChatText.scale;
+    // Its button's accessible id.
+    in property <string> key;
     out property <bool> copied;
     width: button.width;
     height: button.height;
     button := BlockIcon {
+        accessible-id: root.key;
         size: root.size;
         icon: root.copied ? @image-url("icons/check.svg") : @image-url("icons/copy.svg");
         label: root.copied ? @tr("Copied") : root.label;
@@ -751,7 +754,7 @@ export component Block inherits VerticalLayout {
             x: (root.viewer ? expand-code.x : parent.width - 4px) - self.width;
             y: (code-box.line - self.height) / 2;
             size: 16px * ChatText.scale;
-            accessible-id: root.measuring ? "" : "code-copy";
+            key: root.measuring ? "" : "code-copy";
             text: root.block.text;
         }
         expand-code := BlockIcon {
