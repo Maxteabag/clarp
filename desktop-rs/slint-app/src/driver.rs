@@ -93,6 +93,9 @@ mod stop_checks;
 // ---- a stalled turn: the working indicator says so and offers Stop (#249)
 #[path = "stall_checks.rs"]
 mod stall_checks;
+// ---- a failed turn explained: one card, repeats as one (contract 217)
+#[path = "turn_error_checks.rs"]
+mod turn_error_checks;
 // ---- why an agent cannot answer now: one line in the row and the header (#918)
 #[path = "availability_checks.rs"]
 mod availability_checks;
@@ -631,6 +634,7 @@ pub fn start_check(name: &str, out: String) {
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),
         "stalled-turn" => stall_checks::stalled_turn_check(out),
+        "turn-errors" => turn_error_checks::turn_errors_check(out),
         "agent-availability" => availability_checks::agent_availability_check(out),
         "kept-processes" => lanes_checks::kept_processes_check(out),
         "all-hosts" => all_hosts_checks::all_hosts_check(out),

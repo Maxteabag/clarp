@@ -40,6 +40,7 @@ mod search_view;
 mod select_text;
 mod mention_view;
 mod view;
+mod turn_error_view;
 mod vim;
 mod vim_view;
 mod help;
