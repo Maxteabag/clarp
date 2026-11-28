@@ -654,7 +654,11 @@ async fn start_for(
         .flatten()
         .filter_map(|model| model["id"].as_str())
         .collect();
-    if !bound && !model.is_empty() && !offered.is_empty() && !offered.contains(&model.as_str()) {
+    if !bound
+        && !model.is_empty()
+        && !offered.is_empty()
+        && !crate::models::model_is_offered(&backend, &model, &offered)
+    {
         return Err(refused(StatusCode::BAD_REQUEST, "unknown_model"));
     }
     let valid = clarp_backend::efforts(&backend);
