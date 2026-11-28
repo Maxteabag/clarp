@@ -1764,6 +1764,7 @@ fn enable_test_keeper(host: &Host, owner: &str) {
 fn the_goal_ledger_attributes_each_host_door_to_its_actual_caller() {
     let place = Place::new("ledger-doors");
     let (agy, _) = keeping_model(&place, "agy");
+    let store = place.root.join(".gemini/antigravity-cli/conversations");
     let tokens = place.root.join("tokens");
     let running = place.root.join("janitor-working");
     let janitor = janitors_tool(
