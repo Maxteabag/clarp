@@ -1631,7 +1631,14 @@ fn main() -> ExitCode {
     {
         argv.next();
         let program = argv.next().unwrap_or_else(|| "agy".into());
-        let read_only = argv.next().as_deref() == Some(clarp_acp::agy::READ_ONLY);
+        let read_only = match argv.next().as_deref() {
+            None => false,
+            Some(clarp_acp::agy::READ_ONLY) => true,
+            Some(flag) => {
+                eprintln!("clarp-shim: unknown Antigravity ACP option {flag}");
+                return ExitCode::from(2);
+            }
+        };
         return match agy_acp::run(&program, read_only) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
