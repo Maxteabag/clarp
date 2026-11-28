@@ -894,6 +894,8 @@ def search_answer(query):
     answer = {"q": query.get("q", ""), "hits": hits, "next_before": following, "partial": message_search["partial"]}
     if session:
         answer["total"] = len(found)
+    if message_search.get("unsolicited_positions"):
+        answer["positions"] = []
     if query.get("positions") == "1" and message_search["positions"]:
         if not session:
             return 400, {"error": "positions needs a session"}
@@ -1849,6 +1851,12 @@ class Handler(BaseHTTPRequestHandler):
                 # contract.features names the contract a feature landed in;
                 # these are test numbers, the real one is booked at landing.
                 info["contract"]["features"]["artifact_summary_v1"] = 990
+            if "message_search" in features:
+                info["contract"]["features"]["message_search"] = 196
+            if "search_positions" in features:
+                info["contract"]["features"]["search_positions"] = 218
+            if message_search.get("contract") is not None:
+                info["contract"] = message_search["contract"]
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:
@@ -2730,7 +2738,8 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
             message_search.update({"on": bool(body.get("on", True)), "partial": bool(body.get("partial", False)),
-                                   "page": int(body.get("page", 0)), "positions": bool(body.get("positions", False))})
+                                   "page": int(body.get("page", 0)), "positions": bool(body.get("positions", False)),
+                                   "contract": body.get("contract"), "unsolicited_positions": body.get("unsolicited_positions", False)})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/stop-text":
             # Test control: the stop_receipt_text feature on or off (read from
