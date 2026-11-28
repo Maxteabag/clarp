@@ -551,7 +551,7 @@ fn reopened(
     let mut taken_back = None;
     if let Some(message_id) = queued {
         let waiting = actor.queue()?;
-        let found = waiting.into_iter().find(|w| w.client_id == message_id);
+        let found = waiting.into_iter().find(|w| w.message_id == message_id);
         let withdrawn = match &found {
             Some(waiting) => Some(actor.withdraw(waiting.turn, "user", now)?),
             None => None,
