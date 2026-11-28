@@ -367,7 +367,7 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         std::fs::create_dir(dir).unwrap();
     }
     let selection = json!({"backend":"codex","model":"gpt-6.2-astra","effort":"medium"});
-    let owner_id = {
+    let (owner_id, mixed_id) = {
         let host = place.start();
         let lead = host.post(
             "/agents",
@@ -377,14 +377,56 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             "/agents",
             json!({"name":"other","cwd":product,"backend":"scripted"}),
         );
-        lead["agent"]["agent_id"].as_str().unwrap().to_owned()
+        let mixed = host.post(
+            "/agents",
+            json!({"name":"mixed","cwd":product,"backend":"scripted"}),
+        );
+        (
+            lead["agent"]["agent_id"].clone(),
+            mixed["agent"]["agent_id"].as_str().unwrap().to_string(),
+        )
     };
     std::fs::write(
         place.root.join("helper-defaults.json"),
-        json!({"parent_ids":[owner_id], "selection":selection}).to_string(),
+        json!({"parent_ids":[owner_id], "mixed_parents":{(mixed_id):[product]}, "selection":selection}).to_string(),
     )
     .unwrap();
     let host = place.start_with("", &["--config", place.root.to_str().unwrap()]);
+    for (name, parent, cwd, expected) in [
+        ("product-child", "mixed", &product, "codex"),
+        ("film-child", "mixed", &unrelated, "claude"),
+        ("nested-product", "product-child", &unrelated, "codex"),
+        ("nested-film", "film-child", &product, "claude"),
+    ] {
+        let row = host.post(
+            "/agents",
+            json!({"name":name,"session":name,"role":"helper","parent":parent,"cwd":cwd}),
+        );
+        assert_eq!(row["agent"]["backend"], expected, "{row}");
+        assert_eq!(
+            row["agent"]["model"] == selection["model"],
+            expected == "codex"
+        );
+    }
+    let explicit = host.post("/agents", json!({"name":"model-only","role":"helper","parent":"mixed","cwd":product,"model":"claude-opus-5-5"}));
+    assert_eq!(explicit["agent"]["backend"], "claude");
+    assert_eq!(explicit["agent"]["model"], "claude-opus-5-5");
+
+    host.send("mixed", r#"{"session":"s-mixed","reply":"ready"}"#, "ready");
+    wait_for("mixed parent conversation", || {
+        host.state("mixed") == "done"
+    });
+    let forked = host.post(
+        "/agents/mixed/fork",
+        json!({"children":[
+            {"name":"explicit-fork","task":"fixture","cwd":product,"model":"scripted-model"},
+            {"name":"default-fork","task":"fixture","cwd":product},
+            {"name":"film-fork","task":"fixture","cwd":unrelated}
+        ]}),
+    );
+    for (index, backend) in ["scripted", "codex", "scripted"].iter().enumerate() {
+        assert_eq!(forked["children"][index]["backend"], *backend, "{forked}");
+    }
     // The restart rig creates a top-level agent for the backend under test.
     // The soak later starts that same agent again in place using its backend.
     for (session, backend, model) in [

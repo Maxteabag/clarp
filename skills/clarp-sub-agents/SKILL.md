@@ -182,13 +182,17 @@ start, and the command exits 1.
    ```
 
    On Rust Hosts with `scoped_helper_defaults` (contract 220), `clarp-admin
-   agent helper-state SESSION` shows the backend, model and effort selected for
+   agent helper-state SESSION --child-cwd /path/to/worktree` shows the backend, model and effort selected for
    new children in `helper_defaults`. A Host can read `helper-defaults.json`
    in its own configuration directory at startup. Its `parent_ids` are agent
-   IDs of verified owners, and `selection`
+   IDs of dedicated owners. Its `mixed_parents` maps other verified owner IDs
+   to the product directories their immediate child must work in. Descendants
+   qualify through that child. The `selection`
    holds `backend`, `model` and `effort`. A helper also qualifies through its
    helper ancestry. Fresh Clarp helper starts and forks use that selection
-   when flags are omitted. Explicit choices take precedence. Plain systemd
+   when flags are omitted. A model supplied without a backend keeps the
+   traditional backend for that invocation (Claude for start, the parent’s
+   backend for fork). Plain systemd
    workers keep their own defaults.
 
    Without a scoped selection or `--model`, a helper gets the Host's default model for its tool, the

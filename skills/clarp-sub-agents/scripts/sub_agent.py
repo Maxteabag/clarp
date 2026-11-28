@@ -243,7 +243,7 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
                 _admin("model", "--effort", a.effort, "--session", helper)
             _admin("agent", "helper-state", helper, "running", "--from", parent)
         else:
-            apply_start_defaults(a, parent)
+            apply_start_defaults(a, parent, workdir)
             model = a.model if a.model is not None else (DEFAULT_MODEL if a.backend == "claude" else "")
             create = ["agent", "create", a.name, "--parent", parent, "--role", "helper",
                       "--cwd", str(workdir), "--backend", a.backend]
@@ -295,9 +295,8 @@ def fork(a: argparse.Namespace) -> int:
         args += ["--task", a.task]
     else:
         sys.exit("fork needs --task or --task-file")
-    # Without --backend the children take the parent's backend, so that is the one to check.
-    if a.effort:
-        _check_effort(a.backend or helper_defaults(parent).get("backend") or _backend_of(parent), a.effort)
+    # When omitted, the Host resolves the backend for each child.
+    _check_effort(a.backend, a.effort)
     for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
                         ("--backend", a.backend), ("--model", a.model), ("--effort", a.effort)):
         if value:
@@ -423,14 +422,18 @@ def _check_effort(backend: str, effort) -> None:
         sys.exit("--effort is part of the model id on agy: pass e.g. --model claude-opus-5-5-high")
 
 
-def helper_defaults(parent: str) -> dict:
-    if not parent:
-        return {}
-    return _admin("agent", "helper-state", parent).get("helper_defaults") or {}
-
-
-def apply_start_defaults(a: argparse.Namespace, parent: str) -> None:
-    defaults = helper_defaults(parent)
+def apply_start_defaults(a: argparse.Namespace, parent: str, workdir: pathlib.Path) -> None:
+    if a.model and not a.backend:
+        a.backend = "claude"
+        return
+    try:
+        row = _admin("agent", "helper-state", parent, "--child-cwd", str(workdir))
+    except AdminError:
+        # Older Hosts know helper-state but do not accept a child workdir.
+        row = _admin("agent", "helper-state", parent)
+        if "helper_defaults" in row:
+            raise
+    defaults = row.get("helper_defaults") or {}
     a.backend = a.backend or defaults.get("backend") or "claude"
     if a.backend == defaults.get("backend"):
         if a.model is None:

@@ -1,5 +1,5 @@
-use std::collections::HashSet;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -15,6 +15,8 @@ pub(crate) struct Selection {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 pub(crate) struct ScopedDefaults {
     pub parent_ids: Vec<String>,
+    #[serde(default)]
+    pub mixed_parents: HashMap<String, Vec<PathBuf>>,
     pub selection: Selection,
 }
 
@@ -31,12 +33,25 @@ impl ScopedDefaults {
         }
     }
 
-    pub fn for_parent(&self, directory: &Directory, parent: &str) -> Option<&Selection> {
+    pub fn for_parent(
+        &self,
+        directory: &Directory,
+        parent: &str,
+        child_cwd: Option<&str>,
+    ) -> Option<&Selection> {
         let mut record = &directory.named(parent.trim())?.record;
+        let mut cwd = child_cwd;
         let mut seen = HashSet::new();
         loop {
             if record.is_test || record.bound() || !seen.insert(&record.agent_id) {
                 return None;
+            }
+            if let Some(roots) = self.mixed_parents.get(&record.agent_id) {
+                let path = Path::new(cwd?).canonicalize().ok()?;
+                return roots
+                    .iter()
+                    .any(|root| root.is_absolute() && path.starts_with(root))
+                    .then_some(&self.selection);
             }
             if self.parent_ids.contains(&record.agent_id) {
                 return Some(&self.selection);
@@ -44,6 +59,7 @@ impl ScopedDefaults {
             if !record.is_helper() {
                 return None;
             }
+            cwd = Some(&record.cwd);
             record = &directory.by_id(record.parent_agent_id.as_deref()?)?.record;
         }
     }

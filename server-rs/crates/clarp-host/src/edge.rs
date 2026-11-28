@@ -2655,7 +2655,9 @@ pub(crate) async fn make_agent_as(
             == Some("helper")
         && let Some(scope) = &app.config.helper_defaults
         && let Some(parent) = &request.parent
-        && let Some(selection) = scope.for_parent(&app.fleet.directory(), parent)
+        && let Some(selection) =
+            scope.for_parent(&app.fleet.directory(), parent, request.cwd.as_deref())
+        && (request.backend.is_some() || request.model.as_deref().is_none_or(str::is_empty))
         && request
             .backend
             .as_ref()

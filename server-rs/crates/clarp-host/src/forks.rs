@@ -232,11 +232,13 @@ async fn child_of(app: &App, parent: &Member, child: &Child, seed: &str) -> Resu
         let why = format!("No such directory: {cwd}");
         return Err(Refused::new(400, "cwd_missing", why));
     }
-    let backend = if child.backend.is_empty() {
+    let backend = if child.backend.is_empty() && !child.model.is_empty() {
+        &record.backend
+    } else if child.backend.is_empty() {
         app.config
             .helper_defaults
             .as_ref()
-            .and_then(|scope| scope.for_parent(&app.fleet.directory(), &record.session))
+            .and_then(|scope| scope.for_parent(&app.fleet.directory(), &record.session, Some(&cwd)))
             .map_or(&record.backend, |selection| &selection.backend)
     } else {
         &child.backend
