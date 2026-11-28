@@ -993,7 +993,10 @@ pub fn open_picker(app: &App, window: &AppWindow, id: &str) {
     window.invoke_show_switcher();
     refresh_switcher(app, window);
     // The current option is where the keyboard starts.
-    let current = app.switcher.borrow().items.iter().position(|i| i.value == "Current");
+    // The pill's word, in English or (once the switcher translates it) the app's language.
+    // i18n: quick switcher, value pill on a row: this is the one in use now (adjective); the same word as the pill drawn by switcher.slint
+    let current_word = tr!("Current");
+    let current = app.switcher.borrow().items.iter().position(|i| i.value == "Current" || i.value == current_word.as_str());
     if let Some(index) = current {
         switcher_moved(app, window, index as i32);
     }

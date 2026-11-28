@@ -1281,11 +1281,11 @@ pub fn display_local(spec: &Spec, value: &Value) -> String {
     match spec.kind {
         Kind::Toggle { .. } => {
             if value.as_bool() == Some(true) {
-                // i18n: Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb)
-                tr!("switch" => "On")
+                // i18n: Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb; the same word as the quick switcher's "On" pill)
+                tr!("On")
             } else {
                 // i18n: Settings and Ctrl+K, the value of a switch that is off (adjective, not a verb)
-                tr!("switch" => "Off")
+                tr!("Off")
             }
         }
         Kind::Number { unit, zero, .. } => {

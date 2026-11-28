@@ -395,11 +395,11 @@ impl Setting {
         match &self.control {
             Control::Toggle { get, .. } => {
                 if get(app) {
-                    // i18n: Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb)
-                    tr!("switch" => "On")
+                    // i18n: Settings and Ctrl+K, the value of a switch that is on (adjective, not a verb; the same word as the quick switcher's "On" pill)
+                    tr!("On")
                 } else {
                     // i18n: Settings and Ctrl+K, the value of a switch that is off (adjective, not a verb)
-                    tr!("switch" => "Off")
+                    tr!("Off")
                 }
             }
             Control::Choice { options, get, .. } => {
