@@ -493,18 +493,22 @@ pub fn notify(note: Note) {
 
 /// The chat was opened or read on some device: its popup goes.
 pub fn close_chat(session: &str) {
-    close_where(|s| s.session == session, serde_json::json!({"closed": session}));
+    close_where(|s| s.session == session, true, serde_json::json!({"closed": session}));
 }
 
-/// A question was answered, dismissed or withdrawn elsewhere: its popup goes.
+/// A question was answered, dismissed or withdrawn elsewhere: its popup
+/// goes, and only it (a newer popup of the chat stays).
 pub fn close_decision(decision_id: &str) {
-    close_where(|s| s.decision_id == decision_id, serde_json::json!({"closed_decision": decision_id}));
+    close_where(|s| s.decision_id == decision_id, false, serde_json::json!({"closed_decision": decision_id}));
 }
 
 /// Closes the popups `which` picks (`logged` is what a check records). A
-/// popup still on its way is closed as soon as the desktop names it, and a
-/// popup waiting behind it that `which` picks is not sent.
-fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
+/// popup is known by what owns its id now: one a newer popup is replacing
+/// is no longer it. A popup still on its way is closed as soon as the
+/// desktop names it, unless a newer popup of the chat waits to replace it;
+/// a popup waiting that `which` picks is not sent. `whole_chat` (the chat
+/// read or opened) also drops whatever else of the chat waits.
+fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
         let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| which(s));
@@ -516,9 +520,13 @@ fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
         let mut any = false;
         for flight in flights.borrow_mut().iter_mut() {
             if which(&flight.popup) {
-                (flight.close, flight.next) = (true, None);
+                flight.close = true;
                 any = true;
-            } else if flight.next.as_ref().is_some_and(|next| which(&shown_of(next, 0))) {
+                if whole_chat {
+                    flight.next = None;
+                }
+            }
+            if flight.next.as_ref().is_some_and(|next| which(&shown_of(next, 0))) {
                 flight.next = None;
             }
         }
@@ -656,13 +664,16 @@ thread_local! {
 }
 
 /// A chat's Notify on its way, and what came for the chat meanwhile: the
-/// newest popup, sent once the id is known, or a close, done then. The
-/// later of the two wins.
+/// newest popup, sent once the id is known (replacing it), and whether the
+/// popup on its way was closed meanwhile.
 #[cfg(not(target_os = "macos"))]
 struct InFlight {
     popup: Shown,
     next: Option<Note>,
     close: bool,
+    /// The id of a closed popup this one replaces: closed if this Notify
+    /// fails, so the closed popup does not stay.
+    replaces_closed: Option<u32>,
 }
 
 /// Through Notification Center (as Script Editor, the sender `osascript`
@@ -707,13 +718,18 @@ fn notify_freedesktop(note: Note) {
                 None
             }
             None => {
-                flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false });
+                flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false, replaces_closed: None });
                 Some(note)
             }
         }
     });
     let Some(note) = note else { return };
     let replaces = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map_or(0, |s| s.id));
+    // From now the id is this popup's: a close of the one it replaces must
+    // not take it down.
+    if replaces != 0 {
+        remember(shown_of(&note, replaces));
+    }
     let actions = actions(&note);
     runtime::handle().spawn(async move {
         let sent = async {
@@ -753,21 +769,43 @@ fn notify_freedesktop(note: Note) {
 /// chat's newer popup goes next, replacing it.
 #[cfg(not(target_os = "macos"))]
 fn delivered(popup: Shown, id: Option<u32>) {
+    let session = popup.session.clone();
     let flight = IN_FLIGHT.with(|flights| {
         let mut flights = flights.borrow_mut();
-        let at = flights.iter().position(|f| f.popup.session == popup.session)?;
+        let at = flights.iter().position(|f| f.popup.session == session)?;
         Some(flights.remove(at))
     });
-    let close = flight.as_ref().is_some_and(|f| f.close);
-    if let Some(id) = id {
-        if close {
-            close_notification(id);
-        } else {
+    let (close, next, replaces_closed) = flight.map_or((false, None, None), |f| (f.close, f.next, f.replaces_closed));
+    match (id, close, next) {
+        // Shown; a newer popup of the chat replaces it next.
+        (Some(_), false, next) => {
             remember(popup);
+            if let Some(next) = next {
+                notify_freedesktop(next);
+            }
         }
-    }
-    if let Some(next) = flight.and_then(|f| f.next) {
-        notify_freedesktop(next);
+        // Closed meanwhile, and a newer popup waits: it takes the id, so the
+        // closed one goes and the newer stays.
+        (Some(id), true, Some(next)) => {
+            remember(popup);
+            notify_freedesktop(next);
+            IN_FLIGHT.with(|flights| {
+                if let Some(flight) = flights.borrow_mut().iter_mut().find(|f| f.popup.session == session) {
+                    flight.replaces_closed = Some(id);
+                }
+            });
+        }
+        (Some(id), true, None) => close_notification(id),
+        // Not shown: a closed popup it was to replace still goes.
+        (None, _, next) => {
+            if let Some(closed) = replaces_closed {
+                SHOWN.with(|shown| shown.borrow_mut().retain(|s| s.id != closed));
+                close_notification(closed);
+            }
+            if let Some(next) = next {
+                notify_freedesktop(next);
+            }
+        }
     }
 }
 

@@ -19,6 +19,8 @@ const DELAY: Duration = Duration::from_millis(1500);
 
 /// Every call the daemon took, in order: `{call, id, replaces_id, body}`.
 static CALLS: Mutex<Vec<Value>> = Mutex::new(Vec::new());
+/// What the daemon shows now: id and body, as a desktop would draw them.
+static VISIBLE: Mutex<std::collections::BTreeMap<u32, String>> = Mutex::new(std::collections::BTreeMap::new());
 static READY: AtomicBool = AtomicBool::new(false);
 static NEXT_ID: AtomicU32 = AtomicU32::new(101);
 /// The daemon's own connection, kept for the check's lifetime.
@@ -53,11 +55,17 @@ impl Daemon {
         tokio::time::sleep(DELAY).await;
         let id = if replaces_id != 0 { replaces_id } else { NEXT_ID.fetch_add(1, Ordering::Relaxed) };
         record(json!({"call": "Notify", "id": id, "replaces_id": replaces_id, "body": body}));
+        if let Ok(mut visible) = VISIBLE.lock() {
+            visible.insert(id, body);
+        }
         id
     }
 
     fn close_notification(&self, id: u32) {
         record(json!({"call": "CloseNotification", "id": id}));
+        if let Ok(mut visible) = VISIBLE.lock() {
+            visible.remove(&id);
+        }
     }
 
     fn get_capabilities(&self) -> Vec<String> {
@@ -96,6 +104,29 @@ fn reply(id: &str, preview: &str) -> Value {
 
 fn send(event: Value) {
     check(control("/__control/event", &event).is_ok(), &format!("the Host sends {}", event["notification_id"]));
+}
+
+/// The bodies the daemon shows now.
+fn visible() -> Vec<String> {
+    VISIBLE.lock().map(|v| v.values().cloned().collect()).unwrap_or_default()
+}
+
+/// A question card on the fake Host, pending, and its question's event.
+fn ask(card: &str, decision: &str, question: &str) -> Value {
+    let pending = json!({"artifact_id": card, "type": "question", "status": "active", "session": "rachel", "title": question,
+                         "decision": {"decision_id": decision, "status": "pending", "revision": 1, "response_type": "approval"}});
+    check(control("/__control/artifact-update", &json!({"add": [pending], "session": "rachel"})).is_ok(), "the Host has a question card");
+    json!({"type": "user-notification", "event": "needs_you", "alert": true, "unread": false, "notification_id": format!("decision-{decision}"),
+           "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": question,
+           "decision_id": decision, "artifact_id": card, "response_type": "approval", "revision": 1,
+           "options": [{"id": "accepted", "label": "Yes"}, {"id": "rejected", "label": "No"}]})
+}
+
+/// The card answered on another device: the Host says it changed.
+fn answer_elsewhere(card: &str, decision: &str) {
+    let answered = json!({"decision_id": decision, "status": "accepted", "revision": 2, "response_type": "approval"});
+    check(control("/__control/artifact-update", &json!({"id": card, "set": {"decision": answered, "status": "completed"}, "session": "rachel"})).is_ok(),
+          "the question is answered elsewhere");
 }
 
 /// The calls since the `from`th.
@@ -167,6 +198,54 @@ pub fn notify_daemon_check(_out: String) {
             let id = later[asked]["id"].clone();
             check(later[asked + 1..].iter().any(|c| c["call"] == "CloseNotification" && c["id"] == id),
                   &format!("a question answered while its Notify was on its way is closed once the daemon names it: {later:?}"));
+            // A question on its way, a reply of the chat behind it, then the
+            // question answered elsewhere: only the question goes.
+            QUESTION_FROM.store(calls().len() as u32, Ordering::Relaxed);
+            send(ask("q-a1", "d-a1", "Approve A1?"));
+            send(reply("q-b1", "Reply B1"));
+            answer_elsewhere("q-a1", "d-a1");
+            true
+        })),
+        ("reply behind a closed question", Box::new(|_, _window, elapsed| {
+            let later = since(QUESTION_FROM.load(Ordering::Relaxed) as usize);
+            let Some(b) = later.iter().position(|c| c["call"] == "Notify" && c["body"] == "Reply B1") else { return false };
+            if elapsed < DELAY * 3 {
+                return false;
+            }
+            let a = later.iter().position(|c| c["call"] == "Notify" && c["body"] == "Approve A1?");
+            let a_id = a.map(|a| later[a]["id"].clone()).unwrap_or_default();
+            check(a.is_some_and(|a| a < b) && later[b]["replaces_id"] == a_id, &format!("the reply waits for the question's id and replaces it: {later:?}"));
+            let shown = visible();
+            check(shown.iter().any(|v| v == "Reply B1") && !shown.iter().any(|v| v == "Approve A1?"), &format!("the reply stays, the question is gone: {shown:?}"));
+            check(!later[b + 1..].iter().any(|c| c["call"] == "CloseNotification" && c["id"] == later[b]["id"]), "nothing closes the reply's popup");
+            // A question shown; a reply of the chat replacing it; then the
+            // question answered elsewhere while that replacement is on its way.
+            QUESTION_FROM.store(calls().len() as u32, Ordering::Relaxed);
+            send(ask("q-a2", "d-a2", "Approve A2?"));
+            true
+        })),
+        ("question shown", Box::new(|_, _window, _| {
+            let later = since(QUESTION_FROM.load(Ordering::Relaxed) as usize);
+            if !later.iter().any(|c| c["call"] == "Notify" && c["body"] == "Approve A2?") {
+                return false;
+            }
+            send(reply("q-b2", "Reply B2"));
+            answer_elsewhere("q-a2", "d-a2");
+            true
+        })),
+        ("reply owns the id", Box::new(|_, _window, elapsed| {
+            let later = since(QUESTION_FROM.load(Ordering::Relaxed) as usize);
+            let Some(b) = later.iter().position(|c| c["call"] == "Notify" && c["body"] == "Reply B2") else { return false };
+            if elapsed < DELAY * 3 {
+                return false;
+            }
+            let a = later.iter().position(|c| c["call"] == "Notify" && c["body"] == "Approve A2?").unwrap_or(0);
+            let id = later[a]["id"].clone();
+            check(later[b]["replaces_id"] == id, &format!("the reply replaces the shown question's popup: {later:?}"));
+            check(!later[a + 1..].iter().any(|c| c["call"] == "CloseNotification" && c["id"] == id),
+                  &format!("answering the replaced question closes nothing: the id is the reply's: {later:?}"));
+            let shown = visible();
+            check(shown.iter().any(|v| v == "Reply B2") && !shown.iter().any(|v| v == "Approve A2?"), &format!("the reply stays, the question is gone: {shown:?}"));
             true
         })),
     ];
