@@ -134,7 +134,10 @@ component Row inherits Rectangle {
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
     // "Rachel on laptopstudio" when the row names its Host (as on iOS).
-    accessible-label: root.chat.host != "" ? root.chat.name + " on " + root.chat.host : root.chat.name;
+    accessible-label: root.chat.host != ""
+        // i18n: chat list, accessibility label of a chat row that shows which Host the agent runs on; {0} is the agent's name, {1} the Host machine's name (e.g. "Rachel on laptopstudio")
+        ? @tr("{0} on {1}", root.chat.name, root.chat.host)
+        : root.chat.name;
     touch := TouchArea { clicked => { root.clicked(); } }
     HorizontalLayout {
         padding-left: 10px + root.chat.depth * 18px;
@@ -165,7 +168,8 @@ component Row inherits Rectangle {
                     border-radius: 8px;
                     background: root.chat.queue == 1 ? Palette.accent : Palette.accent.with-alpha(0.25);
                     accessible-role: text;
-                    accessible-label: "Next attention, number " + root.chat.queue;
+                    // i18n: chat list, accessibility label of the small numbered badge on a chat row: its place in the queue of chats that need the user's attention; {} is the number (1 is next)
+                    accessible-label: @tr("Next attention, number {}", root.chat.queue);
                     number := Text {
                         text: root.chat.queue;
                         color: root.chat.queue == 1 ? Palette.accent-text : Palette.accent;
@@ -229,7 +233,8 @@ component Row inherits Rectangle {
                     vertical-alignment: center;
                     accessible-role: text;
                     accessible-id: "row-snoozed";
-                    accessible-label: "Snoozed until " + root.chat.snoozed;
+                    // i18n: chat list (compact), accessibility label of the snooze mark on a chat row; {} is when the snooze ends, a time such as "14:30" or the phrase "next message"
+                    accessible-label: @tr("Snoozed until {}", root.chat.snoozed);
                 }
                 // Compact: a glyph and a count per kind, after the name, which
                 // elides to make room.
@@ -284,9 +289,18 @@ component Row inherits Rectangle {
                     font-size: 11 * Look.unit;
                     accessible-role: text;
                     accessible-id: "row-snoozed";
-                    accessible-label: "Snoozed until " + root.chat.snoozed;
+                    // i18n: chat list, accessibility label of the snooze mark on a chat row; {} is when the snooze ends, a time such as "14:30" or the phrase "next message"
+                    accessible-label: @tr("Snoozed until {}", root.chat.snoozed);
                 }
-                if root.chat.queued > 0: RevealText { text: root.chat.queued + (root.chat.queue-paused ? " queued · paused" : " queued"); color: Palette.warning; font-size: 11 * Look.unit; }
+                if root.chat.queued > 0: RevealText {
+                    text: root.chat.queue-paused
+                        // i18n: chat list, small warning on a chat row: how many messages wait in its queue, and the queue is paused; {n} is the number of messages
+                        ? @tr("{n} queued · paused" | "{n} queued · paused" % root.chat.queued)
+                        // i18n: chat list, small warning on a chat row: how many messages wait in its queue to be sent; {n} is the number of messages
+                        : @tr("{n} queued" | "{n} queued" % root.chat.queued);
+                    color: Palette.warning;
+                    font-size: 11 * Look.unit;
+                }
                 if root.chat.unread: Rectangle {
                     width: 8px;
                     height: 8px;
@@ -313,10 +327,12 @@ component Row inherits Rectangle {
             if !root.compact && root.chat.done-count > 0: Rectangle {
                 height: 20px;
                 accessible-role: button;
-                accessible-label: root.chat.done-count + " helpers done";
+                // i18n: chat list, line under a chat row (and its accessibility label) that folds or unfolds the finished helper agents of that chat; {n} is how many helpers are done
+                accessible-label: @tr("{n} helper done" | "{n} helpers done" % root.chat.done-count);
                 Text {
                     x: 0;
-                    text: (root.chat.done-expanded ? "▾ " : "▸ ") + root.chat.done-count + (root.chat.done-count == 1 ? " helper done" : " helpers done");
+                    // i18n: chat list, line under a chat row that folds or unfolds the finished helper agents of that chat; {n} is how many helpers are done
+                    text: (root.chat.done-expanded ? "▾ " : "▸ ") + @tr("{n} helper done" | "{n} helpers done" % root.chat.done-count);
                     color: done-touch.has-hover ? Palette.muted : Palette.faint;
                     font-size: 11 * Look.unit;
                 }
@@ -330,7 +346,8 @@ component Row inherits Rectangle {
             border-radius: 3px;
             background: restore-touch.has-hover ? Palette.hover : transparent;
             accessible-role: button;
-            accessible-label: "Restore " + root.chat.name;
+            // i18n: archived chats list, accessibility label of the button that brings an archived chat back to the chat list (verb); {} is the agent's name
+            accessible-label: @tr("Restore {}", root.chat.name);
             Image { source: @image-url("icons/restore.svg"); width: 16px; height: 16px; colorize: Palette.muted; }
             restore-touch := TouchArea { clicked => { root.restore(); } }
         }
@@ -463,7 +480,11 @@ export component Sidebar inherits Rectangle {
                 search := Field {
                     width: parent.width;
                     height: parent.height;
-                    placeholder-text: root.compact ? "Search" : "Search agents · /";
+                    placeholder-text: root.compact
+                        // i18n: chat list (narrow sidebar), placeholder of the search field that filters the chats (verb)
+                        ? @tr("Search")
+                        // i18n: chat list, placeholder of the search field that filters the chats; "/" is the keyboard key that focuses the field, keep it
+                        : @tr("Search agents · /");
                     edited => { root.filter-changed(); }
                 }
                 FocusRing { shown: Focus.mode == "search"; }
@@ -488,31 +509,44 @@ export component Sidebar inherits Rectangle {
                 height: 24px;
                 spacing: 5px;
                 alignment: start;
-                Chip { label: "All"; on: root.scope == "all"; clicked => { root.choose-scope("all"); } }
-                Chip { label: "Needs you"; count: root.triage-needs; on: root.scope == "needs-you"; accessible-id: "scope-needs-you"; clicked => { root.choose-scope("needs-you"); } }
-                Chip { label: "Working"; count: root.triage-working; on: root.scope == "working"; accessible-id: "scope-working"; clicked => { root.choose-scope("working"); } }
-                Chip { label: "Done"; on: root.scope == "done"; accessible-id: "scope-done"; clicked => { root.choose-scope("done"); } }
-                Chip { label: "Unread"; on: root.scope == "unread"; clicked => { root.choose-scope("unread"); } }
-                if root.triage-snoozed > 0 || root.scope == "snoozed": Chip { label: "Snoozed"; count: root.triage-snoozed; on: root.scope == "snoozed"; accessible-id: "scope-snoozed"; clicked => { root.choose-scope("snoozed"); } }
+                // i18n: chat list, filter chip above the chats: shows every chat
+                Chip { label: @tr("All"); on: root.scope == "all"; clicked => { root.choose-scope("all"); } }
+                // i18n: chat list, filter chip above the chats: shows the chats waiting for the user's answer or attention (a number of them may follow)
+                Chip { label: @tr("Needs you"); count: root.triage-needs; on: root.scope == "needs-you"; accessible-id: "scope-needs-you"; clicked => { root.choose-scope("needs-you"); } }
+                // i18n: chat list, filter chip above the chats: shows the chats whose agent is busy right now (adjective/state, not a verb; a number may follow)
+                Chip { label: @tr("Working"); count: root.triage-working; on: root.scope == "working"; accessible-id: "scope-working"; clicked => { root.choose-scope("working"); } }
+                // i18n: chat list, filter chip above the chats: shows the chats whose agent has finished its work (state "finished", not a button that confirms)
+                Chip { label: @tr("triage filter" => "Done"); on: root.scope == "done"; accessible-id: "scope-done"; clicked => { root.choose-scope("done"); } }
+                // i18n: chat list, filter chip above the chats: shows the chats with messages the user has not read yet (adjective)
+                Chip { label: @tr("Unread"); on: root.scope == "unread"; clicked => { root.choose-scope("unread"); } }
+                if root.triage-snoozed > 0 || root.scope == "snoozed": Chip {
+                    // i18n: chat list, filter chip above the chats: shows the chats the user put off until later (adjective/state; a number may follow)
+                    label: @tr("Snoozed"); count: root.triage-snoozed; on: root.scope == "snoozed"; accessible-id: "scope-snoozed"; clicked => { root.choose-scope("snoozed"); } }
             }
         }
         // Each label is its own row, not one row's text swapped: the swap
         // could leave the longer label's tail drawn behind the shorter one.
         if !root.showing-archive && !root.showing-pairs && !root.minimal: ListSwitch {
             glyph: "↔";
-            label: "Agent conversations";
+            // i18n: chat list, row that opens the list of conversations between agents (agent-to-agent rooms) (noun)
+            label: @tr("Agent conversations");
             // What it counts is the rooms behind it, not the chats below:
             // none shows no number (a 0 above a list of chats read as one).
             count: root.rooms.length > 0 ? "\{root.rooms.length}" : "";
             accessible-role: button;
             accessible-id: "list-rooms";
-            accessible-label: root.rooms.length > 0 ? "Agent conversations, " + root.rooms.length : "Agent conversations, none yet";
+            accessible-label: root.rooms.length > 0
+                // i18n: chat list, accessibility label of the row that opens the agent-to-agent conversations; {} is how many there are
+                ? @tr("Agent conversations, {}", root.rooms.length)
+                // i18n: chat list, accessibility label of the row that opens the agent-to-agent conversations, when there are none yet
+                : @tr("Agent conversations, none yet");
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = true; }
         }
         if !root.showing-archive && root.showing-pairs: ListSwitch {
             glyph: "‹";
-            label: "Back to chats";
+            // i18n: agent conversations list, row at the top that goes back to the normal chat list (verb phrase)
+            label: @tr("Back to chats");
             count: "";
             unread: root.unread-rooms;
             clicked => { root.showing-pairs = false; }
@@ -576,7 +610,17 @@ export component Sidebar inherits Rectangle {
           if !root.showing-pairs && !root.showing-archive && root.rows.length == 0 && (root.scope == "working" || root.scope == "needs-you" || root.scope == "done" || root.scope == "snoozed"): Text {
               y: 8px;
               width: parent.width;
-              text: root.scope == "needs-you" ? "Nothing pending" : root.scope == "working" ? "None working" : root.scope == "snoozed" ? "None snoozed" : "None done";
+              text: root.scope == "needs-you"
+                  // i18n: chat list, empty state under the "Needs you" filter: no chat waits for the user
+                  ? @tr("Nothing pending")
+                  : root.scope == "working"
+                  // i18n: chat list, empty state under the "Working" filter: no agent is busy right now
+                  ? @tr("None working")
+                  : root.scope == "snoozed"
+                  // i18n: chat list, empty state under the "Snoozed" filter: no chat is put off
+                  ? @tr("None snoozed")
+                  // i18n: chat list, empty state under the "Done" filter: no agent has finished yet
+                  : @tr("None done");
               color: Palette.muted;
               font-size: 12 * Look.unit;
               horizontal-alignment: center;
@@ -585,7 +629,8 @@ export component Sidebar inherits Rectangle {
           if root.showing-pairs && root.rooms.length == 0: Text {
               y: 0;
               width: parent.width;
-              text: "No agent conversations";
+              // i18n: agent conversations list, empty state when agents have not talked to each other yet
+              text: @tr("No agent conversations");
               color: Palette.muted;
               font-size: 12 * Look.unit;
               horizontal-alignment: center;
@@ -593,13 +638,15 @@ export component Sidebar inherits Rectangle {
         }
         if !root.showing-pairs && !root.showing-archive && !root.minimal: ListSwitch {
             glyph: "≡";
-            label: "Archived";
+            // i18n: chat list, row at the bottom that opens the list of archived chats (adjective used as a list name; a count follows)
+            label: @tr("Archived");
             count: root.archived.length;
             clicked => { root.showing-archive = true; }
         }
         if !root.showing-pairs && root.showing-archive: ListSwitch {
             glyph: "‹";
-            label: "Back to chats";
+            // i18n: archived chats list, row at the bottom that goes back to the normal chat list (verb phrase)
+            label: @tr("Back to chats");
             count: root.archived.length;
             clicked => { root.showing-archive = false; }
         }
@@ -611,7 +658,8 @@ export component Sidebar inherits Rectangle {
         width: parent.width - 8px;
         height: parent.height - 4px;
         key: Focus.mode == "composer" ? "ctrl+e" : "e";
-        label: "Explorer";
+        // i18n: sidebar, title on the frame around the chat list (noun: the panel that lists the agents' chats); the key shown beside it stays as is
+        label: @tr("Explorer");
         active: root.explorer-active;
         surface: Palette.raised;
     }
