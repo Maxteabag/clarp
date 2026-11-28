@@ -586,18 +586,21 @@ export component AgentProfile inherits Modal {
                     Spot { spot: "dreaming"; ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
                     Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
                     // Muted wins over every event: the choices show while alerts are on.
-                    if root.info.push-alerts: for event[index] in ProfileBridge.notify-events: Spot {
-                        spot: "notify:" + index;
-                        HorizontalLayout {
-                            spacing: 8px;
-                            Text { text: event.label; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                            ComboBox {
-                                horizontal-stretch: 1;
-                                model: event.choices;
-                                current-index: event.index;
-                                accessible-label: event.label;
-                                selected => { ProfileBridge.set-notify-event(event.id, self.current-index); }
-                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                    if root.info.push-alerts && ProfileBridge.notify-events.length > 0: VerticalLayout {
+                        spacing: 8px;
+                        for event[index] in ProfileBridge.notify-events: Spot {
+                            spot: "notify:" + index;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: event.label; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                                ComboBox {
+                                    horizontal-stretch: 1;
+                                    model: event.choices;
+                                    current-index: event.index;
+                                    accessible-label: event.label;
+                                    selected => { ProfileBridge.set-notify-event(event.id, self.current-index); }
+                                    changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                                }
                             }
                         }
                     }
