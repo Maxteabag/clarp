@@ -7,6 +7,7 @@
   import { stripVoiceMarkup } from '@core/voice-markup.js';
   import { renderText } from '../render.js';
   import { lazyHighlight } from '../highlight.js';
+  import { blockChrome } from '../blocks.js';
 
   let { text = '', streaming = false } = $props();
 
@@ -41,7 +42,8 @@
   let tailHtml = $derived(parts.tail.trim() ? renderText(parts.tail, true) : '');
 </script>
 
-<div class="body live-body" class:streaming use:lazyHighlight={parts.committed.length}>
+<div class="body live-body" class:streaming use:lazyHighlight={parts.committed.length}
+     use:blockChrome={`${parts.committed.length}:${tailHtml.length}`}>
   {#each parts.committed as block, i (i)}
     <div class="lv-block">{@html blocks.render(block)}</div>
   {/each}

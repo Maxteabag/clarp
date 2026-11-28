@@ -10,6 +10,7 @@
 import { escapeAttr, escapeHTML } from '@core/html.js';
 import { ActivityStatus } from '@core/protocol.js';
 import { stripVoiceMarkup } from '@core/voice-markup.js';
+import { codeBlockHtml, markedBlockExtensions, tableBlockHtml, tableToMarkdown } from './blocks.js';
 
 export function pathTail(p) {
   if (!p) return '';
@@ -64,6 +65,8 @@ export function renderText(s, streaming = false) {
   if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
     if (!markedConfigured) {
       marked.setOptions({ breaks: true, gfm: true });
+      // Code blocks with their head line, tables with their source (blocks.js).
+      if (typeof marked.use === 'function') marked.use({ extensions: markedBlockExtensions });
       markedConfigured = true;
     }
     return DOMPurify.sanitize(marked.parse(text));
@@ -78,8 +81,8 @@ function renderTextFallback(s) {
   const tokens = [];
   const STUB = (i) => `\0CB${i}\0`;
   let work = String(s)
-    .replace(/```(\w*)\n?([\s\S]*?)```/g, (_, _lang, code) =>
-      STUB(tokens.push({ kind: 'pre', code }) - 1))
+    .replace(/```([^\n`]*)\n?([\s\S]*?)```/g, (_, lang, code) =>
+      STUB(tokens.push({ kind: 'pre', code, lang }) - 1))
     .replace(/`([^`\n]+?)`/g, (_, code) =>
       STUB(tokens.push({ kind: 'code', code }) - 1));
   work = extractTables(work, tokens, STUB);
@@ -91,7 +94,7 @@ function renderTextFallback(s) {
     url => `<a href="${escapeAttr(url)}" target="_blank" rel="noopener">${url}</a>`);
   return work.replace(/\0CB(\d+)\0/g, (_, i) => {
     const tk = tokens[Number(i)];
-    if (tk.kind === 'pre')   return `<pre><code>${escapeHTML(tk.code)}</code></pre>`;
+    if (tk.kind === 'pre')   return codeBlockHtml(tk.code, tk.lang);
     if (tk.kind === 'code')  return `<code>${escapeHTML(tk.code)}</code>`;
     if (tk.kind === 'table') return renderTableHtml(tk);
     return '';
@@ -160,7 +163,7 @@ function renderTableHtml(tk) {
   const body = `<tbody>${tk.rows.map(r =>
     `<tr>${r.map((c, i) =>
       `<td${al(i)}>${escapeHTML(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
-  return `<div class="table-wrap"><table>${head}${body}</table></div>`;
+  return tableBlockHtml(`<table>${head}${body}</table>`, tableToMarkdown(tk.header, tk.rows, tk.align));
 }
 
 // ---- tool cards ---------------------------------------------------------

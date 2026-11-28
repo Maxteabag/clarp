@@ -9,6 +9,7 @@
   import { TOOL_ACTIVITY, TOOL_ACTIVITY_LABELS } from '@core/history-fold.js';
   import { coordination, setCoordinationVisibility } from '../stores/coordination.svelte.js';
   import { live } from '../stores/live.svelte.js';
+  import LanguageSetting from './LanguageSetting.svelte';
 
   let { open = $bindable() } = $props();
 
@@ -138,6 +139,8 @@
         {/if}
         Your messages, replies, cards, errors and notices are never hidden.
       </p>
+
+      <LanguageSetting />
 
       <div class="start-actions">
         <button class="start-btn primary" onclick={() => open = false}>Done</button>

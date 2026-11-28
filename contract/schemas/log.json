@@ -67,6 +67,8 @@
     "latest_ts": {"type": "string"},
     "cwd": {"type": "string"},
     "file": {"type": ["string", "null"]},
-    "includes_automated": {"type": "boolean"}
+    "includes_automated": {"type": "boolean"},
+    "last_message": {"type": "string", "description": "The chat's line in the chat list, in English, without Markdown (contract 217)."},
+    "last_message_preview": {"type": ["object", "null"], "description": "The chat list's line as a kind and its values, worded by the app in the user's language (Rust Host contract 217, feature chat_preview_parts; contract/fixtures/chat-preview.json).", "required": ["kind"], "properties": {"kind": {"type": "string"}, "own": {"type": "boolean"}}, "additionalProperties": true}
   }
 }

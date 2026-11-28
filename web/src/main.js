@@ -3,6 +3,7 @@ import App from './App.svelte';
 import { bootstrapAuth, installAuthFetch, onAuthChange, setClogFlushInterval } from './lib/net.js';
 import { Timing } from '@core/protocol.js';
 import { removeServiceWorker } from './lib/sw.js';
+import { initI18n } from './stores/i18n.svelte.js';
 
 import { app, agentSnapshot, setSession } from './stores/app.svelte.js';
 import { conversation, conversations, reload } from './stores/conversations.svelte.js';
@@ -44,4 +45,7 @@ if (typeof window !== 'undefined') {
   };
 }
 
-mount(App, { target: document.getElementById('app') });
+// The language loads first so the first paint is already in it. Not a top-level await: the
+// bundle inlines the catalogs after this module, and an await here would pause evaluation
+// before they exist.
+initI18n().finally(() => mount(App, { target: document.getElementById('app') }));
