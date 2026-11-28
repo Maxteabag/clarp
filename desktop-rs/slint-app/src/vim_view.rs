@@ -427,6 +427,21 @@ fn run(app: &Rc<App>, window: &AppWindow, region: Region, action: &'static str, 
 
 // ---- what the window shows ------------------------------------------------------------
 
+/// The mode badge's words, in capitals as vim shows them.
+fn mode_label(mode: &str) -> String {
+    match mode {
+        // i18n: vim mode, badge in the status bar: vim's Insert mode (capitals as vim shows it; may stay as is)
+        "INSERT" => tr!("INSERT"),
+        // i18n: vim mode, badge in the status bar: vim's Normal mode (capitals as vim shows it; may stay as is)
+        "NORMAL" => tr!("NORMAL"),
+        // i18n: vim mode, badge in the status bar while typing a search after / (capitals)
+        "SEARCH" => tr!("SEARCH"),
+        // i18n: vim mode, badge in the status bar while typing a : command (capitals)
+        "COMMAND" => tr!("COMMAND"),
+        other => other.to_owned(),
+    }
+}
+
 /// The mode, the command line, the which-key panel and the message, for
 /// the keyboard map's `state`.
 pub fn show(app: &App, window: &AppWindow, state: &str) {
@@ -455,6 +470,10 @@ pub fn show(app: &App, window: &AppWindow, state: &str) {
     // unchanged panel never makes the window draw again.
     if window.get_vim_mode() != mode {
         window.set_vim_mode(mode.into());
+    }
+    let label = mode_label(mode);
+    if window.get_vim_mode_label() != label.as_str() {
+        window.set_vim_mode_label(label.into());
     }
     if window.get_vim_line() != line.as_str() {
         window.set_vim_line(line.into());

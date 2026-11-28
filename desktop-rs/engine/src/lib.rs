@@ -48,7 +48,7 @@ mod roster_rows;
 mod teams;
 pub mod transit;
 mod updates;
-pub use updates::{TranscriptImageReply, TranscriptImageRequest};
+pub use updates::{StatusTone, TranscriptImageReply, TranscriptImageRequest};
 mod viewport;
 mod artifact_summary;
 mod render_spec;

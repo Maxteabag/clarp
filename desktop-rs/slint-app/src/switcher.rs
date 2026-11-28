@@ -190,10 +190,10 @@ pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
         let (target, value) = match kind.as_str() {
             "toggle" => (format!("settingrow:{id}:1"), if *on {
                 // i18n: command palette, a switch setting's value (adjective)
-                clarp_core::tr!("switch" => "On")
+                clarp_core::tr!("On")
             } else {
                 // i18n: command palette, a switch setting's value (adjective)
-                clarp_core::tr!("switch" => "Off")
+                clarp_core::tr!("Off")
             }),
             "choice" | "number" => (format!("settingpicker:{id}"), detail.clone()),
             "action" => (format!("settingrow:{id}:1"), String::new()),
@@ -229,7 +229,7 @@ pub fn picker(id: &str, options: &[(String, String, String, bool)], query: &str)
                 description: description.clone(),
                 aliases: &[],
                 // i18n: command palette, settings picker: marks the value in use (adjective)
-                value: if *current { clarp_core::tr!("setting" => "Current") } else { String::new() },
+                value: if *current { clarp_core::tr!("Current") } else { String::new() },
                 entry: "",
             };
             Some((score, item))

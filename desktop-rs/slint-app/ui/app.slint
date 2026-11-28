@@ -67,7 +67,10 @@ component ShortcutBar inherits Rectangle {
     in property <string> connection;
     // Vim mode: its mode, the command line while one is open (it takes
     // the hints' place, as Vim's last line), and the last command's word.
+    // The mode is a code (INSERT, NORMAL, SEARCH, COMMAND, "" off); the
+    // badge shows its label, in the user's language.
     in property <string> vim-mode;
+    in property <string> vim-mode-label;
     in property <string> vim-line;
     in property <string> vim-message;
     height: 30px;
@@ -82,7 +85,7 @@ component ShortcutBar inherits Rectangle {
             Rectangle {
             accessible-role: text;
             accessible-id: "vim-mode";
-            accessible-label: root.vim-mode;
+            accessible-label: root.vim-mode-label;
             height: 18px;
             width: mode-text.preferred-width + 12px;
             border-radius: 3px;
@@ -90,7 +93,7 @@ component ShortcutBar inherits Rectangle {
             mode-text := Text {
                 width: parent.width;
                 height: parent.height;
-                text: root.vim-mode;
+                text: root.vim-mode-label;
                 color: Palette.sunken;
                 font-size: 11 * Look.unit;
                 font-weight: 700;
@@ -192,8 +195,10 @@ export component AppWindow inherits Window {
     // Vim mode: NORMAL, INSERT, COMMAND or SEARCH ("" when it is off), the
     // command line as typed (":vs", "/Table"), the keys of a sequence so
     // far and what may follow them (the which-key panel), and the last
-    // command's word ("Copied", an error).
+    // command's word ("Copied", an error). The mode is a code; its badge
+    // shows vim-mode-label, in the user's language.
     in property <string> vim-mode;
+    in property <string> vim-mode-label;
     in property <string> vim-line;
     in property <string> vim-pending;
     in property <[Hint]> vim-which;
@@ -690,6 +695,7 @@ export component AppWindow inherits Window {
             connection: root.connection;
             hints: root.hints;
             vim-mode: root.vim-mode;
+            vim-mode-label: root.vim-mode-label;
             vim-line: root.vim-line;
             vim-message: root.vim-message;
         }

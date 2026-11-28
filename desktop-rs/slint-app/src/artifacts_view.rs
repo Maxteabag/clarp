@@ -119,6 +119,7 @@ pub fn artifact_item(artifact: &Value) -> ArtifactItem {
         outcome: outcome.into(),
         failed,
         badge: badge(&status).into(),
+        badge_failed: status == "failed",
         title: title.into(),
         summary: text(artifact, "summary").into(),
         progress: progress.into(),
@@ -813,6 +814,7 @@ pub fn card(artifact: &Value, engine: &Engine, state: &CardState) -> ArtifactIte
     let mut item = artifact_item(artifact);
     item.selected = !state.cursor.is_empty() && item.id == state.cursor;
     item.status_text = engine.artifact_status(&item.id).into();
+    item.status_tone = engine.artifact_status_tone(&item.id).name().into();
     if item.kind == "audio" && !item.action.is_empty() {
         media_fields(&mut item);
     }
@@ -1070,7 +1072,7 @@ pub fn send(app: &App, id: &str) {
         let written: String = app.artifact_drafts.borrow().get(id).map(|d| d.trim().chars().take(4000).collect()).unwrap_or_default();
         if written.is_empty() {
             // i18n: decision card status: Send was pressed with the own-answer field empty
-            app.engine.borrow_mut().set_artifact_status(id, &tr!("Choose an answer first: write one"));
+            app.engine.borrow_mut().set_artifact_problem(id, &tr!("Choose an answer first: write one"));
             app.refresh(&[Change::Updates]);
             return;
         }
@@ -1083,7 +1085,7 @@ pub fn send(app: &App, id: &str) {
     }
     let Some(option) = usize::try_from(card.chosen).ok().and_then(|i| card.options.row_data(i)) else {
         // i18n: decision card status: Send was pressed before an answer was chosen (keys 1 to 9 choose)
-        app.engine.borrow_mut().set_artifact_status(id, &tr!("Choose an answer first (1-9)"));
+        app.engine.borrow_mut().set_artifact_problem(id, &tr!("Choose an answer first (1-9)"));
         app.refresh(&[Change::Updates]);
         return;
     };
@@ -2149,7 +2151,7 @@ pub fn open(app: &App, window: &AppWindow, id: &str) {
                 Err(error) => {
                     eprintln!("clarp-slint: {error}");
                     // i18n: artifact card status: the form or report did not open; {} is the reason
-                    app.engine.borrow_mut().set_artifact_status(id, &tr!("Not opened: {}", error));
+                    app.engine.borrow_mut().set_artifact_problem(id, &tr!("Not opened: {}", error));
                 }
             }
         }
@@ -2288,7 +2290,7 @@ pub fn open_in_browser(app: &App, id: &str) -> bool {
         Err(error) => {
             eprintln!("clarp-slint: {error}");
             // i18n: artifact card status: the form or report did not open; {} is the reason
-            app.engine.borrow_mut().set_artifact_status(id, &tr!("Not opened: {}", error));
+            app.engine.borrow_mut().set_artifact_problem(id, &tr!("Not opened: {}", error));
             false
         }
     }
@@ -2368,7 +2370,7 @@ pub fn settle_hydration(app: &App) {
             });
         }
         // i18n: artifact card status: its full content did not load; {} is why
-        Hydration::Failed(why) => app.engine.borrow_mut().set_artifact_status(&id, &tr!("Not loaded: {}", why)),
+        Hydration::Failed(why) => app.engine.borrow_mut().set_artifact_problem(&id, &tr!("Not loaded: {}", why)),
         // Deleted: the engine took its card away and said so.
         Hydration::Gone | Hydration::Unknown | Hydration::Loading | Hydration::Omitted => {}
     }
@@ -2401,6 +2403,7 @@ fn countdown_fields(item: &mut ArtifactItem, artifact: &Value, status: &str) {
     if status == "cancelled" {
         // i18n: countdown card, note: the countdown was cancelled (past participle)
         item.countdown_note = tr!("countdown" => "Cancelled").into();
+        item.countdown_cancelled = true;
         return;
     }
     let Ok(target) = chrono::DateTime::parse_from_rfc3339(&text(artifact, "target_at")) else {
