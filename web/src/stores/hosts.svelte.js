@@ -22,7 +22,7 @@ import { originOf, readIds, resolveAllHosts, PREFERENCE_KEY } from '@core/all-ho
 import { visibleSessions } from '@core/session-select.js';
 import { clog } from '../lib/net.js';
 import { fetchFailure, peerAttempt } from '@core/host-reach.js';
-import { noteFail, noteOk, reachOf, trackHost, untrackHost } from './reach.svelte.js';
+import { noteFail, noteOk, reachOf, trackHost, untrackHost, untrackOthers } from './reach.svelte.js';
 
 const KEY = 'clarp.hosts.v1';
 const POLL_MS = 15000;
@@ -63,6 +63,8 @@ function persist() {
 
 export function setAllHosts(on) {
   hostsState.allHosts = !!on;
+  // Hosts no longer read are no longer asked, nor shown as down.
+  if (!on) untrackOthers();
   try {
     localStorage.setItem(PREFERENCE_KEY, on ? '1' : '0');
     localStorage.setItem(CHOSEN_KEY, '1');
@@ -102,7 +104,11 @@ async function readPeersOnce() {
     const r = await fetch('/peers/snapshot', { cache: 'no-store' });
     // 404: a Host without the feature; 403: a limited device (peers are full scope). Neither is
     // asked again, and neither is said: the list is this Host's and any pasted ones.
-    if (r.status === 404 || r.status === 403) { peersSupported = false; return; }
+    if (r.status === 404 || r.status === 403) {
+      peersSupported = false;
+      untrackOthers(id => !id.startsWith('peer:'));
+      return;
+    }
     if (!r.ok) return;
     body = await r.json();
   } catch (_) {
@@ -110,6 +116,9 @@ async function readPeersOnce() {
   }
   const entries = Object.entries((body && body.peers) || {}).filter(([, p]) => p && typeof p === 'object');
   const priorPeers = new Map(hostsState.peers.map(p => [p.id, p.name]));
+  // A peer gone from the serving Host's registry is no longer asked about.
+  const present = new Set(entries.map(([key]) => 'peer:' + key));
+  for (const p of hostsState.peers) if (!present.has(p.id)) { untrackHost(p.id); delete hostsState.live[p.id]; }
   hostsState.peers = entries.map(([key, p]) => ({
     id: 'peer:' + key, url: String(p.url || ''),
     name: p.reachable ? String(p.name || key) : String(priorPeers.get('peer:' + key) || p.name || key),
@@ -127,6 +136,8 @@ async function readPeersOnce() {
     };
     // Whether it answers, per Host (stores/reach.svelte.js). The serving Host read it, so a
     // failure here says nothing of this device's own network.
+    // Only while its chats are listed: with the option off a peer is read for its name alone.
+    if (!hostsState.allHosts) continue;
     trackHost(id, {
       label: name, url: String(p.url || ''), key: String(p.server_id || '') || id,
       via: 'host', probe: readPeers,

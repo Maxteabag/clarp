@@ -88,6 +88,10 @@ describe('classifier', () => {
     expect(fetchFailure({ timedOut: true, ms: 8000 })).toEqual({ kind: 'timeout', ms: 8000 });
     expect(fetchFailure({ sameOrigin: true }).kind).toBe('refused');
     expect(fetchFailure({ sameOrigin: false }).kind).toBe('network');
+    // A *.ts.net name served by Tailscale answers 502 when Clarp is stopped; failing by itself
+    // means the name is gone.
+    expect(classify(fetchFailure({ sameOrigin: true, tailnetName: true }), { address: 'tailnet' })).toBe('tailscale_off');
+    expect(classify(fetchFailure({ sameOrigin: false, tailnetName: true }), { address: 'tailnet' })).toBe('unknown');
     expect(answerFailure(200, { json: true })).toBeNull();
     expect(answerFailure(200, { json: false })).toEqual({ kind: 'not_this_host', status: 200 });
     expect(answerFailure(200, { json: true, serverId: 'b', expectedId: 'a' }).kind).toBe('not_this_host');
@@ -249,6 +253,36 @@ describe('per-Host store', () => {
     store.noteFail('b', { kind: 'timeout' });
     expect(store.reachOf('a').reason).toBe('tailscale_off');
     expect(store.reachOf('b').reason).toBe('tailscale_off');
+  });
+
+  it('never asks again at once when a probe learns nothing', async () => {
+    const probe = vi.fn(async () => {});
+    store.trackHost('p', { label: 'P', url: 'http://10.0.0.9', via: 'host', probe });
+    store.noteFail('p', { kind: 'network', via: 'host' });
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(probe).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(100);
+    expect(probe).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1900);
+    expect(probe).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops asking a Host that is no longer read', async () => {
+    const probe = vi.fn(async () => {});
+    store.trackHost('a', { label: 'A', url: 'http://10.0.0.1', via: 'direct', probe });
+    store.noteFail('a', { kind: 'refused' });
+    store.untrackOthers();
+    await vi.advanceTimersByTimeAsync(120000);
+    expect(probe).not.toHaveBeenCalled();
+    expect(store.reachOf('a')).toBeNull();
+    expect(store.reachOf(store.PRIMARY)).not.toBeNull();
+  });
+
+  it('keeps auth_expired when the Host\'s lockout answers 429', () => {
+    store.trackHost('a', { label: 'A', url: 'http://10.0.0.1', via: 'direct', probe: async () => {} });
+    store.noteFail('a', { kind: 'http', status: 401 });
+    store.noteFail('a', { kind: 'http', status: 429 });
+    expect(store.reachOf('a').reason).toBe('auth_expired');
   });
 
   it('shows no Host panel while the device is offline', () => {

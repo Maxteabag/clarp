@@ -11,7 +11,7 @@
 
 import {
   PROBE_TIMEOUT_MS, addressKind, answerFailure, blankReach, classify, fetchFailure,
-  lastSeenAt, reachFail, reachOk,
+  backoffDelay, lastSeenAt, reachFail, reachOk,
 } from '@core/host-reach.js';
 import { clog } from '../lib/net.js';
 
@@ -42,12 +42,21 @@ const probes = new Map();
 const recoverHooks = new Map();
 const timers = new Map();
 
+// What was last written per key: a write only when down_since changes or last_ok moved a minute,
+// not on every answer (each peer answers every 15 s).
+const written = {};
 function persist() {
-  const out = {};
+  let changed = false;
   for (const r of Object.values(reach.hosts)) {
-    if (r.key && (r.lastOk || r.downSince)) out[r.key] = { lastOk: r.lastOk, downSince: r.downSince };
+    if (!r.key || !(r.lastOk || r.downSince)) continue;
+    const w = written[r.key];
+    if (!w || w.downSince !== r.downSince || r.lastOk - w.lastOk >= 60000) {
+      kept[r.key] = written[r.key] = { lastOk: r.lastOk, downSince: r.downSince };
+      changed = true;
+    }
   }
-  try { localStorage.setItem(KEY, JSON.stringify({ ...kept, ...out })); } catch (_) {}
+  if (!changed) return;
+  try { localStorage.setItem(KEY, JSON.stringify(kept)); } catch (_) {}
 }
 
 function record(id) {
@@ -75,6 +84,11 @@ export function trackHost(id, { label = '', url = '', key = '', via = 'direct', 
   if (url) r.url = url;
   r.via = via;
   if (probe) probes.set(id, probe);
+}
+
+/** Stops tracking every Host but the serving one ('Show chats from all Hosts' switched off). */
+export function untrackOthers(keep = () => false) {
+  for (const id of Object.keys(reach.hosts)) if (id !== PRIMARY && !keep(id)) untrackHost(id);
 }
 
 export function untrackHost(id) {
@@ -134,6 +148,9 @@ export function othersAnswering(id) {
 
 function reasonFor(id, attempt) {
   const r = reach.hosts[id];
+  // A Host that refused the token may start answering 429 to the repeated tries (its lockout):
+  // still the token, still Pair again.
+  if (attempt && attempt.kind === 'http' && attempt.status === 429 && r?.reason === 'auth_expired') return 'auth_expired';
   return classify(attempt, {
     deviceOnline: reach.deviceOnline,
     address: addressKind(r?.url),
@@ -207,6 +224,9 @@ export async function probeNow(id) {
   // A probe that reported nothing leaves the Host as it was and keeps the schedule.
   if (after && after.inFlight) {
     after.inFlight = false;
+    // Never at once: a probe that cannot learn anything (its Host not reachable to ask, or the
+    // Host gone from the registry) would otherwise spin.
+    if (after.down) after.nextAt = Date.now() + backoffDelay(Math.max(1, after.failures));
     schedule(id);
   }
 }
@@ -283,7 +303,10 @@ async function probeServing() {
     res = await fetch('/server-info', { cache: 'no-store', signal: ctrl.signal });
   } catch (_) {
     clearTimeout(timer);
-    noteFail(PRIMARY, fetchFailure({ timedOut, sameOrigin: true, ms: Date.now() - t0 }));
+    noteFail(PRIMARY, fetchFailure({
+      timedOut, sameOrigin: true, ms: Date.now() - t0,
+      tailnetName: location.hostname.toLowerCase().endsWith('.ts.net'),
+    }));
     return;
   }
   clearTimeout(timer);

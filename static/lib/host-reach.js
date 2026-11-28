@@ -222,8 +222,12 @@ export function schemeOf(url) {
  * a refused connection (its name resolved when the page loaded, and the same origin has no CORS);
  * for another Host it could be a refused connection, an unknown name or a missing CORS listing.
  */
-export function fetchFailure({ timedOut = false, sameOrigin = false, ms = 0 } = {}) {
+export function fetchFailure({ timedOut = false, sameOrigin = false, ms = 0, tailnetName = false } = {}) {
   if (timedOut) return { kind: 'timeout', ms };
+  // Except a *.ts.net name: Tailscale's own front answers 502 when Clarp behind it is stopped,
+  // so a request to it that fails by itself means the name or its route is gone, which is
+  // Tailscale not connected on this device.
+  if (sameOrigin && tailnetName) return { kind: 'network', ms, tailnetName: true };
   return { kind: sameOrigin ? 'refused' : 'network', ms };
 }
 
@@ -267,7 +271,8 @@ export function attemptLabel(attempt) {
     case 'tls': return 'TLS error';
     case 'http': return `HTTP ${attempt.status}`;
     case 'not_this_host': return attempt.status && attempt.status !== 200 ? `not this Host (HTTP ${attempt.status})` : 'not this Host';
-    case 'network': return attempt.via === 'host' ? 'unreachable from the serving Host' : 'network error (refused, name or CORS)';
+    case 'network': return attempt.via === 'host' ? 'unreachable from the serving Host'
+      : attempt.tailnetName ? 'network error (tailnet name)' : 'network error (refused, name or CORS)';
     default: return String(attempt.kind || 'unknown');
   }
 }
@@ -293,6 +298,7 @@ export function classify(attempt, { deviceOnline = true, address = 'unknown', vi
   if (kind === 'refused') return 'server_stopped';
   // A proxy in front of the Host (tailscale serve, a reverse proxy) answered, Clarp behind it did not.
   if (kind === 'http' && status === 502) return 'server_stopped';
+  if (kind === 'network' && attempt.tailnetName && !viaHost) return 'tailscale_off';
   const silent = kind === 'timeout' || kind === 'network';
   if (silent && address === 'tailnet' && !viaHost) {
     const tailnetOthers = others.filter(o => o.address === 'tailnet');
