@@ -136,20 +136,23 @@ export component PublicationsPanel inherits Rectangle {
                 VerticalLayout {
                     alignment: center;
                     horizontal-stretch: 1;
-                    Text { text: "Publications"; color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
+                    // i18n: publications panel (everything an agent has published: reports, files, media), title (noun, plural)
+                    Text { text: @tr("Publications"); color: Palette.text; font-size: 15 * Look.unit; font-weight: 600; }
                     Text { text: PublicationsBridge.agent; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                 }
                 if PublicationsBridge.loading: Busy { reduced-motion: PublicationsBridge.reduced-motion; }
                 IconButton {
                     y: (parent.height - self.height) / 2;
                     icon: @image-url("icons/refresh.svg");
-                    tip: "Reload (R)";
+                    // i18n: publications panel, tooltip of the reload button (verb); R is its key, a key name left as is
+                    tip: @tr("Reload (R)");
                     clicked => { PublicationsBridge.reload(); }
                 }
                 IconButton {
                     y: (parent.height - self.height) / 2;
                     icon: @image-url("icons/close.svg");
-                    tip: "Close (Esc)";
+                    // i18n: publications panel, tooltip of the close button (verb); Esc is its key, a key name left as is
+                    tip: @tr("Close (Esc)");
                     clicked => { PublicationsBridge.close(); }
                 }
             }
@@ -187,7 +190,8 @@ export component PublicationsPanel inherits Rectangle {
                     height: root.row-h;
                     background: index == PublicationsBridge.selected ? Focus.cursor : touch.has-hover ? Palette.hover : transparent;
                     accessible-role: list-item;
-                    accessible-label: row.title + ", " + row.detail;
+                    // i18n: publications panel, accessibility label of a list row; {0} is the publication's title, {1} its kind and date (only the comma is text)
+                    accessible-label: @tr("{0}, {1}", row.title, row.detail);
                     accessible-item-selectable: true;
                     accessible-item-selected: index == PublicationsBridge.selected;
                     accessible-action-default => { PublicationsBridge.activate(index); }
@@ -260,7 +264,8 @@ export component PublicationsPanel inherits Rectangle {
                         if PublicationsBridge.has-more && !PublicationsBridge.loading: KeyHint {
                             y: (parent.height - self.height) / 2;
                             key: "End";
-                            label: "Load older";
+                            // i18n: publications panel, key hint beside End at the end of the list (verb phrase): load older publications
+                            label: @tr("Load older");
                             emphasised: true;
                             clicked => { PublicationsBridge.load-older(); }
                         }
@@ -274,11 +279,16 @@ export component PublicationsPanel inherits Rectangle {
                 padding-right: 12px;
                 spacing: 6px;
                 alignment: start;
-                KeyHint { y: (parent.height - self.height) / 2; key: "J/K"; label: "Move"; }
-                KeyHint { y: (parent.height - self.height) / 2; key: "Enter"; label: "Open"; clicked => { PublicationsBridge.activate(PublicationsBridge.selected); } }
-                KeyHint { y: (parent.height - self.height) / 2; key: "0-7"; label: "Kind"; }
-                KeyHint { y: (parent.height - self.height) / 2; key: "End"; label: "Older"; clicked => { PublicationsBridge.load-older(); } }
-                KeyHint { y: (parent.height - self.height) / 2; key: "Esc"; label: "Close"; clicked => { PublicationsBridge.close(); } }
+                // i18n: publications panel, key hint beside J/K at the bottom (verb): move up and down the list
+                KeyHint { y: (parent.height - self.height) / 2; key: "J/K"; label: @tr("Move"); }
+                // i18n: publications panel, key hint beside Enter (verb): open the selected publication
+                KeyHint { y: (parent.height - self.height) / 2; key: "Enter"; label: @tr("Open"); clicked => { PublicationsBridge.activate(PublicationsBridge.selected); } }
+                // i18n: publications panel, key hint beside 0-7 (noun): the number keys pick which kind of publication to list
+                KeyHint { y: (parent.height - self.height) / 2; key: "0-7"; label: @tr("Kind"); }
+                // i18n: publications panel, key hint beside End (adjective, short for "load older ones")
+                KeyHint { y: (parent.height - self.height) / 2; key: "End"; label: @tr("Older"); clicked => { PublicationsBridge.load-older(); } }
+                // i18n: publications panel, key hint beside Esc (verb): close the panel
+                KeyHint { y: (parent.height - self.height) / 2; key: "Esc"; label: @tr("Close"); clicked => { PublicationsBridge.close(); } }
             }
         }
     }
@@ -299,9 +309,12 @@ export component PublicationsPanel inherits Rectangle {
                 spacing: 14px;
                 height: 22px;
                 Text { text: PlaybackBridge.title; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; overflow: elide; }
-                KeyHint { key: "Space"; label: "Play/pause"; emphasised: true; clicked => { PlaybackBridge.toggle(); } }
-                KeyHint { key: "←/→"; label: "Seek"; emphasised: true; }
-                KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { PublicationsBridge.close-player(); } }
+                // i18n: publications panel, media player, key hint beside Space (verbs): play or pause the clip
+                KeyHint { key: "Space"; label: @tr("Play/pause"); emphasised: true; clicked => { PlaybackBridge.toggle(); } }
+                // i18n: publications panel, media player, key hint beside ←/→ (verb): jump backward or forward in the clip
+                KeyHint { key: "←/→"; label: @tr("Seek"); emphasised: true; }
+                // i18n: publications panel, media player, key hint beside Esc (verb): close the player
+                KeyHint { key: "Esc"; label: @tr("Close"); emphasised: true; clicked => { PublicationsBridge.close-player(); } }
             }
         }
     }

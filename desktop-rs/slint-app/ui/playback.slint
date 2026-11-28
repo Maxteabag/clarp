@@ -118,7 +118,11 @@ export component MediaPlayer inherits Rectangle {
     background: #000000;
     clip: true;
     accessible-role: groupbox;
-    accessible-label: (root.video ? "Video player: " : "Audio player: ") + PlaybackBridge.title;
+    accessible-label: root.video
+        // i18n: media player, accessibility label of the player; {} is the video's title
+        ? @tr("Video player: {}", PlaybackBridge.title)
+        // i18n: media player, accessibility label of the player; {} is the audio clip's title
+        : @tr("Audio player: {}", PlaybackBridge.title);
     keys := FocusScope {
         key-pressed(event) => {
             if (PlaybackBridge.key(event.text, event.modifiers.shift)) { return accept; }
@@ -196,7 +200,11 @@ export component MediaPlayer inherits Rectangle {
                 IconButton {
                     y: (parent.height - self.height) / 2;
                     icon: PlaybackBridge.playing ? @image-url("icons/pause.svg") : @image-url("icons/play.svg");
-                    tip: PlaybackBridge.playing ? "Pause (Space)" : "Play (Space)";
+                    tip: PlaybackBridge.playing
+                        // i18n: media player, tooltip of the play/pause button while playing (verb); Space is its key, a key name left as is
+                        ? @tr("Pause (Space)")
+                        // i18n: media player, tooltip of the play/pause button while paused (verb); Space is its key, a key name left as is
+                        : @tr("Play (Space)");
                     clicked => { root.focus-keys(); PlaybackBridge.toggle(); }
                 }
                 Text {
@@ -209,7 +217,8 @@ export component MediaPlayer inherits Rectangle {
                 Track {
                     y: (parent.height - self.height) / 2;
                     horizontal-stretch: 1;
-                    label: "Position";
+                    // i18n: media player, accessibility label of the seek bar (noun: where in the clip playback is)
+                    label: @tr("Position");
                     value: PlaybackBridge.position;
                     maximum: PlaybackBridge.duration;
                     moved(to) => { root.focus-keys(); PlaybackBridge.seek-to(to); }
@@ -224,13 +233,18 @@ export component MediaPlayer inherits Rectangle {
                 if PlaybackBridge.has-volume: IconButton {
                     y: (parent.height - self.height) / 2;
                     icon: PlaybackBridge.muted || PlaybackBridge.volume <= 0 ? @image-url("icons/rail-muted.svg") : @image-url("icons/rail-sound.svg");
-                    tip: PlaybackBridge.muted ? "Unmute (M)" : "Mute (M)";
+                    tip: PlaybackBridge.muted
+                        // i18n: media player, tooltip of the speaker button while muted (verb); M is its key, a key name left as is
+                        ? @tr("Unmute (M)")
+                        // i18n: media player, tooltip of the speaker button (verb); M is its key, a key name left as is
+                        : @tr("Mute (M)");
                     clicked => { root.focus-keys(); PlaybackBridge.toggle-mute(); }
                 }
                 if PlaybackBridge.has-volume: Track {
                     y: (parent.height - self.height) / 2;
                     width: 72px;
-                    label: "Volume";
+                    // i18n: media player, accessibility label of the volume slider (noun)
+                    label: @tr("Volume");
                     value: PlaybackBridge.muted ? 0 : PlaybackBridge.volume;
                     maximum: 100;
                     moved(to) => { root.focus-keys(); PlaybackBridge.set-volume(to); }
@@ -238,7 +252,11 @@ export component MediaPlayer inherits Rectangle {
                 if root.video: IconButton {
                     y: (parent.height - self.height) / 2;
                     icon: PlaybackBridge.fullscreen ? @image-url("icons/fullscreen-exit.svg") : @image-url("icons/fullscreen.svg");
-                    tip: PlaybackBridge.fullscreen ? "Leave fullscreen (F or Esc)" : "Fullscreen (F)";
+                    tip: PlaybackBridge.fullscreen
+                        // i18n: media player, tooltip of the fullscreen button while in fullscreen (verb phrase); F and Esc are its keys, key names left as is
+                        ? @tr("Leave fullscreen (F or Esc)")
+                        // i18n: media player, tooltip of the fullscreen button (verb sense: show the video fullscreen); F is its key, a key name left as is
+                        : @tr("Fullscreen (F)");
                     clicked => { root.focus-keys(); PlaybackBridge.toggle-fullscreen(); }
                 }
             }
