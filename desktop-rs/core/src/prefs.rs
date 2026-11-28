@@ -93,9 +93,10 @@ pub const LAYOUT: &str = "Layout";
 pub const CHAT: &str = "Chat";
 pub const COLOURS: &str = "Colours";
 pub const BEHAVIOUR: &str = "Behaviour";
+pub const NOTIFICATIONS: &str = "Notifications";
 
 /// The sections in the order the Settings view shows them.
-pub const SECTIONS: &[&str] = &[TYPOGRAPHY, LAYOUT, CHAT, COLOURS, BEHAVIOUR];
+pub const SECTIONS: &[&str] = &[TYPOGRAPHY, LAYOUT, CHAT, COLOURS, NOTIFICATIONS, BEHAVIOUR];
 
 pub const FONT_OVERRIDES_KEY: &str = "appearance/fontOverrides";
 pub const COLOR_OVERRIDES_KEY: &str = "appearance/colorOverrides";
@@ -848,24 +849,20 @@ pub static SPECS: &[Spec] = &[
     Spec {
         name: "notifyreplies",
         key: "notifications/replies",
-        // i18n: Settings page and Ctrl+K, a preference's name, the row label. What it does: A desktop notification when an agent answers in a chat that is not open
-        label: en::tr!("Reply notifications"),
-        // i18n: Settings page and Ctrl+K, the line under the preference “Reply notifications” saying what it does.
-        description: en::tr!("A desktop notification when an agent answers in a chat that is not open"),
-        aliases: &["notifications", "alerts", "notify", "popups", "toasts", "desktop notifications"],
-        section: BEHAVIOUR,
+        label: crate::notify_events::DESKTOP_LABEL,
+        description: crate::notify_events::DESKTOP_ABOUT,
+        aliases: &["notifications", "alerts", "notify", "popups", "toasts", "reply notifications"],
+        section: NOTIFICATIONS,
         kind: toggle(true),
         scope: G,
     },
     Spec {
         name: "notifysound",
         key: "notifications/sound",
-        // i18n: Settings page and Ctrl+K, a preference's name, the row label. What it does: Ask the desktop to play its message sound with each notification
-        label: en::tr!("Notification sound"),
-        // i18n: Settings page and Ctrl+K, the line under the preference “Notification sound” saying what it does.
-        description: en::tr!("Ask the desktop to play its message sound with each notification"),
-        aliases: &["sounds", "chime", "ding", "audio alert", "beep"],
-        section: BEHAVIOUR,
+        label: crate::notify_events::SOUND_LABEL,
+        description: crate::notify_events::SOUND_ABOUT,
+        aliases: &["sounds", "chime", "ding", "audio alert", "beep", "notification sound"],
+        section: NOTIFICATIONS,
         kind: toggle(false),
         scope: G,
     },
@@ -877,7 +874,7 @@ pub static SPECS: &[Spec] = &[
         // i18n: Settings page and Ctrl+K, the line under the preference “Pause phone alerts” saying what it does.
         description: en::tr!("Hold back phone notifications while you are active at this desktop"),
         aliases: &["mobile push", "phone notifications", "quiet phone", "push alerts"],
-        section: BEHAVIOUR,
+        section: NOTIFICATIONS,
         kind: toggle(true),
         scope: G,
     },

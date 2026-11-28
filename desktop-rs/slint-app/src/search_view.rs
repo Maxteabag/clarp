@@ -275,6 +275,17 @@ thread_local! {
 /// brings the message into view once it shows.
 pub fn jump(app: &Rc<App>, target: &str) {
     let Some((session, id)) = target.split_once(SEPARATOR) else { return };
+    open_message(app, session, id);
+}
+
+/// Opens `session` and brings message `id` into view once it shows; the
+/// chat alone when no message is named.
+pub fn open_message(app: &Rc<App>, session: &str, id: &str) {
+    if id.is_empty() {
+        app.engine.borrow_mut().select(session);
+        pump_now(app);
+        return;
+    }
     app.engine.borrow_mut().select(session);
     pump_now(app);
     JUMP.with(|j| *j.borrow_mut() = Some(Jump { session: session.to_owned(), id: id.to_owned(), started: Instant::now(), pages: 0 }));

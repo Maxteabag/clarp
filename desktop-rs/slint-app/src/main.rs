@@ -539,7 +539,7 @@ impl App {
         }
         whole.lap("switcher");
         self.voice(changes);
-        if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
+        if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo | Change::NotificationSettings)) {
             settings_view::show(self, &window);
         }
         // ---- updates and teams
@@ -646,18 +646,50 @@ impl App {
                     platform::audio::with(|audio| audio.set_muted(muted));
                     platform::desktop::muted_changed(muted);
                 }
-                Change::Notification { title, body } => {
-                    let (on, sound) = {
-                        let engine = self.engine.borrow();
-                        (clarp_core::prefs::flag(engine.settings(), "notifyreplies"), clarp_core::prefs::flag(engine.settings(), "notifysound"))
-                    };
-                    if on {
-                        platform::desktop::notify(title.clone(), body.clone(), sound);
-                    }
-                }
+                Change::Notification(popup) => self.popup(popup),
+                Change::NotificationRead(session) => platform::desktop::close_chat(session),
+                Change::QuestionEnded(decision_id) => platform::desktop::close_decision(decision_id),
                 _ => {}
             }
         }
+    }
+}
+
+impl App {
+    /// A popup from the engine, as the reader's switches and the window
+    /// allow: none while the window has the keyboard and shows that chat.
+    fn popup(&self, popup: &clarp_engine::Popup) {
+        let (on, sound) = {
+            let engine = self.engine.borrow();
+            (clarp_core::prefs::flag(engine.settings(), "notifyreplies"), clarp_core::prefs::flag(engine.settings(), "notifysound"))
+        };
+        if !on || (popup.selected && platform::desktop::window_focused()) {
+            return;
+        }
+        let incoming = &popup.notification;
+        // The cached portrait's `file://` address, as the desktop takes it.
+        let image = self.engine.borrow_mut().avatar_source(&popup.session);
+        platform::desktop::notify(platform::desktop::Note {
+            title: popup.title.clone(),
+            name: Some(incoming.persona.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| popup.title.clone()),
+            body: popup.body.clone(),
+            session: popup.session.clone(),
+            message_id: incoming.message_id.clone(),
+            sound: incoming.sound(sound),
+            image,
+            decision_id: incoming.decision_id.clone(),
+            response_type: incoming.response_type.clone(),
+            choices: if let Some(failure) = incoming.failure.as_ref().filter(|f| !f.action.is_empty() && f.action != "copy_details") {
+                // A failed turn: its one action, in the words of its card.
+                let action = clarp_core::turn_error::Action { id: failure.action.clone(), at_ms: failure.action_at_ms, ..Default::default() };
+                let label = action.label_in(clarp_core::turn_error_text::app_language(), chrono::Utc::now().timestamp_millis());
+                vec![(format!("{}{}", platform::desktop::FAILURE, failure.action), label)]
+            } else if incoming.decision_id.is_empty() {
+                Vec::new()
+            } else {
+                incoming.options.iter().map(|c| (format!("{}{}", platform::desktop::CHOICE, c.id), c.label.clone())).collect()
+            },
+        });
     }
 }
 

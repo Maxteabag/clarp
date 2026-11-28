@@ -1878,17 +1878,32 @@ fn voice_check(out: String) {
 
 /// `--check desktop --out DIR`: a reply in a chat that is not open raises
 /// a notification (recorded: `CLARP_TEST_NOTIFY_LOG`), and someone typing
-/// at the window is reported as present (`CLARP_TEST_FOREGROUND`).
-fn desktop_check(_out: String) {
+/// at the window is reported as present (`CLARP_TEST_FOREGROUND`). With the
+/// Host's notifications per event: one popup per id, the chat's newer one
+/// replacing the older, none when the Host says no or the chat is on
+/// screen, a question's answers as buttons, the popup closed when the chat
+/// is read elsewhere, an answer from a popup held for Undo and taken back,
+/// a failed turn in its card's words with Try again, a question answered on
+/// another device closing its popup,
+/// Mark read told to the Host, the NOTIFICATIONS settings and a contact's
+/// choices per event.
+fn desktop_check(out: String) {
     fn notifications() -> Vec<serde_json::Value> {
         let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") else { return Vec::new() };
         std::fs::read_to_string(path).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect()
     }
+    fn popups() -> Vec<serde_json::Value> {
+        notifications().into_iter().filter(|n| n.get("title").is_some()).collect()
+    }
+    fn send(event: serde_json::Value) {
+        check(control("/__control/event", &event).is_ok(), &format!("the Host sends {}", event["notification_id"]));
+    }
+    let (out2, out3, out4) = (out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, window, elapsed| {
             let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
             // The desktop services start a second after launch.
-            if !open || elapsed < Duration::from_millis(1500) {
+            if !open || elapsed < Duration::from_millis(1500) || app.engine.borrow().notification_settings().is_none() {
                 return false;
             }
             window.invoke_chat_chosen("mike".into());
@@ -1897,11 +1912,13 @@ fn desktop_check(_out: String) {
             true
         })),
         ("notified", Box::new(|_, _window, _| {
-            let shown = notifications();
+            let shown = popups();
             if shown.is_empty() {
                 return false;
             }
             check(shown[0]["title"].as_str().is_some_and(|t| t.contains("Rachel")) && shown[0]["body"] == "Echo from Rachel", &format!("a reply in a chat that is not open is notified: {shown:?}"));
+            check(shown[0]["category"] == "im.received" && shown[0]["session"] == "rachel", &format!("as a message from the chat: {}", shown[0]));
+            check(shown[0]["actions"] == serde_json::json!(["default", "mark-read", "mute", "settings"]), &format!("with Open, Mark read, Mute and Settings: {}", shown[0]["actions"]));
             headless::type_text("x");
             true
         })),
@@ -1910,6 +1927,235 @@ fn desktop_check(_out: String) {
             let Some(active) = reports.iter().find(|r| r["body"]["active"] == true) else { return false };
             check(active["body"]["instance_id"].as_str().is_some_and(|i| !i.is_empty()), "someone typing at the window is reported present");
             check(!posts("/application-activity").is_empty(), "and the window's activity with it");
+            let rachel = |id: &str, event: &str, alert: bool, preview: &str| serde_json::json!({
+                "type": "user-notification", "event": event, "alert": alert, "unread": true, "notification_id": id,
+                "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": preview, "message_id": format!("m-{id}"),
+            });
+            send(rachel("pn-2", "reply", true, "Second reply"));
+            send(rachel("pn-2", "reply", true, "Second reply again"));
+            send(rachel("pn-3", "reply", false, "Turned off"));
+            let mut asked = rachel("decision-d1", "needs_you", true, "Ship it?");
+            asked["decision_id"] = "d1".into();
+            asked["response_type"] = "single_choice".into();
+            asked["options"] = serde_json::json!([{"id": "a", "label": "Now"}, {"id": "b", "label": "Tomorrow"}]);
+            send(asked);
+            // The chat on screen, in a window that has the keyboard.
+            send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "notification_id": "pn-mike",
+                                    "session": "mike", "agent_id": "a2", "persona": "Mike", "preview": "On screen"}));
+            // An older Host's notification that marks nothing unread.
+            send(serde_json::json!({"type": "user-notification", "unread": false, "notification_id": "pn-read",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Already read"}));
+            true
+        })),
+        ("per event", Box::new(|_, _window, elapsed| {
+            let shown = popups();
+            if shown.len() < 3 || elapsed < Duration::from_millis(1500) {
+                return false;
+            }
+            let bodies: Vec<&str> = shown.iter().filter_map(|n| n["body"].as_str()).collect();
+            check(bodies == ["Echo from Rachel", "Second reply", "Ship it?"], &format!("one popup per id, none the Host turned off, read or on screen: {bodies:?}"));
+            check(shown[1]["replaces"] == true && shown[1]["message_id"] == "m-pn-2", &format!("a newer reply replaces the chat's popup and opens at its message: {}", shown[1]));
+            check(shown[2]["actions"] == serde_json::json!(["default", "choice:a", "choice:b", "mark-read", "mute", "settings"]), &format!("a question's answers are its first buttons: {}", shown[2]["actions"]));
+            check(shown[2]["sound"] == false, "no sound while Sound is off");
+            check(control("/__control/event", &serde_json::json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read on another device");
+            true
+        })),
+        ("closed", Box::new(|_, _window, _| {
+            if !notifications().iter().any(|n| n["closed"] == "rachel") {
+                return false;
+            }
+            check(true, "a chat read elsewhere closes its popup");
+            send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": true, "notification_id": "pn-4",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Fourth"}));
+            true
+        })),
+        ("answer", Box::new(|app, _window, _| {
+            if !popups().iter().any(|n| n["body"] == "Fourth") {
+                return false;
+            }
+            let item = serde_json::json!({"id": "d1", "decision_id": "d1", "artifact_id": "q-d1", "revision": 3, "session": "rachel",
+                                          "agent_name": "Rachel", "title": "Ship it?", "response_type": "single_choice"});
+            if !app.engine.borrow().attention_items().iter().any(|i| i["decision_id"] == "d1") {
+                check(control("/__control/attention", &serde_json::json!({"items": [item]})).is_ok(), "the question is in Updates");
+                return false;
+            }
+            // Now, the question's first answer, from its popup.
+            crate::platform::desktop::act_on("rachel", "", "d1", "single_choice", "choice:a");
+            true
+        })),
+        ("answered", Box::new(|_, _window, _| {
+            let resolved = posts("/decisions/d1/resolve");
+            let Some(answered) = popups().into_iter().find(|n| n["body"].as_str().is_some_and(|b| b.starts_with("You answered"))) else { return false };
+            check(resolved.first().is_some_and(|r| r["body"]["undo_ms"] == 8000 && r["body"]["answer"]["option_id"] == "a"), &format!("an answer from a popup is held for Undo: {resolved:?}"));
+            // The pressed popup closed; the next says what was answered.
+            check(answered["body"] == "You answered Now" && answered["actions"][1] == "choice:undo", &format!("the chat's popup says what was answered and offers Undo: {answered}"));
+            crate::platform::desktop::act_on("rachel", "", "d1", "answered", "choice:undo");
+            true
+        })),
+        ("undone", Box::new(|_, _window, _| {
+            let asked_again = popups().iter().filter(|n| n["body"] == "Ship it?").count() == 2;
+            if posts("/decisions/d1/undo").is_empty() || !asked_again {
+                return false;
+            }
+            check(posts("/decisions/d1/undo")[0]["body"] == serde_json::json!({"expected_revision": 4}), "Undo names the held answer's revision");
+            check(true, "Undo brings the question back as a popup");
+            true
+        })),
+        ("failed", Box::new(|_, _window, _| {
+            send(serde_json::json!({"type": "user-notification", "event": "failed", "alert": true, "unread": true, "notification_id": "failed-t1",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "message_id": "m-f1",
+                                    "error_code": "connection", "body_loc_key": "error.connection", "body_loc_args": ["Claude"],
+                                    "body": "Lost the connection.", "primary_action": "retry"}));
+            true
+        })),
+        ("retry", Box::new(|_, _window, _| {
+            let Some(failed) = popups().into_iter().find(|n| n["message_id"] == "m-f1") else { return false };
+            check(failed["body"] == "Lost the connection to Claude, and the Host's retries did not get through. Try again.",
+                  &format!("a failed turn says its card's sentence: {}", failed["body"]));
+            check(failed["actions"][1] == "failure:retry", &format!("with its action beside Open: {}", failed["actions"]));
+            crate::platform::desktop::act_on("rachel", "m-f1", "", "", "failure:retry");
+            true
+        })),
+        ("retried", Box::new(|_, _window, _| {
+            let Some(retry) = posts("/turn-retry").first().cloned() else { return false };
+            check(retry["body"] == serde_json::json!({"session": "rachel", "message_id": "m-f1"}), &format!("Try again sends the message again: {}", retry["body"]));
+            true
+        })),
+        ("asked on a card", Box::new(|_, _window, _| {
+            let card = serde_json::json!({"artifact_id": "q-end", "type": "question", "status": "active", "session": "rachel", "title": "Deploy now?",
+                                          "decision": {"decision_id": "d-end", "status": "pending", "revision": 1, "response_type": "approval"}});
+            check(control("/__control/artifact-update", &serde_json::json!({"add": [card], "session": "rachel"})).is_ok(), "the Host has a question card");
+            send(serde_json::json!({"type": "user-notification", "event": "needs_you", "alert": true, "unread": false, "notification_id": "decision-d-end",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Deploy now?",
+                                    "decision_id": "d-end", "artifact_id": "q-end", "response_type": "approval", "revision": 1,
+                                    "options": [{"id": "accepted", "label": "Deploy"}, {"id": "rejected", "label": "Wait"}]}));
+            true
+        })),
+        ("answered elsewhere", Box::new(|_, _window, _| {
+            let Some(asked) = popups().into_iter().find(|n| n["body"] == "Deploy now?") else { return false };
+            check(asked["actions"][1] == "choice:accepted" && asked["actions"][2] == "choice:rejected", &format!("an approval offers the card's words: {}", asked["actions"]));
+            // Another device answers the card: the Host says the card changed.
+            let answered = serde_json::json!({"decision_id": "d-end", "status": "accepted", "revision": 2, "response_type": "approval"});
+            check(control("/__control/artifact-update", &serde_json::json!({"id": "q-end", "set": {"decision": answered, "status": "completed"}, "session": "rachel"})).is_ok(), "the question is answered on another device");
+            true
+        })),
+        ("question closed", Box::new(|_, _window, _| {
+            if !notifications().iter().any(|n| n["closed_decision"] == "d-end") {
+                return false;
+            }
+            check(true, "a question answered elsewhere closes its popup");
+            true
+        })),
+        ("mark read", Box::new(|app, _window, _| {
+            if popups().len() < 4 {
+                return false;
+            }
+            app.engine.borrow_mut().set_agent_notification_event("rachel", "reply", Some(false));
+            crate::platform::desktop::act_on("rachel", "m-pn-4", "", "", "mark-read");
+            true
+        })),
+        ("marked", Box::new(|app, _window, _| {
+            let read = posts("/chat-read");
+            let set = posts("/notification-settings");
+            let follows = app.engine.borrow().notification_settings().is_some_and(|s| s.agent_choice("a1", "reply") == Some(false) && s.version > 1);
+            if read.is_empty() || set.is_empty() || !follows {
+                return false;
+            }
+            check(read[0]["body"]["session"] == "rachel", &format!("Mark read tells the Host: {}", read[0]["body"]));
+            check(set[0]["body"] == serde_json::json!({"agent": "a1", "events": {"reply": false}}), &format!("a contact's choice goes to the Host: {}", set[0]["body"]));
+            check(!app.engine.borrow().roster().find("rachel").is_some_and(|a| a.unread), "and the chat is read here");
+            if let Some(app) = crate::app()
+                && let Some(window) = crate::window()
+            {
+                crate::profile_view::open(&app, &window, "rachel");
+            }
+            true
+        })),
+        ("contact", Box::new(|_, window, elapsed| {
+            let bridge = window.global::<crate::ProfileBridge>();
+            if bridge.get_notify_events().row_count() == 0 || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            // The keyboard on the last event's choice brings the card into view.
+            bridge.set_cursor(format!("notify:{}", bridge.get_notify_events().row_count() - 1).into());
+            true
+        })),
+        ("contact shown", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            let bridge = window.global::<crate::ProfileBridge>();
+            let events = bridge.get_notify_events();
+            let info = bridge.get_info();
+            check(info.notify_shown && info.notify_preset == 3, &format!("a contact with its own choices is Custom: {}", info.notify_preset));
+            let reply = events.iter().find(|e| e.id == "reply");
+            check(reply.as_ref().is_some_and(|e| e.index == 2), "the contact's profile shows Replies off");
+            check(events.iter().any(|e| e.id == "job_done" && e.index == 0 && e.choices.row_data(0).is_some_and(|c| c.contains("Off"))), "and Default naming the owner's choice");
+            shot(&out2, "desktop-notifications-contact-custom");
+            bridge.invoke_set_notify_preset(1);
+            true
+        })),
+        ("preset", Box::new(move |app, window, elapsed| {
+            let needs_me = app.engine.borrow().notification_settings().is_some_and(|s| s.preset("a1", false) == clarp_core::notify_events::Preset::NeedsMe);
+            let info = window.global::<crate::ProfileBridge>().get_info();
+            if !needs_me || info.notify_preset != 1 || elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            window.global::<crate::ProfileBridge>().set_cursor("notify-customize".into());
+            let last = posts("/notification-settings").last().cloned().unwrap_or_default();
+            check(last["body"]["events"]["needs_you"] == true && last["body"]["events"]["failed"] == true && last["body"]["events"]["update"] == false,
+                  &format!("Only when it needs me sets the contact's choices on the Host: {}", last["body"]));
+            true
+        })),
+        ("preset shown", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            let info = window.global::<crate::ProfileBridge>().get_info();
+            check(info.notify_preset == 1, "the profile shows Only when it needs me");
+            shot(&out3, "desktop-notifications-contact");
+            headless::press(slint::platform::Key::Escape);
+            true
+        })),
+        ("settings", Box::new({
+            let mut pressed = false;
+            move |_, window, elapsed| {
+                if window.get_surface() == "settings" {
+                    return true;
+                }
+                // Once, after the profile has closed.
+                if !pressed && elapsed > Duration::from_millis(300) {
+                    crate::platform::desktop::act_on("rachel", "", "", "", "settings");
+                    pressed = true;
+                }
+                false
+            }
+        })),
+        ("searched", Box::new(move |_, window, elapsed| {
+            let rows: Vec<crate::SettingRow> = window.get_setting_rows().iter().collect();
+            if elapsed < Duration::from_millis(500) || !rows.iter().any(|r| r.id == "notify-reply") {
+                return false;
+            }
+            let current = rows.get(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
+            check(window.get_settings_query() == "notifications" && current == "notify-reply", &format!("a popup's Settings opens the notification settings: {current}"));
+            let ids = ["notify-reply", "notify-needs-you", "notify-job-done", "desktop-notifications", "notification-sound", "pause-mobile-push"];
+            check(ids.iter().all(|id| rows.iter().any(|r| r.id == *id)), "with every switch of the section");
+            check(rows.iter().find(|r| r.id == "notify-job-done").is_some_and(|r| !r.on), "a background job is off by default");
+            shot(&out4, "desktop-notifications-settings");
+            crate::settings_view::cancel_search(&app_now(), window);
+            true
+        })),
+        ("section", Box::new(|_, window, _| {
+            let rows: Vec<crate::SettingRow> = window.get_setting_rows().iter().collect();
+            if !window.get_settings_query().is_empty() {
+                return false;
+            }
+            let at = |id: &str| rows.iter().position(|r| r.id == id);
+            let section = rows.iter().position(|r| r.kind == "section" && r.label.to_uppercase().contains("NOTIFICATIONS"));
+            let ids = ["notify-reply", "notify-needs-you", "notify-job-done", "desktop-notifications", "notification-sound", "pause-mobile-push"];
+            let order: Vec<Option<usize>> = ids.iter().map(|id| at(id)).collect();
+            check(section.is_some() && order.iter().all(|i| i.is_some_and(|i| Some(i) > section)) && order.windows(2).all(|w| w[0] < w[1]),
+                  &format!("NOTIFICATIONS lists the Host's events, then this computer's switches: {order:?} after {section:?}"));
             true
         })),
     ];

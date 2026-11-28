@@ -1,14 +1,15 @@
 //! What the window offers the desktop (the Qt app's `DesktopServices`): a
-//! tray icon with Show, Mute voice replies and Quit; notifications for
-//! replies in chats that are not open; and desktop presence (someone is at
+//! tray icon with Show, Mute voice replies and Quit; notifications (with
+//! the agent's portrait, one per chat, and Open, Mark read and a
+//! question's answers as buttons); and desktop presence (someone is at
 //! this window, so the Host may pause phone alerts; `clarp_core::presence`).
 //! The tray is a StatusNotifierItem; without a tray host there is no tray
 //! and, as in the Qt and C++ clients, no notifications. macOS has no tray
 //! (Show and Quit are the Dock's), notifies through Notification Center,
 //! and takes presence from the window alone (there is no logind).
 //!
-//! For checks: `CLARP_TEST_NOTIFY_LOG` records notifications in a file
-//! instead of sending them, `CLARP_TEST_FOREGROUND=1` treats the
+//! For checks: `CLARP_TEST_NOTIFY_LOG` records notifications (and their
+//! closing) in a file instead of sending them, `CLARP_TEST_FOREGROUND=1` treats the
 //! headless window as the one in front, and `CLARP_TEST_LOGIN=unlocked`
 //! (or `locked`) stands in for the login session logind would report.
 
@@ -396,27 +397,222 @@ pub fn muted_changed(muted: bool) {
     });
 }
 
-/// A reply in a chat that is not open. On Linux only with a tray, as in
-/// the Qt and C++ clients. `sound` asks the desktop for its message sound (Settings →
-/// Notification sound).
-pub fn notify(title: String, body: String, sound: bool) {
-    if let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") {
-        use std::io::Write;
-        let line = serde_json::json!({"title": title, "body": body, "sound": sound}).to_string();
-        let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{line}"));
-        if let Err(error) = written {
-            eprintln!("clarp-slint: could not record a notification: {error}");
-        }
+/// A desktop popup: who, what, the chat it is about, and what its buttons
+/// do. On Linux only with a tray, as in the Qt and C++ clients.
+#[derive(Debug, Clone, Default)]
+pub struct Note {
+    pub title: String,
+    /// The contact's name, for "Mute <name>".
+    pub name: String,
+    pub body: String,
+    /// The chat: a newer popup of the same chat replaces the older one.
+    pub session: String,
+    /// The message a click opens the chat at.
+    pub message_id: String,
+    /// Ask the desktop for its message sound.
+    pub sound: bool,
+    /// The agent's cached portrait (`file://`).
+    pub image: Option<String>,
+    /// A question's id and kind, when its answers are buttons.
+    pub decision_id: String,
+    pub response_type: String,
+    /// The buttons after Open and Mark read: (action key, label).
+    pub choices: Vec<(String, String)>,
+}
+
+/// The settings row a popup's Settings opens at: the Host's first switch,
+/// else this computer's.
+const NOTIFICATION_SETTINGS: &[&str] = &["notify-reply", "desktop-notifications"];
+
+/// The action key of an answer button (`choice:<option id>`).
+pub const CHOICE: &str = "choice:";
+/// The action key of a failed turn's button (`failure:<action id>`).
+pub const FAILURE: &str = "failure:";
+
+/// What a popup was for, kept to act on its buttons.
+#[derive(Debug, Clone)]
+#[cfg_attr(target_os = "macos", allow(dead_code))]
+struct Shown {
+    id: u32,
+    session: String,
+    message_id: String,
+    decision_id: String,
+    response_type: String,
+}
+
+thread_local! {
+    /// The open popups, newest last (one per chat).
+    static SHOWN: RefCell<Vec<Shown>> = const { RefCell::new(Vec::new()) };
+}
+
+/// The window has the keyboard: a popup about the chat on screen is not
+/// needed (`CLARP_TEST_FOREGROUND` counts as focused).
+pub fn window_focused() -> bool {
+    std::env::var_os("CLARP_TEST_FOREGROUND").is_some() || SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.focused))
+}
+
+/// Records what a check asked of the desktop instead of showing it.
+fn test_log(line: serde_json::Value) -> bool {
+    let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") else { return false };
+    use std::io::Write;
+    let written = std::fs::OpenOptions::new().create(true).append(true).open(&path).and_then(|mut f| writeln!(f, "{line}"));
+    if let Err(error) = written {
+        eprintln!("clarp-slint: could not record a notification: {error}");
+    }
+    true
+}
+
+/// Shows a popup. `sound` asks the desktop for its message sound.
+pub fn notify(note: Note) {
+    let logged = test_log(serde_json::json!({
+        "title": note.title, "body": note.body, "sound": note.sound, "session": note.session,
+        "message_id": note.message_id, "image": note.image, "category": "im.received",
+        "actions": actions(&note).chunks(2).map(|pair| pair[0].clone()).collect::<Vec<_>>(),
+        "replaces": SHOWN.with(|shown| shown.borrow().iter().any(|s| s.session == note.session)),
+    }));
+    if logged {
+        // A check's popup is kept as shown, so the next of its chat replaces it.
+        remember(Shown { id: 0, session: note.session, message_id: note.message_id, decision_id: note.decision_id, response_type: note.response_type });
         return;
     }
     #[cfg(target_os = "macos")]
-    notify_macos(title, body, sound);
+    notify_macos(note.title, note.body, note.sound);
     #[cfg(not(target_os = "macos"))]
-    notify_freedesktop(title, body, sound);
+    notify_freedesktop(note);
+}
+
+/// The chat was opened or read on some device: its popup goes.
+pub fn close_chat(session: &str) {
+    close_where(|s| s.session == session, serde_json::json!({"closed": session}));
+}
+
+/// A question was answered, dismissed or withdrawn elsewhere: its popup goes.
+pub fn close_decision(decision_id: &str) {
+    close_where(|s| s.decision_id == decision_id, serde_json::json!({"closed_decision": decision_id}));
+}
+
+/// Closes the popups `which` picks (`logged` is what a check records).
+fn close_where(which: impl Fn(&Shown) -> bool, logged: serde_json::Value) {
+    let gone: Vec<Shown> = SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        let (gone, kept) = std::mem::take(&mut *shown).into_iter().partition(|s| which(s));
+        *shown = kept;
+        gone
+    });
+    if gone.is_empty() {
+        return;
+    }
+    if test_log(logged) {
+        return;
+    }
+    #[cfg(not(target_os = "macos"))]
+    for popup in gone {
+        runtime::handle().spawn(async move {
+            let closed = async {
+                let connection = zbus::Connection::session().await?;
+                connection
+                    .call_method(Some(NOTIFICATIONS), NOTIFICATIONS_PATH, Some(NOTIFICATIONS), "CloseNotification", &(popup.id,))
+                    .await
+            };
+            if let Err(error) = closed.await {
+                eprintln!("clarp-slint: could not close a notification: {error}");
+            }
+        });
+    }
+}
+
+/// The popup's buttons as the desktop takes them: key, label, key, label.
+/// A click is Open; a question's answers come first, as a desktop shows
+/// only its first few; then Mark read, Mute <name> and the settings.
+fn actions(note: &Note) -> Vec<String> {
+    use clarp_core::notify_events::{mute_label, text};
+    let mut out = vec!["default".to_owned(), text("notify.action.open")];
+    for (key, label) in &note.choices {
+        out.extend([key.clone(), label.clone()]);
+    }
+    out.extend(["mark-read".to_owned(), text("notify.action.mark_read")]);
+    if !note.name.is_empty() {
+        out.extend(["mute".to_owned(), mute_label(&note.name)]);
+    }
+    out.extend(["settings".to_owned(), text("notify.action.settings")]);
+    out
+}
+
+fn remember(popup: Shown) {
+    SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        shown.retain(|s| s.session != popup.session && (popup.id == 0 || s.id != popup.id));
+        shown.push(popup);
+        // A desktop closes popups on its own; this keeps the newest few.
+        let extra = shown.len().saturating_sub(32);
+        shown.drain(..extra);
+    });
+}
+
+/// A button of a popup was pressed (`default` is a click on it).
+pub fn action_invoked(id: u32, key: &str) {
+    let Some(popup) = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.id == id).cloned()) else { return };
+    act_on(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
+}
+
+/// What a popup's button does: open the chat at the message, mark it
+/// read, mute the contact, open the notification settings, answer the
+/// question, or send a failed turn's message again (opening the chat when
+/// the answer or the retry cannot go, and for Switch model and Sign in).
+pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
+    let Some(app) = crate::app() else { return };
+    close_chat(session);
+    match key {
+        "mark-read" => {
+            app.engine.borrow_mut().mark_chat_read(session);
+            crate::pump_now(&app);
+            return;
+        }
+        "mute" => {
+            app.engine.borrow_mut().set_agent_push_muted(session, true);
+            crate::pump_now(&app);
+            return;
+        }
+        "settings" => {
+            perform(Action::Show);
+            if let Some(window) = crate::window() {
+                crate::settings_view::open_searched(&app, &window, "notifications", NOTIFICATION_SETTINGS);
+            }
+            return;
+        }
+        _ => {}
+    }
+    if key.starts_with(FAILURE) {
+        let retried = app.engine.borrow_mut().retry_from_notification(session, message_id);
+        if retried {
+            crate::pump_now(&app);
+            return;
+        }
+    }
+    if let Some(option) = key.strip_prefix(CHOICE) {
+        let answered = app.engine.borrow_mut().answer_from_notification(decision_id, response_type, option);
+        if answered {
+            crate::pump_now(&app);
+            return;
+        }
+    }
+    perform(Action::Show);
+    crate::search_view::open_message(&app, session, message_id);
+}
+
+#[cfg(not(target_os = "macos"))]
+const NOTIFICATIONS: &str = "org.freedesktop.Notifications";
+#[cfg(not(target_os = "macos"))]
+const NOTIFICATIONS_PATH: &str = "/org/freedesktop/Notifications";
+
+#[cfg(not(target_os = "macos"))]
+thread_local! {
+    /// The buttons are listened to once the first popup is shown.
+    static LISTENING: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Through Notification Center (as Script Editor, the sender `osascript`
-/// is): the texts go as arguments, never into the script.
+/// is): the texts go as arguments, never into the script. No buttons.
 #[cfg(target_os = "macos")]
 fn notify_macos(title: String, body: String, sound: bool) {
     let script = if sound {
@@ -436,33 +632,95 @@ fn notify_macos(title: String, body: String, sound: bool) {
     }
 }
 
+/// A freedesktop notification: the agent's portrait, the `im.received`
+/// category, the chat's earlier popup replaced, and buttons.
 #[cfg(not(target_os = "macos"))]
-fn notify_freedesktop(title: String, body: String, sound: bool) {
+fn notify_freedesktop(note: Note) {
     let has_tray = SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.tray.is_some()));
     if !has_tray {
         return;
     }
+    if !LISTENING.with(|l| l.replace(true)) {
+        runtime::handle().spawn(listen_to_popups());
+    }
+    let replaces = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map_or(0, |s| s.id));
+    let actions = actions(&note);
     runtime::handle().spawn(async move {
         let sent = async {
             let connection = zbus::Connection::session().await?;
             let mut hints: std::collections::HashMap<&str, zbus::zvariant::Value> = std::collections::HashMap::new();
-            if sound {
+            hints.insert("category", zbus::zvariant::Value::from("im.received"));
+            hints.insert("desktop-entry", zbus::zvariant::Value::from("clarp"));
+            if let Some(image) = note.image.as_deref() {
+                hints.insert("image-path", zbus::zvariant::Value::from(image));
+            }
+            if note.sound {
                 hints.insert("sound-name", zbus::zvariant::Value::from("message-new-instant"));
             }
-            connection
+            let actions: Vec<&str> = actions.iter().map(String::as_str).collect();
+            let reply = connection
                 .call_method(
-                    Some("org.freedesktop.Notifications"),
-                    "/org/freedesktop/Notifications",
-                    Some("org.freedesktop.Notifications"),
+                    Some(NOTIFICATIONS),
+                    NOTIFICATIONS_PATH,
+                    Some(NOTIFICATIONS),
                     "Notify",
-                    &("Clarp", 0u32, "clarp", title.as_str(), body.as_str(), Vec::<&str>::new(), hints, 8_000i32),
+                    &("Clarp", replaces, "clarp", note.title.as_str(), note.body.as_str(), actions, hints, 8_000i32),
                 )
-                .await
+                .await?;
+            reply.body().deserialize::<u32>()
         };
-        if let Err(error) = sent.await {
-            eprintln!("clarp-slint: notification failed: {error}");
+        match sent.await {
+            Ok(id) => later(move || {
+                remember(Shown { id, session: note.session, message_id: note.message_id, decision_id: note.decision_id, response_type: note.response_type })
+            }),
+            Err(error) => eprintln!("clarp-slint: notification failed: {error}"),
         }
     });
+}
+
+/// Follows the popups' buttons and their closing on the session bus.
+#[cfg(not(target_os = "macos"))]
+async fn listen_to_popups() {
+    use futures_util::StreamExt;
+    let connection = match zbus::Connection::session().await {
+        Ok(connection) => connection,
+        Err(error) => {
+            eprintln!("clarp-slint: notification buttons are not followed: {error}");
+            return;
+        }
+    };
+    let rule = zbus::MatchRule::builder()
+        .msg_type(zbus::message::Type::Signal)
+        .interface(NOTIFICATIONS)
+        .and_then(|rule| rule.path(NOTIFICATIONS_PATH))
+        .map(|rule| rule.build());
+    let mut stream = match rule {
+        Ok(rule) => match zbus::MessageStream::for_match_rule(rule, &connection, None).await {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!("clarp-slint: notification buttons are not followed: {error}");
+                return;
+            }
+        },
+        Err(error) => {
+            eprintln!("clarp-slint: notification buttons are not followed: {error}");
+            return;
+        }
+    };
+    while let Some(Ok(message)) = stream.next().await {
+        let header = message.header();
+        match header.member().map(|m| m.as_str()) {
+            Some("ActionInvoked") => {
+                let Ok((id, key)) = message.body().deserialize::<(u32, String)>() else { continue };
+                later(move || action_invoked(id, &key));
+            }
+            Some("NotificationClosed") => {
+                let Ok((id, _reason)) = message.body().deserialize::<(u32, u32)>() else { continue };
+                later(move || SHOWN.with(|shown| shown.borrow_mut().retain(|s| s.id != id)));
+            }
+            _ => {}
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

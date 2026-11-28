@@ -1417,7 +1417,10 @@ mod tests {
         assert_eq!(ranked("color")[0], "reading-theme", "American spelling");
         assert_eq!(ranked("mute")[0], "spoken-replies");
         top3("sidebar", "explorer");
-        top3("notifications", "pause-mobile-push");
+        // The NOTIFICATIONS section answers "notifications"; its switch for
+        // the phone by its own words.
+        top3("notifications", "desktop-notifications");
+        top3("pause phone", "pause-mobile-push");
         top3("double tap", "double-press");
         // Zoom is the chat's; the window's own size is its scale.
         assert_eq!(ranked("zoom in")[0], "chat-zoom-in");

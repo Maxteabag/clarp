@@ -41,6 +41,8 @@ mod send_while_working;
 mod stop;
 mod turn_retry;
 pub use turn_retry::RetryState;
+mod notifications;
+pub use notifications::Popup;
 pub mod search;
 mod panels;
 pub mod profile;
@@ -116,8 +118,15 @@ pub enum Change {
     HostStatus,
     /// A chat's composer attachments changed.
     Composer(String),
-    /// A reply in a chat that is not open: the desktop may notify.
-    Notification { title: String, body: String },
+    /// Something for the user the desktop may pop up (`notifications.rs`).
+    Notification(Popup),
+    /// This chat was opened or read on some device: its popup goes.
+    NotificationRead(String),
+    /// This question (decision id) was answered, dismissed or withdrawn
+    /// elsewhere: its popup goes.
+    QuestionEnded(String),
+    /// The Host's notification settings changed (or whether it has them).
+    NotificationSettings,
     /// Launch data changed: the model catalog, idle contacts, launch
     /// defaults, paths, past sessions, assignment contacts or the
     /// starting contact.
@@ -333,6 +342,7 @@ pub struct Engine {
     quiet_failures: HashSet<String>,
     stops: stop::Stops,
     retries: turn_retry::Retries,
+    notifications: notifications::Notifications,
     /// Chats whose "not spoken" banner showed since their voice last worked:
     /// it shows once per chat, not after every reply.
     voice_errors_shown: HashSet<String>,
@@ -484,6 +494,7 @@ impl Engine {
             quiet_failures: HashSet::new(),
             stops: stop::Stops::default(),
             retries: turn_retry::Retries::default(),
+            notifications: notifications::Notifications::default(),
             voice_errors_shown: HashSet::new(),
             error_source: String::new(),
             narrator,
@@ -572,7 +583,7 @@ impl Engine {
         self.pump_peers();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();
-        changes.retain(|change| matches!(change, Change::Notification { .. }) || seen.insert(format!("{change:?}")));
+        changes.retain(|change| matches!(change, Change::Notification(_)) || seen.insert(format!("{change:?}")));
         changes
     }
 
@@ -1666,10 +1677,12 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        // An answer from a popup the Host holds: the popup offers Undo.
+        self.notification_answer_json(tag, object);
         if self.form_events_json(tag, object) {
             return;
         }
-        if self.lifecycle_json(tag, object) {
+        if self.lifecycle_json(tag, object) || self.notifications_json(tag, object) {
             return;
         }
         if self.render_spec_json(tag, object) || self.panels_json(tag, object) {
@@ -1733,6 +1746,7 @@ impl Engine {
             self.roster_rows_server_info(object);
             self.form_events_server_info(object);
             self.stop_server_info(object);
+            self.notifications_server_info(object);
             self.search_server_info(object);
             self.queue_server_info(object);
             self.send_while_working_server_info(object);
@@ -1783,7 +1797,7 @@ impl Engine {
             }
             return;
         }
-        if self.lifecycle_failure(tag, message, status) {
+        if self.lifecycle_failure(tag, message, status) || self.notifications_failure(tag, &detail) {
             return;
         }
         if self.render_spec_failure(tag, message, status) || self.panels_failure(tag, message, status) {
@@ -2005,17 +2019,17 @@ impl Engine {
                     self.with_conversation(&session, |c| c.apply_activity_event(event));
                 }
             }
-            "agent-focus" => self.mutate_roster(|r| r.apply_focus_event(event)),
+            "agent-focus" => {
+                self.mutate_roster(|r| r.apply_focus_event(event));
+                self.chat_read_event(&session, false);
+            }
+            clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, true),
+            clarp_core::notify_events::SETTINGS_CHANGED => self.notification_settings_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
             "user-notification" => {
                 self.request_snapshot();
                 self.mutate_roster(|r| r.apply_notification_event(event));
-                if session == self.selected {
-                    self.mutate_roster(|r| r.clear_unread(&session));
-                } else {
-                    let title = event.get("persona").and_then(Value::as_str).unwrap_or(&session).to_owned();
-                    self.changes.push(Change::Notification { title, body: clarp_core::decision_receipt::preview_line(&json::string(event, "preview")) });
-                }
+                self.notification_event(event);
             }
             "server-version" => {
                 let version = json::string(event, "version");

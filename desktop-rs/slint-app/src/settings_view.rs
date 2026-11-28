@@ -276,6 +276,21 @@ pub fn open(app: &App, window: &AppWindow) {
     watch_pressure();
 }
 
+/// Opens the surface searched for `query`, at the first of `ids` it lists
+/// (a popup's Settings: "notifications"). The search brings far rows to the
+/// top, where a long page would not scroll a row it has not drawn yet;
+/// Escape in the list shows the whole page again.
+pub fn open_searched(app: &App, window: &AppWindow, query: &str, ids: &[&str]) {
+    open(app, window);
+    window.set_settings_query(query.into());
+    window.set_setting_current(-1);
+    show(app, window);
+    let rows = window.get_setting_rows();
+    if let Some(at) = ids.iter().find_map(|id| rows.iter().position(|r| r.id == *id)) {
+        window.set_setting_current(at as i32);
+    }
+}
+
 thread_local! {
     static PRESSURE_READ: RefCell<Option<slint::Timer>> = const { RefCell::new(None) };
 }

@@ -21,6 +21,8 @@ icu_calendar = "2.3"
 icu_time = "2.3"
 icu_datetime = "2.3"
 icu_decimal = "2.3"
+# Plural rules for counts in the app's locale (turn errors' repeat count).
+icu_plurals = "2.3"
 
 [build-dependencies]
 # The parser Slint's compiler reads the same .po files with.

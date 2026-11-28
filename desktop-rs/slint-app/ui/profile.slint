@@ -19,6 +19,10 @@ export struct ProfileInfo {
     heartbeat: bool,
     dreaming: bool,
     push-alerts: bool,
+    // The Host keeps notifications per event: a preset (0 All, 1 Only when
+    // it needs me, 2 Muted, 3 Custom) stands in for Push alerts.
+    notify-shown: bool,
+    notify-preset: int,
     context-fraction: float,
     // Empty while the Host does not say how much is used: no row then.
     context-used: string,
@@ -82,6 +86,15 @@ export struct PromptItem {
     meta: string,
 }
 
+// One event's choice for this contact (Host feature notification_events):
+// its words, and Default (the owner's choice, named), On or Off.
+export struct NotifyChoice {
+    id: string,
+    label: string,
+    choices: [string],
+    index: int,
+}
+
 export struct NamedItem {
     id: string,
     name: string,
@@ -126,6 +139,13 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
+    // Per event for this contact, under Customize.
+    in property <[NotifyChoice]> notify-events;
+    in property <[string]> notify-presets;
+    // Customize was pressed: the events show under the preset.
+    in-out property <bool> notify-customize;
+    callback set-notify-event(string, int);
+    callback set-notify-preset(int);
     callback set-agent-messages(int);
     // Bumped to bring the profile's Publications card into view (the chat's
     // ⋯ menu's Artifacts).
@@ -629,7 +649,55 @@ export component AgentProfile inherits Modal {
                     // i18n: agent profile, switch label (noun): the agent reflects on its past work while idle and keeps what it learns
                     Spot { spot: "dreaming"; ToggleRow { label: @tr("Dreaming"); checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
                     // i18n: agent profile, switch label (noun): phone/desktop notifications from this agent
-                    Spot { spot: "push-alerts"; ToggleRow { label: @tr("Push alerts"); checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
+                    if !root.info.notify-shown: Spot { spot: "push-alerts"; ToggleRow { label: @tr("Push alerts"); checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
+                    // One choice first; Customize shows each event (Muted wins over them).
+                    if root.info.notify-shown: Spot {
+                        spot: "notify-preset";
+                        // A pick in the box ends its binding: a change from the
+                        // Host (another device) still shows.
+                        property <int> preset: root.info.notify-preset;
+                        changed preset => { preset-box.current-index = self.preset; }
+                        HorizontalLayout {
+                            spacing: 8px;
+                            // i18n: contact profile, row label (noun) of the contact's notification preset
+                            Text { text: @tr("notify.settings.contact" => "Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            preset-box := ComboBox {
+                                horizontal-stretch: 1;
+                                model: ProfileBridge.notify-presets;
+                                current-index: root.info.notify-preset;
+                                // i18n: contact profile, accessibility label of the notification preset choice (noun)
+                                accessible-label: @tr("notify.settings.contact" => "Notifications");
+                                selected => { ProfileBridge.set-notify-preset(self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
+                        }
+                    }
+                    if root.info.notify-shown && root.info.notify-preset < 2 && !ProfileBridge.notify-customize: HorizontalLayout {
+                        alignment: start;
+                        Spot {
+                            spot: "notify-customize";
+                            // i18n: contact profile, button (verb): shows a notification choice per event
+                            TextButton { text: @tr("notify.settings.customize" => "Customize"); clicked => { ProfileBridge.notify-customize = true; } }
+                        }
+                    }
+                    if root.info.notify-shown && root.info.notify-preset != 2 && (ProfileBridge.notify-customize || root.info.notify-preset == 3): VerticalLayout {
+                        spacing: 8px;
+                        for event[index] in ProfileBridge.notify-events: Spot {
+                            spot: "notify:" + index;
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: event.label; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                                ComboBox {
+                                    horizontal-stretch: 1;
+                                    model: event.choices;
+                                    current-index: event.index;
+                                    accessible-label: event.label;
+                                    selected => { ProfileBridge.set-notify-event(event.id, self.current-index); }
+                                    changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                                }
+                            }
+                        }
+                    }
                 }
                 if ProfileBridge.teams.length > 0: Card {
                     // i18n: agent profile, section title in capitals (noun): the agent teams this agent belongs to

@@ -220,6 +220,17 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from live_projection import LiveView  # noqa: E402
 
 live_features = False
+# Notifications per event (feature notification_events): the owner's
+# document, as GET/POST /notification-settings answer it.
+NOTIFY_EVENTS = [("reply", True), ("needs_you", True), ("failed", True), ("update", True),
+                 ("job_done", False), ("helper_report", False), ("call", True), ("account", True)]
+# decision_undo: answers held for Undo, by decision id -> (revision, attention item).
+held_answers = {}
+notification_settings = {
+    "events": [{"id": i, "message_key": f"notify.event.{i}", "default": d, "on": d} for i, d in NOTIFY_EVENTS],
+    "agents": {},
+    "version": 1,
+}
 # Message search across chats (feature message_search, Rust Host contract
 # 196): off until /__control/message-search turns it on. `partial` answers
 # partial: true (older history still being indexed); `page` caps a page
@@ -1769,6 +1780,8 @@ class Handler(BaseHTTPRequestHandler):
             if viewport["on"]:
                 features += ["events_live_change", "events_chat_previews"]
             features.append("html_form_events")
+            features.append("notification_events")
+            features.append("decision_undo")
             if turn_summaries:
                 features.append("log_turn_summary")
             if turn_reasons:
@@ -2140,6 +2153,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, live_snapshot(session))
         if url.path == "/tool-explanations/settings":
             return self.reply(200, tool_explanation_settings)
+        if url.path == "/notification-settings":
+            with state_lock:
+                return self.reply(200, notification_settings)
         if url.path == "/coordination-settings":
             return self.reply(200, {"coordination_visibility": coordination["visibility"]})
         if url.path == "/lane-settings":
@@ -3059,6 +3075,36 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(400, {"error": "interactive form not found"})
                 form_event_config[artifact_id] = key
             return self.reply(200, {"artifact_id": artifact_id, "version": form.get("version"), "draft_key": key})
+        if url.path == "/notification-settings":
+            record({"method": "POST", "path": url.path, "body": body})
+            known = {e["id"] for e in notification_settings["events"]}
+            events = body.get("events") or {}
+            if not isinstance(events, dict) or any(k not in known for k in events):
+                return self.reply(400, {"error": "unknown event"})
+            with state_lock:
+                agent = body.get("agent")
+                if agent:
+                    agent_id = next((a["agent_id"] for a in agents if agent in (a["session"], a["agent_id"])), agent)
+                    choices = notification_settings["agents"].setdefault(agent_id, {"muted": False, "events": {}})
+                    for k, v in events.items():
+                        if v is None:
+                            choices["events"].pop(k, None)
+                        else:
+                            choices["events"][k] = bool(v)
+                else:
+                    for e in notification_settings["events"]:
+                        if e["id"] in events:
+                            e["on"] = bool(events[e["id"]])
+                notification_settings["version"] += 1
+                document = json.loads(json.dumps(notification_settings))
+            broadcast({"type": "notification-settings-changed", **document})
+            return self.reply(200, document)
+        if url.path == "/chat-read":
+            record({"method": "POST", "path": url.path, "body": body})
+            session = body.get("session", "")
+            agent_id = next((a["agent_id"] for a in agents if a["session"] == session), "")
+            broadcast({"type": "chat-read", "session": session, "agent_id": agent_id, "at_ms": int(time.time() * 1000)})
+            return self.reply(200, {"ok": True})
         if url.path == "/tool-explanations/settings":
             for key in ("enabled", "detail_level"):
                 if key in body:
@@ -3144,13 +3190,29 @@ class Handler(BaseHTTPRequestHandler):
             if body.get("name") == "Nobody":
                 return self.reply(409, {"error": "contact is busy"})
             return self.reply(200, {"ok": True, "session": body.get("session")})
+        if url.path.startswith("/decisions/") and url.path.endswith("/undo"):
+            # decision_undo: pending again while held, else too late.
+            record({"method": "POST", "path": url.path, "body": body})
+            decision = url.path.split("/")[2]
+            with state_lock:
+                held = held_answers.pop(decision, None)
+                if held is None or held[0] != body.get("expected_revision"):
+                    return self.reply(409, {"error": "too_late"})
+                attention.append(held[1])
+            broadcast({"type": "attention-updated"})
+            return self.reply(200, {"undone": True, "artifact": {"decision": {"decision_id": decision, "revision": held[0] + 1, "status": "pending"}}})
         if url.path.startswith("/decisions/") and (url.path.endswith("/resolve") or url.path.endswith("/dismiss")):
             # A resolved decision leaves the attention list; an artifact's
             # decision takes the answer, unless the user saw an older one.
             decision = url.path.split("/")[2]
             owner = None
             with state_lock:
-                attention[:] = [a for a in attention if a.get("id") != decision]
+                if body.get("undo_ms"):
+                    # Held for Undo: the item it was, at the answer's revision.
+                    item = next((a for a in attention if a.get("id") == decision or a.get("decision_id") == decision), None)
+                    if item is not None:
+                        held_answers[decision] = ((body.get("expected_revision") or 0) + 1, item)
+                attention[:] = [a for a in attention if a.get("id") != decision and a.get("decision_id") != decision]
                 for artifact in artifacts:
                     held = artifact.get("decision") or {}
                     if held.get("decision_id") == decision:
@@ -3175,7 +3237,11 @@ class Handler(BaseHTTPRequestHandler):
                     owner["updated_at"] = int(time.time() * 1000)
             if owner is not None:
                 announce([owner.get("artifact_id", "")], owner.get("session", ""))
-            return self.reply(200, {"ok": True, "decision_id": decision, "status": body.get("choice")})
+            answer = {"ok": True, "decision_id": decision, "status": body.get("choice")}
+            if decision in held_answers:
+                answer["artifact"] = {"decision": {"decision_id": decision, "revision": held_answers[decision][0],
+                                                   "undoable": True, "undo_until": int(time.time() * 1000) + body["undo_ms"]}}
+            return self.reply(200, answer)
         if url.path.startswith("/artifacts/") and url.path.endswith("/submit"):
             # A form's answers: a receipt echoing the submission, or 409
             # when the form changed since it was opened.
