@@ -13,6 +13,8 @@ import {
 import { actionLabel, errorSentence, errorTime } from '../../web/src/lib/live/turn-error-text.js';
 import { t } from '../../web/src/stores/i18n.svelte.js';
 import en from '../../web/src/lib/i18n/en.json';
+import { conversations } from '../../web/src/stores/conversations.svelte.js';
+import { errorPlanFor, sessionOfTurn } from '../../web/src/stores/turn-errors.svelte.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const fixture = JSON.parse(fs.readFileSync(path.join(here, '..', 'fixtures', 'turn-errors.json'), 'utf8'));
@@ -92,5 +94,19 @@ describe('turn errors', () => {
   it('the live failure is the newest card', () => {
     const plan = planTurnErrors(rows, { key: 'live', error: fixture.live_turn_op.turn.error });
     expect(plan.actionable).toBe('live');
+  });
+
+  it('a card finds its chat and the chat\'s plan by itself', () => {
+    conversations.bySession['tt-codex'] = { turns: rows.map(r => ({ ...r })) };
+    const turns = conversations.bySession['tt-codex'].turns;
+    const card = turns.find(r => r.id === 'marker-u3');
+    expect(sessionOfTurn(card)).toBe('tt-codex');
+    const plan = errorPlanFor('tt-codex');
+    expect([...plan.hidden]).toEqual(['marker-u1', 'marker-u2']);
+    expect(plan.counts.get('marker-u3')).toBe(3);
+    expect(errorPlanFor('tt-codex')).toBe(plan);
+    conversations.bySession['tt-codex'].turns = [...turns, { id: 'a9', role: 'assistant', text: 'Done.' }];
+    expect(errorPlanFor('tt-codex').actionable).toBeNull();
+    delete conversations.bySession['tt-codex'];
   });
 });

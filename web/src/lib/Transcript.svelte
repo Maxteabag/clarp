@@ -4,7 +4,7 @@
   // position or a set of turns.
   import { tick } from 'svelte';
   import { mergeTimeline } from '@core/timeline.js';
-  import { currentTurnItems, explainedError, liveInsertIndex, planTurnErrors, takenOverTurns } from '@core/live-present.js';
+  import { currentTurnItems, liveInsertIndex, takenOverTurns } from '@core/live-present.js';
   import { liveSegmentItems, withLiveSegments } from '@core/live-timeline.js';
   import Turn from './Turn.svelte';
   import WorkRow from './WorkRow.svelte';
@@ -52,11 +52,6 @@
   let lastHidden = null;
   let hidden = $derived.by(() => (lastHidden = takenOverTurns(conv.turns, liveItems, lastHidden, liveState && liveState.turn)));
   let turns = $derived(hidden.size ? conv.turns.filter(t => !hidden.has(t.id)) : conv.turns);
-  // Failed turns the Host explains (docs/turn-errors.md): repeats of one failure with no
-  // reply between them draw as the newest with a count; only the newest offers a retry.
-  let liveFailure = $derived(liveItems.length && liveState.turn && liveState.turn.status === 'failed'
-    ? explainedError(liveState.turn.error) : null);
-  let errorPlan = $derived(planTurnErrors(turns, liveFailure ? { key: 'live', error: liveFailure } : null));
   // Read both lists at the top level so the tracking sees them.
   let merged = $derived(mergeTimeline(turns, liveItems.length ? [] : conv.activity));
   // The live turn sits where its turn started, as one keyed entry, so a
@@ -237,10 +232,10 @@
     {#if entry.type === 'turn'}
       {#if entry.item.hidden_before && prefs.showCoordinationLine}<HiddenRun count={entry.item.hidden_before} onShow={showCoordination} />{/if}
       {#if fold.byRow.has('before:' + entry.item.id)}<WorkRow fold={fold.byRow.get('before:' + entry.item.id)} />{/if}
-      {#if !errorPlan.hidden.has(entry.item.id)}<Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} {errorPlan} {session} />{/if}
+      <Turn turn={entry.item} strip={fold.stripped.get(entry.item.id)} />
       {#if fold.byRow.has(entry.item.id)}<WorkRow fold={fold.byRow.get(entry.item.id)} />{/if}
     {:else if entry.type === 'live'}
-      <LiveTurn {liveState} items={liveSegmentItems(liveItems, entry)} last={entry.last !== false} explanations={live.explanations.enabled} {errorPlan} {session} />
+      <LiveTurn {liveState} items={liveSegmentItems(liveItems, entry)} last={entry.last !== false} explanations={live.explanations.enabled} />
     {:else if entry.type === 'artifact'}
       <RenderSpecCard row={entry.item} />
     {:else}

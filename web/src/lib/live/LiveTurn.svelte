@@ -12,9 +12,9 @@
 
   // `last`: this part is the one the turn ends in (a turn split at a steer draws its
   // fold button and error once, there); an unsplit turn is its own last part.
-  // `errorPlan`/`session`: the chat's failure cards (planTurnErrors), so the
-  // live failure counts repeats and offers a retry only while it is the newest.
-  let { liveState, items, explanations = true, last = true, errorPlan = null, session = '' } = $props();
+  import { errorPlanFor, sessionOfLive } from '../../stores/turn-errors.svelte.js';
+
+  let { liveState, items, explanations = true, last = true } = $props();
 
   let running = $derived(items.some(i => i.status === 'running' || i.status === 'pending'));
   // Elapsed times and the 600 ms output delay need a clock, but only while
@@ -40,6 +40,10 @@
   let foldId = $derived(`fold:${liveState.turn ? liveState.turn.turn_id : ''}`);
   let foldOpen = $derived(isOpen(foldId));
   let shown = $derived(!fold || foldOpen ? rows : fold.visible);
+  // An explained failure (docs/turn-errors.md): the chat's cards, so the live card counts the
+  // repeats before it and offers a retry only while it is the newest.
+  let session = $derived(fold && fold.error && fold.error.explained ? sessionOfLive(liveState) : '');
+  let errorPlan = $derived(session ? errorPlanFor(session) : null);
 </script>
 
 <div class="live-turn" class:settled={!!fold}>

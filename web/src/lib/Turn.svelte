@@ -8,9 +8,9 @@
 
   // `strip`: the tool calls, cells and commentary the turn's work row took
   // (static/lib/history-fold.js).
-  // `errorPlan`/`session`: the chat's failure cards (planTurnErrors): this
-  // card's count of repeats and whether it offers a retry.
-  let { turn: row, strip = null, errorPlan = null, session = '' } = $props();
+  import { errorPlanFor, sessionOfTurn } from '../stores/turn-errors.svelte.js';
+
+  let { turn: row, strip = null } = $props();
   let turn = $derived(strip ? {
     ...row,
     text: strip.text ? '' : row.text,
@@ -36,6 +36,11 @@
   let streaming = $derived(turn.kind === 'live' && !!turn.text);
   // A row the Host wrote about a turn (it failed, a restart cut it short).
   let notice = $derived(systemNotice(turn));
+  // An explained failure (docs/turn-errors.md): its chat, and the chat's cards: an older repeat
+  // is drawn as the newest of its run, and only the newest card offers a retry.
+  let session = $derived(notice && notice.explained ? sessionOfTurn(row) : '');
+  let errorPlan = $derived(session ? errorPlanFor(session) : null);
+  let repeat = $derived(!!errorPlan && errorPlan.hidden.has(turn.id));
   let html = $derived.by(() => {
     turn.revision;      // tracked: a growing assistant row bumps this
     return streaming ? (turn.tools || []).map(renderTool).join('') : renderTurnBodyCached(turn);
@@ -44,7 +49,7 @@
 
 <!-- .turn carries content-visibility in styles.css, so an off-screen row
      costs no layout or paint. -->
-{#if empty}
+{#if empty || repeat}
 {:else if notice}
 <div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} explained={notice.explained || null} {session}
   count={errorPlan ? errorPlan.counts.get(turn.id) || 1 : 1} actionable={!!errorPlan && errorPlan.actionable === turn.id} /></div>
