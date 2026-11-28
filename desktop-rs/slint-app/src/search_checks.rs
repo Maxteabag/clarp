@@ -523,7 +523,14 @@ fn marked_words(id: &str) -> Option<bool> {
     Some(block.styled != plain)
 }
 
-const CODE: &str = "fn survey() {\n    let heron = \"<Héron> & **lake**\";\n\n    record(heron);\n}";
+const CODE: &str = concat!(
+    "heron! {\n",
+    "    heron(\"<Héron> & **lake**\");\n",
+    "\n",
+    "    // Walk the northern lakes in survey order, counting the birds on each shore before crossing to the next inlet. ",
+    "Record the observation beside its station, preserve the route in the field notes, and finish the pass at the heron\n",
+    "}",
+);
 
 fn fenced_message() -> String {
     format!("```rust\n{CODE}\n```")
@@ -559,7 +566,36 @@ fn fenced_frame(out: &str, name: &str, window: &crate::AppWindow) {
         return;
     }
     let crop = image::imageops::crop_imm(&frame, x, y, width, height).to_image();
-    check(crop.pixels().any(|p| p.0 == [mark.red(), mark.green(), mark.blue()]), "the code itself contains pixels in the find highlight colour");
+    // The underline spans the word in the mark colour. The first two
+    // physical lines start with identical words, four monospace columns apart.
+    let ink = [mark.red(), mark.green(), mark.blue()];
+    let mut underlines = Vec::new();
+    let mut previous_y = None;
+    for (y, row) in crop.rows().enumerate() {
+        let mut run = 0;
+        for (x, pixel) in row.enumerate() {
+            run = if pixel.0 == ink { run + 1 } else { 0 };
+            if run == 12 {
+                if previous_y != Some(y.saturating_sub(1)) {
+                    underlines.push((x + 1 - run, y));
+                }
+                previous_y = Some(y);
+                break;
+            }
+        }
+    }
+    if let [(first_x, first_y), (indented_x, second_y), (_, last_y)] = underlines.as_slice() {
+        // The second line's first underline is displaced by four character
+        // cells. Measure one five-letter word from the first underline.
+        let word_width = (*first_x..crop.width() as usize).take_while(|x| crop.get_pixel(*x as u32, *first_y as u32).0 == ink).count();
+        let indent = indented_x.saturating_sub(*first_x);
+        check((5 * indent).abs_diff(4 * word_width) <= 10, "the rendered indent is four monospace columns");
+        // The last mark is on source line four. Without wrapping it would
+        // sit three line heights below the first, including the empty line.
+        check(last_y - first_y > 3 * (second_y - first_y) + 2, "the long code line wraps and its final word is visible");
+    } else {
+        check(false, &format!("expected find underlines on three separate code lines, found {underlines:?}"));
+    }
     let zoom = image::imageops::resize(&crop, width * 2, height * 2, image::imageops::FilterType::Nearest);
     check(zoom.save(format!("{out}/{name}-code.png")).is_ok(), "saved the enlarged code and its active highlight");
     let block = app_now().active_messages().and_then(|rows| rows.iter().find(|r| r.id == "o-300")?.blocks.row_data(0));
