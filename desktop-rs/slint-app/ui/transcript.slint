@@ -645,6 +645,7 @@ export component BlockIcon inherits Rectangle {
 // Copy: the icon turns into a checkmark for a moment (no toast).
 export component CopyIcon inherits Rectangle {
     in property <string> text;
+    // i18n: chat, code block header, accessibility label of the copy icon button (an action: copy the code)
     in property <string> label: @tr("Copy code");
     in property <length> size: 16px * ChatText.scale;
     // Its button's accessible id.
@@ -656,6 +657,7 @@ export component CopyIcon inherits Rectangle {
         accessible-id: root.key;
         size: root.size;
         icon: root.copied ? @image-url("icons/check.svg") : @image-url("icons/copy.svg");
+        // i18n: chat and code/table viewer, accessibility label the copy icon takes for a moment after copying (a state: the text was copied)
         label: root.copied ? @tr("Copied") : root.label;
         clicked => {
             BlockBridge.copy(root.text);
@@ -713,6 +715,7 @@ export component Block inherits VerticalLayout {
     // the block that did not drag, opens it over the window.
     if root.block.kind == "code": code-box := Rectangle {
         property <length> line: 30px * ChatText.scale;
+        // i18n: chat, code block header, left label when the code names no language (noun: a block of program code)
         property <string> name: root.block.language != "" ? root.block.language : @tr("Code");
         background: Palette.sunken;
         border-radius: 6px;
@@ -764,6 +767,7 @@ export component Block inherits VerticalLayout {
             size: 16px * ChatText.scale;
             accessible-id: root.measuring || !root.viewer ? "" : "code-expand";
             icon: @image-url("icons/expand.svg");
+            // i18n: chat, code block header, accessibility label of the icon button that opens the code full screen (verb)
             label: @tr("Expand");
             clicked => { BlockBridge.open(root.block); }
         }
@@ -830,6 +834,7 @@ export component Block inherits VerticalLayout {
                     y: (parent.height - self.height) / 2;
                     accessible-id: root.measuring ? "" : "table-expand";
                     icon: @image-url("icons/expand.svg");
+                    // i18n: chat, line over a wide table, accessibility label of the icon button that opens the table full screen (verb)
                     label: @tr("Expand");
                     clicked => { BlockBridge.open(root.block); }
                 }

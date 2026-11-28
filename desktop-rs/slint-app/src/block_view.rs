@@ -14,7 +14,8 @@ pub fn bind(window: &AppWindow) {
     bridge.on_copy(|text| {
         if let Err(error) = crate::platform::clipboard::copy(&text) {
             if let Some(app) = crate::app() {
-                app.engine.borrow_mut().report_error(&format!("Could not copy: {error}"));
+                // i18n: error line over the chat when a copy icon could not put the text on the clipboard; {} is the system's reason
+                app.engine.borrow_mut().report_error(&clarp_core::tr!("Could not copy: {}", error));
             }
         }
     });

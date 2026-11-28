@@ -42,6 +42,7 @@ export component BlockView inherits Rectangle {
     changed block => { root.wrap = true; }
     background: Palette.window;
     accessible-role: groupbox;
+    // i18n: full-screen viewer, accessibility label of the whole view (nouns): "Code" for a code block, "Table" for a table
     accessible-label: root.code ? @tr("Code") : @tr("Table");
     // Nothing under it takes a click.
     TouchArea { }
@@ -65,6 +66,7 @@ export component BlockView inherits Rectangle {
                 accessible-id: "block-view-wrap";
                 size: 18px;
                 icon: @image-url("icons/wrap.svg");
+                // i18n: code viewer, accessibility label of the toggle icon button that wraps long lines (an action)
                 label: @tr("Wrap lines");
                 on: root.wrap;
                 accessible-checkable: true;
@@ -75,12 +77,14 @@ export component BlockView inherits Rectangle {
                 key: "block-view-copy";
                 size: 18px;
                 text: root.code ? root.block.text : root.block.source;
+                // i18n: full-screen viewer, accessibility label of the copy icon button (actions): copy the code, or copy the table as Markdown text
                 label: root.code ? @tr("Copy code") : @tr("Copy table");
             }
             BlockIcon {
                 accessible-id: "block-view-close";
                 size: 18px;
                 icon: @image-url("icons/close.svg");
+                // i18n: full-screen viewer, accessibility label of the close icon button (verb: close the viewer)
                 label: @tr("Close");
                 clicked => { root.done(); }
             }
@@ -113,6 +117,7 @@ export component BlockView inherits Rectangle {
                 ((column < root.block.columns.length ? root.block.columns[column] : 4) * table.char + table.pad) * table.grow
             }
             accessible-role: AccessibleRole.table;
+            // i18n: table viewer, accessibility label of the table; {n} is how many columns it has
             accessible-label: @tr("{n} column" | "{n} columns" % self.count);
             clip: true;
             head := Rectangle {
