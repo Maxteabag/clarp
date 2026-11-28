@@ -637,7 +637,8 @@ export component AppWindow inherits Window {
                         drop-shadow-blur: 8px;
                         drop-shadow-color: #00000060;
                         accessible-role: text;
-                        accessible-label: "Error banner";
+                        // i18n: main window, accessibility label of the red banner across the top that shows an error (noun)
+                        accessible-label: @tr("Error banner");
                         Rectangle { background: Palette.danger-surface; }
                         // Clicks on the banner stay on it.
                         TouchArea {}
@@ -657,12 +658,14 @@ export component AppWindow inherits Window {
                                 spacing: 4px;
                                 padding-left: 12px;
                                 Text { text: root.error-dismiss-key; color: Palette.danger; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
-                                Text { text: "Dismiss"; color: Palette.danger; font-size: 11 * Look.unit; vertical-alignment: center; }
+                                // i18n: main window, error banner, word after the key that closes the banner (verb: dismiss the error)
+                                Text { text: @tr("Dismiss"); color: Palette.danger; font-size: 11 * Look.unit; vertical-alignment: center; }
                             }
                             Rectangle {
                                 width: 28px;
                                 accessible-role: button;
-                                accessible-label: "Dismiss";
+                                // i18n: main window, error banner, accessibility label of the close button (verb: dismiss the error)
+                                accessible-label: @tr("Dismiss");
                                 Image {
                                     source: @image-url("icons/rail-close.svg");
                                     width: 16px;
