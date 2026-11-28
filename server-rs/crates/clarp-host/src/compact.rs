@@ -41,7 +41,7 @@ fn bad(why: &str) -> Response {
 /// `POST /compact {"session": ...}`: the agent's tool is asked to make its conversation
 /// shorter. Answered at once; an app watches the agent's row (`compacting`, then
 /// `last_compaction`).
-async fn compact(State(app): State<App>, body: Bytes) -> Response {
+pub(crate) async fn compact(State(app): State<App>, body: Bytes) -> Response {
     let Ok(Value::Object(asked)) = serde_json::from_slice::<Value>(&body) else {
         return bad("bad json");
     };

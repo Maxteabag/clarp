@@ -2097,11 +2097,33 @@ impl Actor {
                 };
                 let model = self.turn_model().unwrap_or_default();
                 let told = failures::told(kind, reason, &model, failures::Known::default());
-                let error = serde_json::json!({
+                let mut error = serde_json::json!({
                     "reason": kind,
                     "message": clarp_kernel::python::first(&told.message, 300),
                     "detail": clarp_kernel::python::first(&told.provider_message, 500),
                 });
+                // The same failure as every app draws it (feature `turn_error_explained`): the
+                // fields above stay for the apps that read only them.
+                let message_id = self
+                    .message_at(settled.message_seq)
+                    .map(|message| message.id)
+                    .unwrap_or_default();
+                explain_into(
+                    &mut error,
+                    &clarp_kernel::turn_error::Failure {
+                        kind,
+                        said: reason,
+                        backend: self.backend.id(),
+                        model: &model,
+                        message_id: &message_id,
+                        trace_id: self
+                            .shown_turn
+                            .as_ref()
+                            .map_or("", |(_, name)| name.as_str()),
+                        resets_at_ms: None,
+                        at_ms: settled.ended_at_ms,
+                    },
+                );
                 ("failed", Some(error))
             }
             Outcome::Stopped { .. } | Outcome::Interrupted { .. } | Outcome::Withdrawn { .. } => {
@@ -3297,6 +3319,22 @@ impl Actor {
         self.live
             .as_ref()
             .map_or(&[], |live| live.drafts.as_slice())
+    }
+}
+
+/// Adds to a live turn's `error` the failure as every app draws it (feature
+/// `turn_error_explained`): its `reason`, `message` and `detail` stay for the apps that read
+/// only them.
+pub(crate) fn explain_into(error: &mut serde_json::Value, failure: &clarp_kernel::turn_error::Failure<'_>) {
+    if let (Some(error), serde_json::Value::Object(more)) = (
+        error.as_object_mut(),
+        clarp_kernel::turn_error::explained(failure),
+    ) {
+        for (key, value) in more {
+            if key != "detail" {
+                error.insert(key, value);
+            }
+        }
     }
 }
 
@@ -5597,6 +5635,19 @@ impl Actor {
             && backend_session
                 .as_deref()
                 .is_some_and(|session| !self.backend.keeps(session));
+        // A session whose history the provider rejected fails the same way however often it
+        // is asked (a tool result it calls empty, a call id too long), and one too long for
+        // its model fits no better: the turn after such a failure begins a new session, which
+        // opens with the Host's own record of the conversation (`docs/turn-errors.md`). A
+        // tool that can shorten its own conversation is asked to (`compact_retry`) instead.
+        let rejected = takeover.is_none()
+            && backend_session.is_some()
+            && self.recorder.agent().last().is_some_and(|last| {
+                matches!(&last.outcome, Outcome::Failed { kind, .. }
+                    if kind == failures::INVALID_REQUEST
+                        || (kind == failures::PROMPT_TOO_LONG && self.backend.shortens_with().is_none()))
+            });
+        let lost = lost || rejected;
         let backend_session = backend_session.filter(|_| !lost);
         // An agent that changed its tool, whose new tool has no session of its conversation:
         // the turn begins one, which opens with the Host's record of it.

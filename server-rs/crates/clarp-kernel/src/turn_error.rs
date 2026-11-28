@@ -69,6 +69,11 @@ static PROVIDER_DOWN_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)upstream request failed|endpoint is unavailable|provider is unavailable")
         .expect("a fixed pattern compiles")
 });
+// The Host's own sentence of a folder that is gone: "This agent's folder /x no longer exists".
+static FOLDER_SAID_RE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(r"folder (\S+) (?:no longer exists|is not a folder)").expect("a fixed pattern compiles")
+});
 // A reset as the Host's own row says it: "· resets 18:27", "· resets Wed 19:00".
 static HOST_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
@@ -98,6 +103,17 @@ pub fn code_of(kind: &str, said: &str) -> &'static str {
     }
     if said.contains("No network for 15 minutes") {
         return "network_gone";
+    }
+    // The Host's own sentences of a message that never ran.
+    if said.contains("was never run") || said.starts_with("The turn could not be started") {
+        return if said.contains("folder") && said.contains("no longer exists") {
+            "folder_missing"
+        } else {
+            "not_started"
+        };
+    }
+    if said.starts_with("This agent's folder") && said.contains("no longer exists") {
+        return "folder_missing";
     }
     match kind {
         failures::USAGE_LIMIT => {
@@ -427,6 +443,12 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
                         .trim()
                         .to_string()
                 })
+                .or_else(|| {
+                    FOLDER_SAID_RE
+                        .captures(said)
+                        .and_then(|found| found.get(1))
+                        .map(|dir| dir.as_str().to_string())
+                })
                 .unwrap_or_default();
             if dir.is_empty() {
                 Said::new(
@@ -529,11 +551,15 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
             push(&mut actions, "copy_details", &copy, false);
         }
         "prompt_too_long" => {
-            push(&mut actions, 
-                "compact_retry",
-                &Said::new("Compact and continue", "Komprimer og fortsett"),
-                true,
-            );
+            // Only Claude Code takes a word to shorten its conversation
+            // (`clarp_backend::Backend::shortens_with`); any other tool starts a fresh session
+            // that opens with the Host's shorter record of the conversation.
+            let (id, label) = if failure.backend == "claude" {
+                ("compact_retry", Said::new("Compact and continue", "Komprimer og fortsett"))
+            } else {
+                ("fresh_retry", Said::new("New session, try again", "Ny økt, prøv igjen"))
+            };
+            push(&mut actions, id, &label, true);
             push(&mut actions, "switch_model", &switch, false);
         }
         "folder_missing" | "provider_mismatch" => push(&mut actions, "copy_details", &copy, false),

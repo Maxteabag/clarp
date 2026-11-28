@@ -122,6 +122,7 @@ pub mod roster;
 pub mod roster_fields;
 pub mod router;
 pub mod schedules;
+pub mod turn_retry;
 pub mod screens;
 pub mod search;
 pub mod seats;

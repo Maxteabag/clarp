@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 216;
+pub const HOST_CONTRACT: u64 = 217;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -104,6 +104,14 @@ pub const FEATURES: &[(&str, u64)] = &[
     // What agents make and ask: the library, the inbox, requests and every way they end.
     // `GET /attention/inbox`: what agents made, a page at a time.
     ("attention_index", 2),
+    // A failed turn says itself as every app draws it: `error` on the `/log` row that tells
+    // it, on the live turn and on `agent-activity`, with a stable code, one sentence in
+    // Norwegian and English, the actions that fit and the tool's raw words
+    // (`docs/turn-errors.md`).
+    ("turn_error_explained", 217),
+    // `POST /turn-retry`: the message of a failed turn sent again, now, at a time, or after
+    // the conversation was made shorter.
+    ("turn_retry", 217),
     ("artifact_summary_v1", 73),
     // `GET /agents/snapshot` and `GET /artifacts` carry a weak `ETag` per caller, and
     // `If-None-Match` with it is answered 304 (issue 805).
@@ -1000,6 +1008,7 @@ pub fn router(app: App) -> Router {
         .merge(crate::calls::routes())
         .merge(crate::chip::routes())
         .merge(crate::compact::routes())
+        .merge(crate::turn_retry::routes())
         .merge(crate::schedules::routes())
         .merge(crate::heartbeat::routes())
         .merge(crate::forks::routes())
@@ -1061,8 +1070,9 @@ pub fn router(app: App) -> Router {
 }
 
 /// The controls of a chat, by their paths: what is asked of an agent a person speaks to.
-const CHAT_CONTROLS: [&str; 23] = [
+const CHAT_CONTROLS: [&str; 24] = [
     "/send",
+    "/turn-retry",
     "/stop",
     "/select",
     "/focus",
@@ -3855,6 +3865,12 @@ pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResp
 }
 
 /// Delivers a due schedule, keeping the prompt and reply in Session view.
+/// A message of the user's sent again at their word (`POST /turn-retry`): the user's send,
+/// from nobody's turn.
+pub(crate) async fn send_again(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
+    send_as(app, request, false, None, &crate::coordination::Made::default(), None).await
+}
+
 pub(crate) async fn send_scheduled_prompt(
     app: &App,
     request: SendRequest,
