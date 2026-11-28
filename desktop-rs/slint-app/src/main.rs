@@ -677,7 +677,12 @@ impl App {
             image,
             decision_id: incoming.decision_id.clone(),
             response_type: incoming.response_type.clone(),
-            choices: if incoming.decision_id.is_empty() {
+            choices: if let Some(failure) = incoming.failure.as_ref().filter(|f| !f.action.is_empty() && f.action != "copy_details") {
+                // A failed turn: its one action, in the words of its card.
+                let action = clarp_core::turn_error::Action { id: failure.action.clone(), at_ms: failure.action_at_ms, ..Default::default() };
+                let label = action.label_in(clarp_core::turn_error_text::app_language(), chrono::Utc::now().timestamp_millis());
+                vec![(format!("{}{}", platform::desktop::FAILURE, failure.action), label)]
+            } else if incoming.decision_id.is_empty() {
                 Vec::new()
             } else {
                 incoming.options.iter().map(|c| (format!("{}{}", platform::desktop::CHOICE, c.id), c.label.clone())).collect()

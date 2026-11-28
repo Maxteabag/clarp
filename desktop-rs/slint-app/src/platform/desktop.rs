@@ -425,6 +425,8 @@ const NOTIFICATION_SETTINGS: &[&str] = &["notify-reply", "desktop-notifications"
 
 /// The action key of an answer button (`choice:<option id>`).
 pub const CHOICE: &str = "choice:";
+/// The action key of a failed turn's button (`failure:<action id>`).
+pub const FAILURE: &str = "failure:";
 
 /// What a popup was for, kept to act on its buttons.
 #[derive(Debug, Clone)]
@@ -543,8 +545,9 @@ pub fn action_invoked(id: u32, key: &str) {
 }
 
 /// What a popup's button does: open the chat at the message, mark it
-/// read, mute the contact, open the notification settings, or answer the
-/// question (opening it when the answer cannot go).
+/// read, mute the contact, open the notification settings, answer the
+/// question, or send a failed turn's message again (opening the chat when
+/// the answer or the retry cannot go, and for Switch model and Sign in).
 pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
     let Some(app) = crate::app() else { return };
     close_chat(session);
@@ -567,6 +570,13 @@ pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type:
             return;
         }
         _ => {}
+    }
+    if key.starts_with(FAILURE) {
+        let retried = app.engine.borrow_mut().retry_from_notification(session, message_id);
+        if retried {
+            crate::pump_now(&app);
+            return;
+        }
     }
     if let Some(option) = key.strip_prefix(CHOICE) {
         let answered = app.engine.borrow_mut().answer_from_notification(decision_id, response_type, option);

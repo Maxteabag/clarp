@@ -1871,6 +1871,7 @@ fn voice_check(out: String) {
 /// replacing the older, none when the Host says no or the chat is on
 /// screen, a question's answers as buttons, the popup closed when the chat
 /// is read elsewhere, an answer from a popup held for Undo and taken back,
+/// a failed turn in its card's words with Try again,
 /// Mark read told to the Host, the NOTIFICATIONS settings and a contact's
 /// choices per event.
 fn desktop_check(out: String) {
@@ -1983,6 +1984,26 @@ fn desktop_check(out: String) {
             }
             check(posts("/decisions/d1/undo")[0]["body"] == serde_json::json!({"expected_revision": 4}), "Undo names the held answer's revision");
             check(true, "Undo brings the question back as a popup");
+            true
+        })),
+        ("failed", Box::new(|_, _window, _| {
+            send(serde_json::json!({"type": "user-notification", "event": "failed", "alert": true, "unread": true, "notification_id": "failed-t1",
+                                    "session": "rachel", "agent_id": "a1", "persona": "Rachel", "message_id": "m-f1",
+                                    "error_code": "connection", "body_loc_key": "error.connection", "body_loc_args": ["Claude"],
+                                    "body": "Lost the connection.", "primary_action": "retry"}));
+            true
+        })),
+        ("retry", Box::new(|_, _window, _| {
+            let Some(failed) = popups().into_iter().find(|n| n["message_id"] == "m-f1") else { return false };
+            check(failed["body"] == "Lost the connection to Claude, and the Host's retries did not get through. Try again.",
+                  &format!("a failed turn says its card's sentence: {}", failed["body"]));
+            check(failed["actions"][1] == "failure:retry", &format!("with its action beside Open: {}", failed["actions"]));
+            crate::platform::desktop::act_on("rachel", "m-f1", "", "", "failure:retry");
+            true
+        })),
+        ("retried", Box::new(|_, _window, _| {
+            let Some(retry) = posts("/turn-retry").first().cloned() else { return false };
+            check(retry["body"] == serde_json::json!({"session": "rachel", "message_id": "m-f1"}), &format!("Try again sends the message again: {}", retry["body"]));
             true
         })),
         ("mark read", Box::new(|app, _window, _| {

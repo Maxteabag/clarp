@@ -41,6 +41,8 @@ pub(crate) struct Notifications {
     undo: bool,
     /// Questions that popped up, newest last, to show again after Undo.
     questions: Vec<Popup>,
+    /// Failed turns that popped up, newest last, for their button.
+    failures: Vec<Popup>,
     /// Answers sent from a popup, by decision id: the answer's words, and
     /// the revision Undo names once the Host has held it.
     answers: std::collections::HashMap<String, (String, Option<i64>)>,
@@ -194,6 +196,22 @@ impl Engine {
             }
             _ => false,
         }
+    }
+
+    /// A failed turn's popup button: sends the message again as its action
+    /// says (`POST /turn-retry`, through the same call as the chat's card).
+    /// False when the action does not send (switch_model, sign_in) or the
+    /// failure is not known here: the caller opens the chat.
+    pub fn retry_from_notification(&mut self, session: &str, message_id: &str) -> bool {
+        on_peer!(self.peer_mut(session), |engine, local| engine.retry_from_notification(local, message_id));
+        let Some(popup) = self.notifications.failures.iter().rev().find(|p| p.session == session && p.notification.message_id == message_id).cloned() else {
+            return false;
+        };
+        let Some(failure) = popup.notification.failure.as_ref().filter(|f| f.retries()) else { return false };
+        let error = failure.turn_error(message_id, &popup.body);
+        let Some(action) = error.actions.first().cloned() else { return false };
+        self.turn_retry(session, &error, &action);
+        true
     }
 
     /// Takes back an answer sent from a popup while the Host still holds
@@ -388,12 +406,26 @@ impl Engine {
         }
         let title = Some(incoming.persona.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| session.clone());
         let mut body = clarp_core::decision_receipt::preview_line(&incoming.preview);
+        // A failed turn says what its card says, in the app's language.
+        if let Some(failure) = &incoming.failure {
+            let now = chrono::Utc::now().timestamp_millis();
+            let sentence = failure.turn_error(&incoming.message_id, &body).sentence_in(clarp_core::turn_error_text::app_language(), now);
+            if !sentence.is_empty() {
+                body = sentence;
+            }
+        }
         if body.is_empty() {
             let key = format!("notify.body.{}", incoming.event);
             let words = notify_events::text(&key);
             body = if words == key { notify_events::text("notify.body.reply").to_owned() } else { words.to_owned() };
         }
         let popup = Popup { title, body, session, notification: incoming, selected };
+        if popup.notification.failure.is_some() {
+            let failures = &mut self.notifications.failures;
+            failures.push(popup.clone());
+            let extra = failures.len().saturating_sub(QUESTIONS_KEPT);
+            failures.drain(..extra);
+        }
         if !popup.notification.decision_id.is_empty() {
             let questions = &mut self.notifications.questions;
             questions.retain(|q| q.notification.decision_id != popup.notification.decision_id);

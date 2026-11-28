@@ -14,6 +14,7 @@ use std::collections::{HashMap, VecDeque};
 use serde_json::{Value, json};
 
 use crate::json::{self, Object};
+use crate::turn_error::{Action, TurnError, Words};
 
 /// The Host feature that sends `event` and `alert` and keeps the settings.
 pub const FEATURE: &str = "notification_events";
@@ -278,7 +279,55 @@ impl Failure {
     /// The action sends the message again (`POST /turn-retry`); the others
     /// (switch_model, sign_in) open the chat.
     pub fn retries(&self) -> bool {
-        matches!(self.action.as_str(), "retry" | "retry_at" | "fresh_retry" | "compact_retry")
+        crate::turn_error::retries(&self.action)
+    }
+
+    /// The failure as a failed turn's card has it (`turn_error`), so the
+    /// popup says the same sentence and its button does the same: the
+    /// arguments named by the key's English placeholders in order (`{time}`
+    /// from `time_ms`), the Host's English as the fallback, and the one
+    /// action. `copy_details` has no place in a popup.
+    pub fn turn_error(&self, message_id: &str, fallback: &str) -> TurnError {
+        let mut params = Object::new();
+        let template = crate::turn_error_text::ENGLISH.iter().find(|(k, _)| *k == self.body_loc_key).map_or("", |(_, t)| t);
+        let mut names: Vec<&str> = Vec::new();
+        for part in template.split('{').skip(1) {
+            if let Some((name, _)) = part.split_once('}')
+                && !names.contains(&name)
+            {
+                names.push(name);
+            }
+        }
+        for (name, arg) in names.iter().zip(&self.body_loc_args) {
+            match *name {
+                "time" => {
+                    if let Ok(at) = arg.parse::<i64>() {
+                        params.insert("time_ms".into(), Value::from(at));
+                    }
+                }
+                _ => {
+                    params.insert((*name).into(), Value::from(arg.as_str()));
+                }
+            }
+        }
+        if let Some(at) = self.time_ms {
+            params.insert("time_ms".into(), Value::from(at));
+        }
+        let actions = Some(&self.action)
+            .filter(|id| !id.is_empty() && id.as_str() != "copy_details")
+            .map(|id| Action { id: id.clone(), at_ms: self.action_at_ms, ..Action::default() })
+            .into_iter()
+            .collect();
+        TurnError {
+            code: self.code.clone(),
+            key: self.body_loc_key.clone(),
+            params,
+            text: Words { en: fallback.to_owned(), nb: String::new() },
+            actions,
+            message_id: message_id.to_owned(),
+            resets_at_ms: self.time_ms,
+            ..TurnError::default()
+        }
     }
 }
 
@@ -570,6 +619,30 @@ mod tests {
         let plain = Incoming::parse(&object(json!({"event": "failed", "error_code": "auth", "primary_action": "sign_in"})));
         assert!(!plain.failure.unwrap().retries());
         assert_eq!(Incoming::parse(&object(json!({"event": "reply"}))).failure, None);
+    }
+
+    #[test]
+    fn a_failure_reads_as_its_card_does() {
+        let failure = Incoming::parse(&object(json!({
+            "event": "failed", "error_code": "usage_limit", "body_loc_key": "error.usage_limit_until",
+            "body_loc_args": ["Claude", "1795800000000"], "time_ms": 1795800000000i64, "primary_action": "retry_at",
+            "body": "Your Claude account is out of usage.",
+        })))
+        .failure
+        .unwrap();
+        let error = failure.turn_error("m9", "Your Claude account is out of usage.");
+        assert_eq!(error.params.get("backend"), Some(&json!("Claude")));
+        assert_eq!(error.params.get("time_ms"), Some(&json!(1795800000000i64)));
+        assert_eq!((error.message_id.as_str(), error.actions.len()), ("m9", 1));
+        // retry_at with no time of its own retries at the reset.
+        assert_eq!(error.retry_body("s", &error.actions[0]), Some(json!({"session": "s", "message_id": "m9", "at_ms": 1795800000000i64})));
+        let sentence = error.sentence_in("en", 1795790000000);
+        assert!(sentence.starts_with("Your Claude account is out of usage until ") && !sentence.contains('{'), "{sentence}");
+        // A key the catalog lacks: the Host's English.
+        let unknown = Failure { body_loc_key: "error.brand_new".into(), action: "copy_details".into(), ..Failure::default() };
+        let error = unknown.turn_error("m1", "Something new broke.");
+        assert_eq!(error.sentence_in("en", 0), "Something new broke.");
+        assert!(error.actions.is_empty(), "no Copy diagnostics in a popup");
     }
 
     #[test]
