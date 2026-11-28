@@ -55,7 +55,7 @@ pub fn host_down_check(out: String) {
             bridge(window).invoke_copy_diagnostics(down.url.clone().into());
             let clipboard = std::env::var_os("CLARP_TEST_CLIPBOARD").and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
             check(clipboard.starts_with("Clarp diagnostics\n") && clipboard.lines().count() <= 15, &format!("the diagnostics: {clipboard}"));
-            for private in ["127.0.0.1", "Fake Host", "fake-host", "probe-token", "rachel", "http"] {
+            for private in ["127.0.0.1", "Fake Host", "fake-host", "probe-token", "rachel", "://"] {
                 check(!clipboard.contains(private), &format!("the diagnostics leave out {private}: {clipboard}"));
             }
             check(bridge(window).get_copied(), "and say so");
