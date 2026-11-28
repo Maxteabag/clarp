@@ -683,14 +683,18 @@ impl ArtifactBook {
             .collect()
     }
 
-    /// The earliest moment a pending request runs out, or a held answer or form submission
-    /// is to be told to its agent, for whoever sets the alarm.
+    /// The earliest moment a pending request runs out, for whoever sets the alarm.
     pub fn next_expiry(&self) -> Option<i64> {
-        let runs_out = self
-            .artifacts()
+        self.artifacts()
             .filter_map(|artifact| artifact.decision.as_ref())
             .filter(|decision| decision.status == "pending")
-            .filter_map(|decision| decision.expires_at);
+            .filter_map(|decision| decision.expires_at)
+            .min()
+    }
+
+    /// The earliest moment a held answer or form submission is to be told to its agent, for
+    /// whoever sets the alarm.
+    pub fn next_hold(&self) -> Option<i64> {
         let held = self
             .artifacts()
             .filter_map(|artifact| artifact.decision.as_ref())
@@ -702,7 +706,7 @@ impl ArtifactBook {
                 .filter(|submission| submission.delivered_at.is_none())
                 .filter_map(|submission| submission.hold_until)
         });
-        runs_out.chain(held).chain(forms).min()
+        held.chain(forms).min()
     }
 
     /// The requests whose end is to be told to the agent now: not held any more.
@@ -829,10 +833,12 @@ impl ArtifactBook {
         if decision.revision != expected_revision {
             return refuse("decision revision changed");
         }
-        // Told already: only a message that still waits its turn can be taken back.
+        // Told already: only a message that still waits its turn can be taken back, and only
+        // of an answer the app offered to undo (held). Another, such as the answer to one of
+        // the Host's own cards, did what it asked when it was given.
         let queued = match delivery.status.as_str() {
             "pending" => None,
-            "delivered" => Some(decision.message_id()),
+            "delivered" if delivery.hold_until.is_some() => Some(decision.message_id()),
             _ => return refuse(TOO_LATE),
         };
         let now = now.max(artifact.updated_at + 1);

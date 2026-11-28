@@ -677,7 +677,7 @@ impl ArtifactBook {
             return Err(Refusal::new("not_open", "").refused());
         };
         let sid = data.get("submission_id").and_then(J::str);
-        if sid.is_some_and(|sid| form.taken_back.iter().any(|back| back == sid)) {
+        if sid.is_some_and(|sid| self.was_taken_back(sid)) {
             return Err(Refusal::new("reused_id", "/submission_id").refused());
         }
         let own = sid.and_then(|sid| self.submission(sid));

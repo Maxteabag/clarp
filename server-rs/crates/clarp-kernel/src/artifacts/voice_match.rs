@@ -235,21 +235,34 @@ fn by_position(word: &str, count: usize) -> Option<usize> {
     (index < count).then_some(index)
 }
 
-/// The option whose label the words are: equal to it, a prefix of only it, or holding only it
-/// with nothing else of substance.
+/// The option whose label the words are exactly, where only one is.
+fn by_whole_label(said: &[String], labels: &[Vec<String>]) -> Option<usize> {
+    let text = joined(said);
+    let found: Vec<usize> = (0..labels.len())
+        .filter(|&i| !text.is_empty() && joined(&labels[i]) == text)
+        .collect();
+    (found.len() == 1).then(|| found[0])
+}
+
+/// The option the words name by its letter or its number: one word, or a letter followed by
+/// that option's own whole label ("B, Pebble").
+fn by_spoken_position(said: &[String], labels: &[Vec<String>]) -> Option<usize> {
+    match said {
+        [word] => by_position(word, labels.len()),
+        [word, rest @ ..] => by_position(word, labels.len())
+            .filter(|&index| by_whole_label(rest, labels) == Some(index)),
+        [] => None,
+    }
+}
+
+/// The option whose label the words begin (three letters or more) or hold with nothing else
+/// of substance, where only one does.
 fn by_label(said: &[String], labels: &[Vec<String>]) -> Option<usize> {
     let text = joined(said);
     if text.is_empty() {
         return None;
     }
     let only = |found: Vec<usize>| (found.len() == 1).then(|| found[0]);
-    if let Some(index) = only(
-        (0..labels.len())
-            .filter(|&i| joined(&labels[i]) == text)
-            .collect(),
-    ) {
-        return Some(index);
-    }
     if text.chars().count() >= 3
         && let Some(index) = only(
             (0..labels.len())
@@ -322,18 +335,13 @@ pub fn voice_match(decision: &Decision, transcript: &str, commands: &Commands) -
                 .iter()
                 .map(|option| words(option["label"].as_str().unwrap_or_default()))
                 .collect();
-            let count = labels.len();
-            let chosen = by_label(&said, &labels).or_else(|| {
-                let plain = plain_choice(said.clone());
-                match plain.as_slice() {
-                    [word] => by_position(word, count).or_else(|| by_label(&plain, &labels)),
-                    // A letter followed by its own label: "B, Pebble".
-                    [word, rest @ ..] => by_position(word, count)
-                        .filter(|&index| by_label(rest, &labels) == Some(index))
-                        .or_else(|| by_label(&plain, &labels)),
-                    [] => None,
-                }
-            });
+            // A whole label first, then a letter or a number, then the rest of a label.
+            let plain = plain_choice(said.clone());
+            let chosen = by_whole_label(&said, &labels)
+                .or_else(|| by_whole_label(&plain, &labels))
+                .or_else(|| by_spoken_position(&plain, &labels))
+                .or_else(|| by_label(&said, &labels))
+                .or_else(|| by_label(&plain, &labels));
             match chosen {
                 Some(index) => {
                     let option = &decision.options[index];

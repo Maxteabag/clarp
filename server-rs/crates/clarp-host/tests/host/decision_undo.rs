@@ -116,8 +116,8 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
     assert!(said["artifact"]["decision"].get("undoable").is_none(), "{said}");
 }
 
-/// An answer that became a message waiting behind the agent's running turn is taken back from
-/// the queue; the next answer reaches the agent as a message of its own.
+/// A held answer that became a message waiting behind the agent's running turn is taken back
+/// from the queue; the next answer reaches the agent as a message of its own.
 #[test]
 fn an_answer_waiting_in_the_queue_is_taken_back_from_it() {
     let place = Place::new("decision-undo-queue");
@@ -154,10 +154,11 @@ fn an_answer_waiting_in_the_queue_is_taken_back_from_it() {
     let (status, said) = host.ask(
         "POST",
         &format!("/decisions/{id}/resolve"),
-        Some(&json!({ "answer": { "option_id": "b" }, "expected_revision": 1 })),
+        Some(&json!({ "answer": { "option_id": "b" }, "expected_revision": 1, "undo_ms": 300 })),
     );
     assert_eq!(status, 200, "{said}");
     let first = format!("decision-{id}");
+    // The hold ends while the turn runs: the answer waits in the queue, and can still go.
     wait_for("the answer in the queue", || waiting(&first));
     let (status, back) = host.ask(
         "POST",
@@ -170,7 +171,7 @@ fn an_answer_waiting_in_the_queue_is_taken_back_from_it() {
     let (status, said) = host.ask(
         "POST",
         &format!("/decisions/{id}/resolve"),
-        Some(&json!({ "answer": { "option_id": "a" }, "expected_revision": 3 })),
+        Some(&json!({ "answer": { "option_id": "a" }, "expected_revision": 3, "undo_ms": 300 })),
     );
     assert_eq!(status, 200, "{said}");
     let second = format!("decision-{id}-u1");

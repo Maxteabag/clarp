@@ -271,7 +271,7 @@ impl ArtifactBook {
         if form.payload.get("read_only") == Some(&Value::Bool(true)) {
             return refuse(READ_ONLY);
         }
-        if form.taken_back.contains(&sent.submission_id) {
+        if self.was_taken_back(&sent.submission_id) {
             return refuse(TAKEN_BACK);
         }
         // Putting a form away only hides it in the inbox; it does not close it.
@@ -343,6 +343,12 @@ impl ArtifactBook {
             .collect()
     }
 
+    /// Whether answers under this id were taken back from any of this agent's forms.
+    pub fn was_taken_back(&self, submission_id: &str) -> bool {
+        self.artifacts()
+            .any(|form| form.taken_back.iter().any(|back| back == submission_id))
+    }
+
     /// The submissions to be told to their agent now (not held any more), the oldest first:
     /// each with the id of its form.
     pub fn untold_due(&self, now: i64) -> Vec<(String, String)> {
@@ -382,11 +388,15 @@ impl ArtifactBook {
         else {
             return Ok(Taken::Gone(form.clone()));
         };
+        // Told already: only a message that still waits its turn can be taken back, and only
+        // of answers the app offered to undo (held).
+        let told = form.submissions[index].delivered_at.is_some();
+        if told && form.submissions[index].hold_until.is_none() {
+            return refuse(super::decisions::TOO_LATE);
+        }
         let mut form = form.clone();
         let submission = form.submissions.remove(index);
-        let queued = submission
-            .delivered_at
-            .map(|_| answer_row_id(&submission.submission_id));
+        let queued = told.then(|| answer_row_id(&submission.submission_id));
         if let Some(status) = submission.reopen_status {
             form.status = status;
             form.completed_at = None;

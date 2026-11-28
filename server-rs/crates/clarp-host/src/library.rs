@@ -548,33 +548,38 @@ fn reopened(
             });
         }
     };
-    let mut taken_back = None;
-    if let Some(message_id) = queued {
-        let waiting = actor.queue()?;
-        let found = waiting.into_iter().find(|w| w.message_id == message_id);
-        let withdrawn = match &found {
-            Some(waiting) => Some(actor.withdraw(waiting.turn, "user", now)?),
-            None => None,
-        };
-        match withdrawn {
-            Some((true, out)) => {
-                outs.push(out);
-                taken_back = found;
-            }
-            _ => {
-                return Ok(Carried {
-                    said: Err(Refused {
-                        why: Why::Value,
-                        message: decisions::TOO_LATE.to_string(),
-                    }),
-                    outs,
-                    taken_back: None,
-                });
+    // The message is looked for first, then the card is open again, then the message leaves
+    // the queue: nothing starts in between on this thread, and should a write fail, a card
+    // open again with its message still waiting is the half that is sorted out later.
+    let found = match queued {
+        None => None,
+        Some(message_id) => {
+            let waiting = actor.queue()?;
+            match waiting.into_iter().find(|w| w.message_id == message_id) {
+                Some(waiting) => Some(waiting),
+                None => {
+                    return Ok(Carried {
+                        said: Err(Refused {
+                            why: Why::Value,
+                            message: decisions::TOO_LATE.to_string(),
+                        }),
+                        outs,
+                        taken_back: None,
+                    });
+                }
             }
         }
-    }
+    };
     if changed {
         outs.push(actor.keep(&kept(std::slice::from_ref(&artifact)), now)?);
+    }
+    let mut taken_back = None;
+    if let Some(waiting) = found {
+        let (withdrawn, out) = actor.withdraw(waiting.turn, "user", now)?;
+        outs.push(out);
+        if withdrawn {
+            taken_back = Some(waiting);
+        }
     }
     let shown = artifact.public(&record.persona, actor.goals(), now);
     Ok(Carried {
@@ -1423,6 +1428,7 @@ async fn submit(
     // cannot be now.
     let told = |why: Refused| match why.message.as_str() {
         forms::READ_ONLY => refused(StatusCode::BAD_REQUEST, why.message),
+        bad if bad.starts_with("undo_ms ") => refused(StatusCode::BAD_REQUEST, why.message),
         _ => refused(StatusCode::CONFLICT, why.message),
     };
     let mut sent = forms::sent(artifact_id, &data).map_err(told)?;

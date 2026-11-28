@@ -47,6 +47,44 @@
         }
       ]
     },
+    "food": {
+      "response_type": "single_choice",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": [
+        {
+          "id": "beef",
+          "label": "Beef"
+        },
+        {
+          "id": "chicken",
+          "label": "Chicken"
+        },
+        {
+          "id": "fish",
+          "label": "Fish"
+        }
+      ]
+    },
+    "party": {
+      "response_type": "single_choice",
+      "yes_label": "Yes",
+      "no_label": "No",
+      "options": [
+        {
+          "id": "third",
+          "label": "Tredjepart"
+        },
+        {
+          "id": "internal",
+          "label": "Intern"
+        },
+        {
+          "id": "external",
+          "label": "Ekstern"
+        }
+      ]
+    },
     "text": {
       "response_type": "text_input",
       "yes_label": "Yes",
@@ -385,6 +423,54 @@
       "expect": {
         "kind": "custom",
         "text": "B men bare for prod"
+      }
+    },
+    {
+      "request": "food",
+      "text": "bee",
+      "expect": {
+        "kind": "option",
+        "option_id": "chicken",
+        "label": "Chicken"
+      },
+      "note": "a letter name before a label it begins"
+    },
+    {
+      "request": "food",
+      "text": "beef",
+      "expect": {
+        "kind": "option",
+        "option_id": "beef",
+        "label": "Beef"
+      },
+      "note": "a whole label"
+    },
+    {
+      "request": "food",
+      "text": "fis",
+      "expect": {
+        "kind": "option",
+        "option_id": "fish",
+        "label": "Fish"
+      }
+    },
+    {
+      "request": "party",
+      "text": "tre",
+      "expect": {
+        "kind": "option",
+        "option_id": "external",
+        "label": "Ekstern"
+      },
+      "note": "a number before a label it begins"
+    },
+    {
+      "request": "party",
+      "text": "tredjepart",
+      "expect": {
+        "kind": "option",
+        "option_id": "third",
+        "label": "Tredjepart"
       }
     },
     {
