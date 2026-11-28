@@ -46,9 +46,16 @@ impl Commands {
     }
 }
 
-const NEXT: &[&str] = &["neste", "hopp over", "next", "skip"];
-const UNDO: &[&str] = &["angre", "undo"];
-const CANCEL: &[&str] = &["avbryt", "cancel"];
+// The command words of the languages the apps ship in. A word is in one list only: French
+// says `annuler` for undo and `abandonner` for cancel, since a transcript cannot tell two
+// `annuler` apart.
+const NEXT: &[&str] = &[
+    "neste", "hopp over", "next", "skip", "suivant", "siguiente", "अगला", "下一个",
+];
+const UNDO: &[&str] = &["angre", "undo", "annuler", "deshacer", "पूर्ववत", "撤销"];
+const CANCEL: &[&str] = &[
+    "avbryt", "cancel", "abandonner", "cancelar", "रद्द करो", "रद्द", "取消",
+];
 
 /// Sounds that say nothing, wherever they are.
 const FILLER: &[&str] = &["eh", "ehm", "øh", "øhm", "um", "uh", "uhm", "hmm", "mm", "erm"];
@@ -299,10 +306,11 @@ pub fn voice_match(decision: &Decision, transcript: &str, commands: &Commands) -
         return json!({ "kind": "custom", "text": "" });
     }
     let text = joined(&said);
+    // Undo first: a word an app put under two commands takes back rather than leaves.
     let named = [
-        ("next", &commands.next, NEXT),
         ("undo", &commands.undo, UNDO),
         ("cancel", &commands.cancel, CANCEL),
+        ("next", &commands.next, NEXT),
     ];
     // The app's own words first: what its prompt told the user to say.
     for (command, own, _) in &named {

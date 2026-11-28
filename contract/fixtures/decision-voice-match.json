@@ -678,6 +678,105 @@
       }
     },
     {
+      "request": "choice",
+      "text": "annuler",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "fr: annuler is undo only"
+    },
+    {
+      "request": "choice",
+      "text": "abandonner",
+      "expect": {
+        "kind": "command",
+        "command": "cancel"
+      },
+      "note": "fr"
+    },
+    {
+      "request": "choice",
+      "text": "suivant",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      },
+      "note": "fr"
+    },
+    {
+      "request": "choice",
+      "text": "siguiente",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      },
+      "note": "es"
+    },
+    {
+      "request": "choice",
+      "text": "deshacer",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "es"
+    },
+    {
+      "request": "choice",
+      "text": "cancelar",
+      "expect": {
+        "kind": "command",
+        "command": "cancel"
+      },
+      "note": "es"
+    },
+    {
+      "request": "choice",
+      "text": "अगला",
+      "expect": {
+        "kind": "command",
+        "command": "next"
+      },
+      "note": "hi"
+    },
+    {
+      "request": "choice",
+      "text": "रद्द करो",
+      "expect": {
+        "kind": "command",
+        "command": "cancel"
+      },
+      "note": "hi"
+    },
+    {
+      "request": "choice",
+      "text": "撤销",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "zh-Hans"
+    },
+    {
+      "request": "choice",
+      "text": "取消",
+      "expect": {
+        "kind": "command",
+        "command": "cancel"
+      },
+      "note": "zh-Hans"
+    },
+    {
+      "request": "approval",
+      "text": "Annuler.",
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "fr, on an approval"
+    },
+    {
       "request": "text",
       "text": "B",
       "expect": {
@@ -744,6 +843,26 @@
         "command": "undo"
       },
       "note": "the app's own command words in its user's language"
+    },
+    {
+      "request": "choice",
+      "text": "annuler",
+      "commands": {
+        "undo": [
+          "annuler"
+        ],
+        "cancel": [
+          "annuler"
+        ],
+        "next": [
+          "suivant"
+        ]
+      },
+      "expect": {
+        "kind": "command",
+        "command": "undo"
+      },
+      "note": "a word an app sends under two commands is undo before cancel"
     }
   ]
 }
