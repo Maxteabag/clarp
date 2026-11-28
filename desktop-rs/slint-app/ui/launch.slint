@@ -108,6 +108,7 @@ export component LinkButton inherits Rectangle {
 }
 
 // ---- NewSessionHub.qml + LaunchDirectoryPicker.qml ------------------------
+// i18n-screen: new session
 
 // What the hub shows and asks for; Rust (`launch_view.rs`) owns the state.
 export global LaunchHub {
@@ -247,7 +248,8 @@ component Card inherits Rectangle {
             background: Palette.control;
             border-width: 1px;
             border-color: Palette.border;
-            in-chat := Text { text: "In chat"; color: Palette.muted; font-size: 11 * Look.unit; }
+            // i18n: New Session dialog, small tag on a contact card: this contact already has an open chat
+            in-chat := Text { text: @tr("In chat"); color: Palette.muted; font-size: 11 * Look.unit; }
         }
         if root.selected: Rectangle {
             width: 22px;
@@ -267,7 +269,8 @@ component DirectoryPicker inherits VerticalLayout {
     search := Field {
         placeholder-text: "~";
         text <=> LaunchHub.directory-text;
-        accessible-label: "Launch directory";
+        // i18n: New Session dialog, accessibility label of the field where the user types the folder the agent starts in (noun)
+        accessible-label: @tr("Launch directory");
         edited(text) => { LaunchHub.directory-edited(text); }
         init => { if (LaunchHub.open && LaunchHub.focus-target == "directory") { self.focus(); } }
         property <int> request: LaunchHub.focus-request;
@@ -364,12 +367,15 @@ export component NewSessionHub inherits Modal {
             spacing: 12px;
             HorizontalLayout {
                 spacing: 10px;
-                Text { text: "New Session"; color: Palette.text; font-size: 18 * Look.unit; font-weight: 600; vertical-alignment: center; }
+                // i18n: New Session dialog, title (noun: a new agent session to start)
+                Text { text: @tr("New Session"); color: Palette.text; font-size: 18 * Look.unit; font-weight: 600; vertical-alignment: center; }
                 Rectangle { horizontal-stretch: 1; }
-                Text { text: "enter start · esc cancel"; color: Palette.faint; font-size: 11 * Look.unit; vertical-alignment: center; }
+                // i18n: New Session dialog, key hint beside the title: Enter starts, Esc cancels; the key names enter and esc stay untranslated, lower case is intended
+                Text { text: @tr("enter start · esc cancel"); color: Palette.faint; font-size: 11 * Look.unit; vertical-alignment: center; }
                 IconButton {
                     icon: @image-url("icons/rail-close.svg");
-                    label: "Cancel · Esc";
+                    // i18n: New Session dialog, accessibility label and tooltip of the close button (verb: cancel); Esc is the key name and stays untranslated
+                    label: @tr("Cancel · Esc");
                     clicked => { LaunchHub.cancel(); }
                 }
                 Button {
@@ -383,20 +389,23 @@ export component NewSessionHub inherits Modal {
                 spacing: 12px;
                 Text {
                     font-size: ChromeText.body;
-                    text: "Not connected";
+                    // i18n: New Session dialog, warning when the app has no connection to the Host
+                    text: @tr("Not connected");
                     color: Palette.warning;
                     wrap: word-wrap;
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
-                Button { text: "Host connection…"; clicked => { LaunchHub.open-connection(); } }
+                // i18n: New Session dialog, button that opens the Host connection settings (noun); Host is the product noun and stays untranslated
+                Button { text: @tr("Host connection…"); clicked => { LaunchHub.open-connection(); } }
             }
             if LaunchHub.connected: VerticalLayout {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 10px;
                     alignment: start;
-                    Caption { text: "BACKEND"; }
+                    // i18n: New Session dialog, section caption above the backend choices (noun: the agent CLI that runs the agent), written in capitals where the script has them
+                    Caption { text: @tr("BACKEND"); }
                     KeyTag { text: "ctrl+← →"; }
                 }
                 HorizontalLayout {
@@ -413,7 +422,8 @@ export component NewSessionHub inherits Modal {
                 spacing: 6px;
                 HorizontalLayout {
                     spacing: 10px;
-                    Caption { text: "MODEL"; }
+                    // i18n: New Session dialog, section caption above the AI model summary (noun), written in capitals where the script has them
+                    Caption { text: @tr("MODEL"); }
                     KeyTag { text: "ctrl+m"; }
                     Text {
                         font-size: ChromeText.body;
@@ -423,9 +433,14 @@ export component NewSessionHub inherits Modal {
                         vertical-alignment: center;
                         horizontal-stretch: 1;
                     }
-                    KeyTag { text: "effort ctrl+e"; }
+                    // i18n: New Session dialog, key hint: ctrl+e changes the reasoning effort; "effort" is the noun (how hard the model thinks), ctrl+e is the key and stays untranslated; lower case is intended
+                    KeyTag { text: @tr("effort ctrl+e"); }
                     LinkButton {
-                        text: LaunchHub.editing-model ? "Done" : "Edit";
+                        text: LaunchHub.editing-model
+                            // i18n: New Session dialog, button beside the model summary while its editor is open (verb-like: finish editing the model and effort)
+                            ? @tr("Done")
+                            // i18n: New Session dialog, button beside the model summary (verb: open the model and effort editor)
+                            : @tr("Edit");
                         clicked => { LaunchHub.toggle-edit-model(); }
                     }
                 }
@@ -435,21 +450,24 @@ export component NewSessionHub inherits Modal {
                         horizontal-stretch: 1;
                         model: LaunchHub.model-labels;
                         current-index <=> LaunchHub.model-index;
-                        accessible-label: "Model";
+                        // i18n: New Session dialog, accessibility label of the drop-down that picks the AI model (noun)
+                        accessible-label: @tr("Model");
                         selected => { LaunchHub.model-chosen(self.current-index); }
                     }
                     ComboBox {
                         width: 200px;
                         model: LaunchHub.effort-labels;
                         current-index <=> LaunchHub.effort-index;
-                        accessible-label: "Effort";
+                        // i18n: New Session dialog, accessibility label of the drop-down that picks the reasoning effort (noun: how hard the model thinks)
+                        accessible-label: @tr("Effort");
                         selected => { LaunchHub.effort-chosen(self.current-index); }
                     }
                 }
             }
             if LaunchHub.connected && !LaunchHub.choosing-directory: HorizontalLayout {
                 spacing: 10px;
-                Caption { text: "DIRECTORY"; }
+                // i18n: New Session dialog, section caption above the folder the agent starts in (noun), written in capitals where the script has them
+                Caption { text: @tr("DIRECTORY"); }
                 KeyTag { text: "ctrl+d"; }
                 Text {
                     font-size: ChromeText.body;
@@ -459,7 +477,8 @@ export component NewSessionHub inherits Modal {
                     vertical-alignment: center;
                     horizontal-stretch: 1;
                 }
-                LinkButton { text: "Change…"; clicked => { LaunchHub.change-directory(); } }
+                // i18n: New Session dialog, button beside the start folder (verb: choose another folder)
+                LinkButton { text: @tr("Change…"); clicked => { LaunchHub.change-directory(); } }
             }
             if LaunchHub.connected && LaunchHub.choosing-directory: DirectoryPicker { vertical-stretch: 1; }
             if LaunchHub.connected && !LaunchHub.choosing-directory: VerticalLayout {
@@ -467,26 +486,34 @@ export component NewSessionHub inherits Modal {
                 vertical-stretch: 1;
                 HorizontalLayout {
                     spacing: 10px;
-                    Caption { text: "CONTACT"; }
+                    // i18n: New Session dialog, section caption above the contact cards (noun: the agent contact to start), written in capitals where the script has them
+                    Caption { text: @tr("CONTACT"); }
                     KeyTag { text: "↑↓"; }
                     Rectangle { horizontal-stretch: 1; }
                     KeyTag { text: "ctrl+t"; }
                     CheckBox {
-                        text: "Show all";
+                        // i18n: New Session dialog, checkbox above the contact cards: also list contacts that already have a chat
+                        text: @tr("Show all");
                         checked: LaunchHub.show-all;
                         toggled => { LaunchHub.toggle-show-all(); }
                     }
                     KeyTag { text: "ctrl+n"; }
                     LinkButton {
                         y: 3px;
-                        text: LaunchHub.new-contact ? "Choose a contact" : "New contact";
+                        text: LaunchHub.new-contact
+                            // i18n: New Session dialog, button while the new-contact name field shows (an action: go back to picking an existing contact)
+                            ? @tr("Choose a contact")
+                            // i18n: New Session dialog, button above the contact cards (an action: create a new contact by typing a name)
+                            : @tr("New contact");
                         clicked => { LaunchHub.toggle-new-contact(); }
                     }
                 }
                 if LaunchHub.new-contact: Field {
-                    placeholder-text: "Contact name";
+                    // i18n: New Session dialog, placeholder of the field for a new contact's name (noun)
+                    placeholder-text: @tr("Contact name");
                     text <=> LaunchHub.name;
-                    accessible-label: "Contact name";
+                    // i18n: New Session dialog, accessibility label of the field for a new contact's name (noun)
+                    accessible-label: @tr("Contact name");
                     edited(text) => { LaunchHub.name-edited(text); }
                     init => { if (LaunchHub.open && LaunchHub.focus-target == "name") { self.focus(); } }
                     property <int> request: LaunchHub.focus-request;
@@ -494,9 +521,11 @@ export component NewSessionHub inherits Modal {
                 }
                 if LaunchHub.new-contact: Rectangle { vertical-stretch: 1; }
                 if !LaunchHub.new-contact: Field {
-                    placeholder-text: "Search contacts";
+                    // i18n: New Session dialog, placeholder of the field that filters the contact cards (an action: search the contacts)
+                    placeholder-text: @tr("Search contacts");
                     text <=> LaunchHub.query;
-                    accessible-label: "Search contacts";
+                    // i18n: New Session dialog, accessibility label of the field that filters the contact cards (an action: search the contacts)
+                    accessible-label: @tr("Search contacts");
                     edited(text) => { LaunchHub.search-edited(text); }
                     init => { if (LaunchHub.open && LaunchHub.focus-target == "search") { self.focus(); } }
                     property <int> request: LaunchHub.focus-request;
@@ -540,6 +569,7 @@ export component NewSessionHub inherits Modal {
 }
 
 // ---- StartAgentDialog.qml ---------------------------------------------------
+// i18n-screen: start agent
 
 // The named start (and relaunch) form; Rust (`launch_view.rs`) owns it.
 export global StartAgent {
@@ -610,24 +640,33 @@ export component StartAgentDialog inherits Modal {
             padding: 24px;
             spacing: 10px;
             Text {
-                text: StartAgent.relaunch ? "Relaunch agent" : "Start an agent";
+                text: StartAgent.relaunch
+                    // i18n: Start agent dialog, title when an existing agent is started again (an action: relaunch the agent)
+                    ? @tr("Relaunch agent")
+                    // i18n: Start agent dialog, title (an action: start a new named agent)
+                    : @tr("Start an agent");
                 color: Palette.text;
                 font-size: 17 * Look.unit;
                 font-weight: 600;
             }
-            Label { text: "Name"; }
+            // i18n: Start agent dialog, label above the field for the agent's name (noun)
+            Label { text: @tr("Name"); }
             name := Field {
-                placeholder-text: "Rachel";
+                // i18n: Start agent dialog, placeholder of the name field: an example agent name; a common first name in the language may replace it
+                placeholder-text: @tr("Rachel");
                 text <=> StartAgent.name;
-                accessible-label: "Name";
+                // i18n: Start agent dialog, accessibility label of the field for the agent's name (noun)
+                accessible-label: @tr("Name");
                 property <int> request: StartAgent.focus-request;
                 changed request => { self.focus(); }
             }
-            Label { text: "Workspace"; }
+            // i18n: Start agent dialog, label above the field for the folder the agent works in (noun)
+            Label { text: @tr("Workspace"); }
             workspace := Field {
                 placeholder-text: "~/Projects/example";
                 text <=> StartAgent.workspace;
-                accessible-label: "Workspace";
+                // i18n: Start agent dialog, accessibility label of the field for the folder the agent works in (noun)
+                accessible-label: @tr("Workspace");
                 edited(text) => { StartAgent.workspace-edited(text); }
             }
             if StartAgent.suggestions.length > 0: HorizontalLayout {
@@ -651,36 +690,43 @@ export component StartAgentDialog inherits Modal {
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Label { text: "Backend"; }
+                    // i18n: Start agent dialog, label above the drop-down that picks the backend (noun: the agent CLI that runs the agent)
+                    Label { text: @tr("Backend"); }
                     ComboBox {
                         model: StartAgent.backend-labels;
                         current-index <=> StartAgent.backend-index;
-                        accessible-label: "Backend";
+                        // i18n: Start agent dialog, accessibility label of the drop-down that picks the backend (noun: the agent CLI that runs the agent)
+                        accessible-label: @tr("Backend");
                         selected => { StartAgent.backend-chosen(self.current-index); }
                     }
                 }
                 VerticalLayout {
                     spacing: 4px;
                     horizontal-stretch: 1;
-                    Label { text: "Effort"; }
+                    // i18n: Start agent dialog, label above the drop-down that picks the reasoning effort (noun: how hard the model thinks)
+                    Label { text: @tr("Effort"); }
                     ComboBox {
                         model: StartAgent.effort-labels;
                         current-index <=> StartAgent.effort-index;
-                        accessible-label: "Effort";
+                        // i18n: Start agent dialog, accessibility label of the drop-down that picks the reasoning effort (noun)
+                        accessible-label: @tr("Effort");
                         selected => { StartAgent.effort-chosen(self.current-index); }
                     }
                 }
             }
-            Label { text: "Model"; }
+            // i18n: Start agent dialog, label above the drop-down that picks the AI model (noun)
+            Label { text: @tr("Model"); }
             ComboBox {
                 model: StartAgent.model-labels;
                 current-index <=> StartAgent.model-index;
-                accessible-label: "Model";
+                // i18n: Start agent dialog, accessibility label of the drop-down that picks the AI model (noun)
+                accessible-label: @tr("Model");
                 selected => { StartAgent.model-chosen(self.current-index); }
             }
             if StartAgent.mcp-servers.length > 0: VerticalLayout {
                 spacing: 4px;
-                Label { text: "MCP servers"; }
+                // i18n: Start agent dialog, label above the checkboxes of MCP servers the agent gets (noun); MCP stays untranslated
+                Label { text: @tr("MCP servers"); }
                 HorizontalLayout {
                     spacing: 6px;
                     alignment: start;
@@ -691,13 +737,17 @@ export component StartAgentDialog inherits Modal {
                     }
                 }
             }
-            Label { text: "Conversation"; }
+            // i18n: Start agent dialog, label above the choice of a fresh, resumed or forked conversation (noun)
+            Label { text: @tr("Conversation"); }
             HorizontalLayout {
                 spacing: 6px;
                 alignment: start;
-                ModeButton { text: "Fresh"; on: StartAgent.mode == "fresh"; clicked => { StartAgent.mode-chosen("fresh"); } }
-                if StartAgent.can-resume: ModeButton { text: "Resume"; on: StartAgent.mode == "resume"; clicked => { StartAgent.mode-chosen("resume"); } }
-                if StartAgent.can-fork: ModeButton { text: "Fork"; on: StartAgent.mode == "fork"; clicked => { StartAgent.mode-chosen("fork"); } }
+                // i18n: Start agent dialog, conversation choice (adjective: start with a new, empty conversation)
+                ModeButton { text: @tr("Fresh"); on: StartAgent.mode == "fresh"; clicked => { StartAgent.mode-chosen("fresh"); } }
+                // i18n: Start agent dialog, conversation choice (verb: continue a past session's conversation)
+                if StartAgent.can-resume: ModeButton { text: @tr("Resume"); on: StartAgent.mode == "resume"; clicked => { StartAgent.mode-chosen("resume"); } }
+                // i18n: Start agent dialog, conversation choice (verb: start a copy of a past session's conversation that continues separately)
+                if StartAgent.can-fork: ModeButton { text: @tr("Fork"); on: StartAgent.mode == "fork"; clicked => { StartAgent.mode-chosen("fork"); } }
             }
             if StartAgent.mode != "fresh": Rectangle {
                 height: 132px;
@@ -715,7 +765,8 @@ export component StartAgentDialog inherits Modal {
                         }
                     }
                 }
-                if StartAgent.past-loading: Text { font-size: ChromeText.body; text: "Loading…"; color: Palette.muted; }
+                // i18n: Start agent dialog, shown while the list of past sessions loads
+                if StartAgent.past-loading: Text { font-size: ChromeText.body; text: @tr("Loading…"); color: Palette.muted; }
             }
             if StartAgent.error != "": Text { text: StartAgent.error; color: Palette.warning; wrap: word-wrap; font-size: 12 * Look.unit; }
             Rectangle { vertical-stretch: 1; }
@@ -725,11 +776,16 @@ export component StartAgentDialog inherits Modal {
                 alignment: end;
                 IconButton {
                     icon: @image-url("icons/rail-close.svg");
-                    label: "Cancel";
+                    // i18n: Start agent dialog, accessibility label and tooltip of the close button (verb: cancel)
+                    label: @tr("Cancel");
                     clicked => { StartAgent.cancel(); }
                 }
                 Button {
-                    text: StartAgent.relaunch ? "Relaunch" : "Start";
+                    text: StartAgent.relaunch
+                        // i18n: Start agent dialog, main button when an existing agent is started again (verb)
+                        ? @tr("Relaunch")
+                        // i18n: Start agent dialog, main button (verb: start the agent)
+                        : @tr("Start");
                     primary: true;
                     enabled: StartAgent.can-start;
                     clicked => { StartAgent.start(); }
