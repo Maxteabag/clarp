@@ -3,6 +3,8 @@ use super::*;
 const MINI: &str = "eleven_realtime_v1_mini";
 const MAX: &str = "eleven_realtime_v1_max";
 const ROUTE: &str = "/v1/convai/realtime";
+const PICKER: &str = "/oracle/voice-provider?provider_models=1";
+const LEGACY_PICKER: &str = "/oracle/voice-provider";
 
 fn elevenlabs_stand_in() -> (String, std::sync::mpsc::Receiver<(Value, End)>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -74,21 +76,33 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     let select = |model: &str| {
         host.ask(
             "POST",
-            "/oracle/voice-provider",
+            PICKER,
             Some(&json!({
                 "provider": "elevenlabs", "model": model,
             })),
         )
     };
     assert_eq!(
-        host.get("/oracle/voice-provider")["available"],
+        host.get(PICKER)["available"],
         json!(["openai", "gemini", "elevenlabs"])
+    );
+    assert_eq!(
+        host.get(LEGACY_PICKER)["available"],
+        json!(["openai", "gemini"])
     );
     let call = |model: &str| {
         let (status, saved) = select(model);
         assert_eq!(status, 200, "{saved}");
         assert_eq!(saved["elevenlabs"]["models"], json!([MINI, MAX]));
-        assert_eq!(host.get("/oracle/status")["v2"]["model"], model);
+        let status = host.get("/oracle/status")["v2"].clone();
+        assert_eq!(status["model"], model);
+        assert_eq!(status["voice_provider"], "elevenlabs");
+        assert_eq!(status["available"], true);
+        assert_eq!(status["direct_contact_available"], true);
+        let legacy = host.get(LEGACY_PICKER);
+        assert_eq!(legacy["provider"], "elevenlabs");
+        assert_eq!(legacy["available"], json!(["elevenlabs"]));
+        assert!(legacy.get("elevenlabs").is_none());
         let device = End::of_a_phone(socket_at(&host, &phone, "/oracle/v2").unwrap());
         let (mint, provider) = calls.recv_timeout(Duration::from_secs(10)).unwrap();
         assert_eq!(mint["session"]["model"], model);
@@ -113,10 +127,7 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     let (device, provider) = call(MINI);
     let (status, _) = select("a-foreign-model");
     assert_eq!(status, 400);
-    assert_eq!(
-        host.get("/oracle/voice-provider")["elevenlabs"]["model"],
-        MINI
-    );
+    assert_eq!(host.get(PICKER)["elevenlabs"]["model"], MINI);
 
     let pcm = clarp_kernel::python::b64encode(&[0xE8, 0x03].repeat(960));
     device.says(&json!({"type": "session.input_audio.append", "audio": pcm}));
@@ -191,4 +202,30 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     second.says(&json!({"type": "session.close"}));
     second.told_of("session.closed", 1);
     second.ends();
+
+    let old = host.post(LEGACY_PICKER, json!({"provider":"openai"}));
+    assert_eq!(old["provider"], "openai");
+    assert_eq!(old["available"], json!(["openai", "gemini"]));
+    let saved = host.post(PICKER, json!({"provider":"elevenlabs"}));
+    assert_eq!(saved["elevenlabs"]["model"], MAX);
+}
+
+#[test]
+fn an_unconfigured_elevenlabs_key_reports_the_effective_oracle_fallback() {
+    let place = Place::new("oracle-eleven-no-key");
+    let host = place.start_without("admin", &[], &[], &["ELEVEN_API_KEY"]);
+    let (status, reply) = host.ask(
+        "POST",
+        PICKER,
+        Some(&json!({"provider":"elevenlabs","model":MAX})),
+    );
+    assert_eq!(status, 200);
+    assert_eq!(reply["selected"], "elevenlabs");
+    assert_eq!(reply["provider"], "openai");
+    assert!(reply.get("elevenlabs").is_none());
+    assert_eq!(
+        reply["fallback_reason"],
+        "Eleven Realtime needs an ElevenLabs API key on this Host"
+    );
+    assert_eq!(host.get(PICKER), reply);
 }

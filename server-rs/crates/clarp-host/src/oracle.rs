@@ -13,7 +13,7 @@
 //! that says one can be held, and no more than is said there.
 
 use axum::body::Bytes;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
@@ -160,14 +160,43 @@ fn voice_told(app: &App, directory: &Directory) -> Value {
     voices.status()
 }
 
+#[derive(serde::Deserialize)]
+struct VoicePicker {
+    provider_models: Option<String>,
+}
+
+impl VoicePicker {
+    fn show(&self, mut choice: Value) -> Value {
+        if self.provider_models.as_deref() == Some("1") {
+            return choice;
+        }
+        // Earlier pickers render any effective provider other than Gemini as OpenAI.
+        // Keep the actual provider and hide their two-provider control when it cannot
+        // represent the current choice. This only projects the settings reply.
+        if choice["provider"] == "elevenlabs" {
+            choice["available"] = json!(["elevenlabs"]);
+        } else if let Some(available) = choice["available"].as_array_mut() {
+            available.retain(|provider| provider.as_str() != Some("elevenlabs"));
+        }
+        if let Some(fields) = choice.as_object_mut() {
+            fields.remove("elevenlabs");
+        }
+        choice
+    }
+}
+
 /// `GET /oracle/voice-provider`: which voice model a call of the Oracle runs on.
-async fn voice(State(app): State<App>) -> Json<Value> {
-    Json(voice_told(&app, &app.fleet.directory()))
+async fn voice(State(app): State<App>, Query(picker): Query<VoicePicker>) -> Json<Value> {
+    Json(picker.show(voice_told(&app, &app.fleet.directory())))
 }
 
 /// `POST /oracle/voice-provider`: a phone chooses the voice of the calls to come. An invalid
 /// Eleven Realtime model is refused before keeping any part of the choice.
-async fn choose_voice(State(app): State<App>, body: Bytes) -> Answered {
+async fn choose_voice(
+    State(app): State<App>,
+    Query(picker): Query<VoicePicker>,
+    body: Bytes,
+) -> Answered {
     let said = object(&body)?;
     let named = said.get("provider").unwrap_or(&Value::Null);
     let chosen = oracle::choose_voice(named);
@@ -192,7 +221,7 @@ async fn choose_voice(State(app): State<App>, body: Bytes) -> Answered {
         "clarp-host: the Oracle's voice is chosen oracleVoiceProvider selected={selected} \
          effective={effective}"
     );
-    Ok(Json(told))
+    Ok(Json(picker.show(told)))
 }
 
 /// The model and the voice of the first kind of call, as the Python Host names them where
