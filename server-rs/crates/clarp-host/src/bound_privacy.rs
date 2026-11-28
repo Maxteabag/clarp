@@ -1582,6 +1582,7 @@ mod tests {
                 "fields": {
                     "conversation_id": "c1", "head_revision": 7, "last_message_id": "m7",
                     "last_message": "secret", "busy": true, "latest_state": "tool",
+                    "last_message_preview": {"kind": "file", "name": "secret.pdf", "own": false},
                     "latest_state_ts": 5, "status_text": "Reading secret.md",
                     "last_activity": 5,
                 },
@@ -1597,6 +1598,10 @@ mod tests {
         assert_eq!(event["words_withheld"], true);
         let fields = &event["fields"];
         assert_eq!(fields["last_message"], "");
+        assert_eq!(
+            fields["last_message_preview"],
+            json!({"kind": "file", "name": "", "own": false})
+        );
         assert_eq!(fields["status_text"], "");
         assert_eq!(
             (&fields["conversation_id"], &fields["last_message_id"]),

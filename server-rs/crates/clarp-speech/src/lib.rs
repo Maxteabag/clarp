@@ -18,6 +18,7 @@ pub mod deepgram_voice;
 pub mod eleven_voice;
 pub mod gemini;
 pub mod google_voice;
+pub mod list_line;
 pub mod listen;
 pub mod markup;
 pub mod nova;

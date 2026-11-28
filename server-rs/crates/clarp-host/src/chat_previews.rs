@@ -40,11 +40,12 @@ pub const SETTLE: Duration = Duration::from_millis(250);
 
 /// The fields of a preview that carry the chat's newest message: sent again only when one of
 /// them moved. The rest, small, go in every preview.
-const MESSAGE_FIELDS: [&str; 4] = [
+const MESSAGE_FIELDS: [&str; 5] = [
     "conversation_id",
     "head_revision",
     "last_message_id",
     "last_message",
+    "last_message_preview",
 ];
 
 /// What a stream does with an event about one chat that is not shown whole.
