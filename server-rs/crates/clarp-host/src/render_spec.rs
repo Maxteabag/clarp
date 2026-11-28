@@ -18,6 +18,7 @@ use std::collections::BTreeMap;
 
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use clarp_kernel::artifacts::decisions::UNDO_MOST_MS;
 use clarp_kernel::artifacts::render_spec::{
     self as spec, CATALOG_UNAVAILABLE, Catalog, J, KIND, Obj, Publish, Refusal, Unavailable,
 };
@@ -498,6 +499,25 @@ pub(crate) async fn submit(
     let Ok(catalog) = known else {
         return Err(no(CATALOG_UNAVAILABLE, "", known));
     };
+    // How long the answers are held from the agent, for their user to take them back: read
+    // here, and not among the answers the spec's rules weigh.
+    let given = data.object().and_then(|fields| fields.get("undo_ms"));
+    let hold_ms = match given {
+        None | Some(J::Null) => 0,
+        Some(J::Int(ms)) if (0..=i128::from(UNDO_MOST_MS)).contains(ms) => {
+            i64::try_from(*ms).unwrap_or(0)
+        }
+        Some(_) => {
+            return Err(ApiError::new(
+                StatusCode::BAD_REQUEST,
+                format!("undo_ms must be an integer from 0 to {UNDO_MOST_MS}"),
+            ));
+        }
+    };
+    let without = data
+        .object()
+        .map(|fields| J::Object(fields.without("undo_ms")));
+    let data = without.as_ref().unwrap_or(data);
     // A submission id is used once on the whole Host: one under it in another agent's
     // book is the submission it comes again to.
     let sid = data.get("submission_id").and_then(J::str);
@@ -518,6 +538,7 @@ pub(crate) async fn submit(
         data: Box::new(data.clone()),
         elsewhere: elsewhere.map(Box::new),
         capable,
+        hold_ms,
     };
     let done = holder.agent.artifact(want).await?;
     let done = done.map_err(|why| refused(why, Ok(catalog)))?;

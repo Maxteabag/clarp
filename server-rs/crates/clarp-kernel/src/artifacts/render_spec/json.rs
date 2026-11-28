@@ -160,6 +160,18 @@ impl Obj {
     pub fn keys(&self) -> impl Iterator<Item = &Text> {
         self.pairs.iter().map(|(key, _)| key)
     }
+
+    /// The object without one key, otherwise as it was read.
+    pub fn without(&self, key: &str) -> Self {
+        let mut rest = Self::new();
+        for (name, value) in &self.pairs {
+            if *name != Text::Valid(key.to_string()) {
+                rest.insert(name.clone(), value.clone());
+            }
+        }
+        rest.duplicate = self.duplicate;
+        rest
+    }
 }
 
 /// A value as Python's reader makes it.

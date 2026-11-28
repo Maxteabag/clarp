@@ -38,6 +38,7 @@ pub mod moved;
 pub mod render_spec;
 pub mod reports;
 pub mod updates;
+pub mod voice_match;
 
 pub use decisions::{Decision, Delivery};
 
@@ -262,6 +263,10 @@ pub struct Artifact {
     /// The answers users gave to a form.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub submissions: Vec<forms::Submission>,
+    /// The ids of answers to a form its user took back: never taken again, so that what
+    /// they became for the agent is never mistaken for answers sent anew.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub taken_back: Vec<String>,
     /// The trace of the turn that published it, where the Host proved that turn by its token
     /// and it was the agent's running turn then: the same text as `trace_id` on that turn's
     /// rows. Set when it is made, and never after; empty otherwise, and for one kept before.
@@ -937,6 +942,10 @@ impl Artifact {
                     fields.insert("answered_action".to_string(), json!(action));
                     fields.insert("answered_label".to_string(), json!(label));
                 }
+                if let Some(until) = render_spec::held_answer(self).and_then(|h| h.undo_until()) {
+                    fields.insert("undoable".to_string(), json!(true));
+                    fields.insert("undo_until".to_string(), json!(until));
+                }
             }
             return item;
         }
@@ -1136,6 +1145,7 @@ impl ArtifactBook {
             page: None,
             revisions: Vec::new(),
             submissions: Vec::new(),
+            taken_back: Vec::new(),
             source_trace_id: new.source_trace_id.clone(),
         })
     }

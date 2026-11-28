@@ -582,6 +582,7 @@ impl Fleet {
                         choice: args.get("choice"),
                         answer: args.get("answer"),
                         synthesize_audio: false,
+                        hold_ms: 0,
                     };
                     let known = |session: &str| sessions.iter().any(|known| known == session);
                     book.resolve(&id, &given, &by, &known, now)

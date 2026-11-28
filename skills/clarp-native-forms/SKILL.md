@@ -78,6 +78,15 @@ A refusal is printed on standard error as the Host gives it: usually a code and
 the path in your request that caused it, sometimes a sentence (an unknown session). Fix that
 and publish again; nothing was created.
 
+## One-tap answers and undo
+
+On a Host with contract 228 or later (feature `decision_undo`), apps that support it send a
+form whose only input is one choice, or a version 2 form of buttons only, on one tap, and let the
+user undo it for a few seconds. The answers reach you when that window ends. An undone answer
+never reaches you and the form is open again; the user may answer it anew under a new
+submission. Forms with two or more inputs keep their Send button. Nothing changes in how you
+publish a form.
+
 ## Version 2: chart, table and buttons
 
 Version 2 (`"catalog_version": 2`, catalog at `GET /artifact-catalogs/clarp.form/2`)

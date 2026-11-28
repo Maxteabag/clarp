@@ -2324,8 +2324,10 @@ fn told_artifact(artifact: &Artifact) -> ToldArtifact {
         artifact.archived_at,
         artifact.deleted_at,
     ];
+    // Any form's latest answer: a render spec's held answer that goes to its agent is told too.
     let latest_html_answer = artifact
-        .latest_html_submission()
+        .submissions
+        .last()
         .map(|answer| (artifact.submissions.len(), answer.delivered_at.is_some()));
     ToldArtifact {
         updated_at: artifact.updated_at,
@@ -2524,11 +2526,24 @@ impl Worker {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
                 });
-            // And an agent with a request that runs out wakes to close it.
+            // And an agent with a request that runs out wakes to close it, and one with a held
+            // answer to tell it (not once it moved away: nothing is told there any more).
             let requests_due = self
                 .actor
                 .as_ref()
-                .and_then(|actor| actor.artifacts().next_expiry())
+                .and_then(|actor| {
+                    let held = actor
+                        .moved()
+                        .is_none()
+                        .then(|| actor.artifacts().next_hold())
+                        .flatten();
+                    actor
+                        .artifacts()
+                        .next_expiry()
+                        .into_iter()
+                        .chain(held)
+                        .min()
+                })
                 .map(|due| {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);
                     Instant::now() + Duration::from_millis(wait)
@@ -3461,6 +3476,9 @@ impl Worker {
         let pages = self.setup.blobs.as_ref();
         match library::carry_out(actor, &self.setup.record, want, now, pages) {
             Ok(carried) => {
+                if let Some(item) = carried.taken_back {
+                    self.queue_edit = Some(QueueEdit::Deleted(item));
+                }
                 for out in carried.outs {
                     self.after(out);
                 }

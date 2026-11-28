@@ -73,6 +73,8 @@ mod conversation_fork;
 mod coordination;
 #[path = "host/cross_origin_read.rs"]
 mod cross_origin_read;
+#[path = "host/decision_undo.rs"]
+mod decision_undo;
 #[path = "host/delivery.rs"]
 mod delivery;
 #[path = "host/diagnostics.rs"]

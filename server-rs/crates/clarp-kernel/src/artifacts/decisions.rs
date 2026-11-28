@@ -56,6 +56,10 @@ pub struct Decision {
     /// What is to be told to the agent of how it ended, and whether it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub delivery: Option<Delivery>,
+    /// How many times the user took an answer back: each answer after one taken back reaches
+    /// the agent as a message of its own.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub undone: u32,
 }
 
 /// How a request ended, on its way to the agent that asked.
@@ -73,11 +77,26 @@ pub struct Delivery {
     /// asked for it (`synthesize_audio: true` on the resolve). Absent means not.
     #[serde(default, skip_serializing_if = "is_false")]
     pub synthesize_audio: bool,
+    /// The user may still take the answer back until then: it is not told to the agent
+    /// before. Absent means it goes at once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold_until: Option<i64>,
 }
 
 fn is_false(truth: &bool) -> bool {
     !*truth
 }
+
+fn is_zero(count: &u32) -> bool {
+    *count == 0
+}
+
+/// The longest an app may hold an answer back from the agent, so that its user can take it
+/// back (`undo_ms`).
+pub const UNDO_MOST_MS: i64 = 15_000;
+
+/// What an undo that comes too late is refused with: the agent has the answer already.
+pub const TOO_LATE: &str = "too_late";
 
 /// What a request is to be made from, as the caller gave it.
 #[derive(Debug, Clone, PartialEq)]
@@ -331,6 +350,7 @@ fn asked(ask: &Ask, now: i64) -> Result<(Decision, Option<Value>), Refused> {
         deadline_at,
         answer: Value::Null,
         delivery: None,
+        undone: 0,
     };
     Ok((decision, payload))
 }
@@ -371,6 +391,38 @@ impl Decision {
         self.status == "pending" && self.expires_at.is_none_or(|at| at > now)
     }
 
+    /// Until when the user may take the answer back: the answer is held from the agent till
+    /// then. `None` once it went, or for one that was never held.
+    pub fn undo_until(&self) -> Option<i64> {
+        let delivery = self.delivery.as_ref()?;
+        (delivery.status == "pending")
+            .then_some(delivery.hold_until)
+            .flatten()
+    }
+
+    /// The id of the message the agent is told the end by: one of its own for every answer
+    /// after one that was taken back, so that the one taken back does not stand for it.
+    pub fn message_id(&self) -> String {
+        match self.undone {
+            0 => format!("u-decision-{}", self.decision_id),
+            undone => format!("u-decision-{}-u{undone}", self.decision_id),
+        }
+    }
+
+    /// Whether an app may offer the user to write their own answer. An approval always may:
+    /// its own words are told to the agent as no approval.
+    fn custom_text(&self) -> bool {
+        self.allow_custom_text || self.response_type == "approval"
+    }
+
+    /// Marks a held answer as one that may still be taken back.
+    fn mark_undoable(&self, item: &mut Value) {
+        if let Some(until) = self.undo_until() {
+            item["undoable"] = json!(true);
+            item["undo_until"] = json!(until);
+        }
+    }
+
     fn row(&self, artifact: &Artifact) -> Value {
         json!({
             "decision_id": self.decision_id,
@@ -386,7 +438,7 @@ impl Decision {
             "revision": self.revision,
             "expires_at": self.expires_at,
             "response_type": self.response_type,
-            "allow_custom_text": self.allow_custom_text,
+            "allow_custom_text": self.custom_text(),
             "recommended_option_id": self.recommended_option_id,
             "blocks_progress": self.blocks_progress,
             "priority_reason": self.priority_reason,
@@ -407,6 +459,7 @@ impl Decision {
         if self.response_type == "text_input" {
             item["input_hint"] = json!(input_hint(&artifact.payload));
         }
+        self.mark_undoable(&mut item);
         item
     }
 
@@ -449,6 +502,21 @@ impl Decision {
             answer.filter(|v| !v.is_null()),
         );
         if self.response_type == "approval" {
+            // The user's own words instead of a yes or a no: kept as they were written.
+            let fields = answer.and_then(Value::as_object);
+            let text = fields
+                .filter(|fields| fields.len() == 1 && choice.is_none())
+                .and_then(|fields| fields.get("text"))
+                .and_then(Value::as_str);
+            if let Some(text) = text {
+                let text = text.trim();
+                if text.is_empty() || text.chars().count() > 4_000 {
+                    return refuse(
+                        "answer text must be a nonempty string of at most 4000 characters",
+                    );
+                }
+                return Ok(("answered".to_string(), json!({ "text": text })));
+            }
             let Some(choice) = choice.and_then(Value::as_str).filter(|_| answer.is_none()) else {
                 return refuse("approval requires an explicit accepted or rejected choice");
             };
@@ -513,6 +581,23 @@ pub struct Given<'a> {
     pub answer: Option<&'a Value>,
     /// The app that answers asks for the agent's reply to be spoken.
     pub synthesize_audio: bool,
+    /// How long the answer is held from the agent so that the user can take it back
+    /// (`undo_ms`, at most [`UNDO_MOST_MS`]); 0 tells it at once. Only the user's own answer
+    /// is held.
+    pub hold_ms: i64,
+}
+
+/// What taking an answer back comes to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Undo {
+    /// The request is open already: nothing changes.
+    Open(Artifact),
+    /// The request open again. `queued` names the message the answer became, which has to
+    /// be taken out of the agent's queue first: if it no longer waits there, it is too late.
+    Reopened {
+        artifact: Artifact,
+        queued: Option<String>,
+    },
 }
 
 /// Who answers a request in the user's place, when someone does.
@@ -590,6 +675,7 @@ impl ArtifactBook {
                         created_at: now,
                         delivered_at: None,
                         synthesize_audio: false,
+                        hold_until: None,
                     });
                 }
                 artifact
@@ -604,6 +690,33 @@ impl ArtifactBook {
             .filter(|decision| decision.status == "pending")
             .filter_map(|decision| decision.expires_at)
             .min()
+    }
+
+    /// The earliest moment a held answer or form submission is to be told to its agent, for
+    /// whoever sets the alarm.
+    pub fn next_hold(&self) -> Option<i64> {
+        let held = self
+            .artifacts()
+            .filter_map(|artifact| artifact.decision.as_ref())
+            .filter_map(Decision::undo_until);
+        let forms = self.artifacts().flat_map(|artifact| {
+            artifact
+                .submissions
+                .iter()
+                .filter(|submission| submission.delivered_at.is_none())
+                .filter_map(|submission| submission.hold_until)
+        });
+        held.chain(forms).min()
+    }
+
+    /// The requests whose end is to be told to the agent now: not held any more.
+    pub fn due_deliveries(&self, now: i64) -> Vec<String> {
+        self.artifacts()
+            .filter_map(|artifact| artifact.decision.as_ref())
+            .filter(|decision| decision.delivery_pending())
+            .filter(|decision| decision.undo_until().is_none_or(|until| until <= now))
+            .map(|decision| decision.decision_id.clone())
+            .collect()
     }
 
     /// The requests whose end still waits to be told to the agent, by their ids.
@@ -627,6 +740,9 @@ impl ArtifactBook {
         now: i64,
     ) -> Result<(Artifact, bool), Refused> {
         let resolved_by = acting(by)?.map_or_else(|| "user".to_string(), |s| format!("agent:{s}"));
+        // Only the user may take an answer back, so only theirs is held.
+        let hold_until = (given.hold_ms > 0 && resolved_by == "user")
+            .then(|| now + given.hold_ms.min(UNDO_MOST_MS));
         let Some(artifact) = self.of_decision(decision_id) else {
             return refuse("decision not found");
         };
@@ -680,9 +796,67 @@ impl ArtifactBook {
                 created_at: now,
                 delivered_at: None,
                 synthesize_audio: given.synthesize_audio,
+                hold_until: hold_until.map(|until| until.max(now)),
             });
         }
         Ok((artifact, true))
+    }
+
+    /// The user takes their answer back while the agent does not have it yet: the request is
+    /// open again as it was before the answer. `expected_revision` is the revision the answer
+    /// left. Refused with [`TOO_LATE`] once the agent has it, or for an answer the user did
+    /// not give themselves.
+    pub fn undo(
+        &self,
+        decision_id: &str,
+        expected_revision: i64,
+        now: i64,
+    ) -> Result<Undo, Refused> {
+        let found = self.of_decision(decision_id);
+        let Some((artifact, decision)) = found.and_then(|a| Some((a, a.decision.as_ref()?))) else {
+            return refuse("decision not found");
+        };
+        if decision.status == "pending" {
+            return Ok(Undo::Open(artifact.clone()));
+        }
+        let answered = matches!(
+            decision.status.as_str(),
+            "accepted" | "rejected" | "answered"
+        );
+        let delivery = decision.delivery.as_ref();
+        let ran_out = decision.expires_at.is_some_and(|at| at <= now);
+        let Some(delivery) =
+            delivery.filter(|_| answered && decision.resolved_by == "user" && !ran_out)
+        else {
+            return refuse(TOO_LATE);
+        };
+        if decision.revision != expected_revision {
+            return refuse("decision revision changed");
+        }
+        // Told already: only a message that still waits its turn can be taken back, and only
+        // of an answer the app offered to undo (held). Another, such as the answer to one of
+        // the Host's own cards, did what it asked when it was given.
+        let queued = match delivery.status.as_str() {
+            "pending" => None,
+            "delivered" if delivery.hold_until.is_some() => Some(decision.message_id()),
+            _ => return refuse(TOO_LATE),
+        };
+        let now = now.max(artifact.updated_at + 1);
+        let mut artifact = artifact.clone();
+        artifact.status = "active".to_string();
+        artifact.updated_at = now;
+        artifact.completed_at = None;
+        if let Some(decision) = artifact.decision.as_mut() {
+            decision.status = "pending".to_string();
+            decision.resolved_choice = String::new();
+            decision.resolved_at = None;
+            decision.resolved_by = String::new();
+            decision.answer = Value::Null;
+            decision.delivery = None;
+            decision.revision += 1;
+            decision.undone += 1;
+        }
+        Ok(Undo::Reopened { artifact, queued })
     }
 
     /// The user discards a pending request without answering it. Nothing is told to the
@@ -953,6 +1127,12 @@ pub fn delivery_prompt(artifact: &Artifact) -> Option<String> {
                  not approve any broader, additional, or repeated action."
             )
         }
+        ("answered", "approval") if answered => format!(
+            "{actor} neither approved nor rejected this exact action and replied: {}. This is \
+             not approval: do not perform the protected action unless they approve it \
+             explicitly.",
+            delivery.answer["text"].as_str().unwrap_or_default()
+        ),
         ("rejected", "approval") => format!(
             "{actor} rejected this exact action: {} Do not perform it or a broader version of it.",
             decision.question.trim()
