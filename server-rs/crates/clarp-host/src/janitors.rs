@@ -1558,6 +1558,8 @@ async fn set_policy(State(app): State<App>, body: Bytes) -> Response {
     let Some(body) = object(&body) else {
         return bad("Expected a JSON object");
     };
+    // The models of the chain are checked against what the tools list.
+    app.models.found_once(app.clock.now_ms()).await;
     let result = app
         .janitors
         .with(&app, |book, world, _| {
