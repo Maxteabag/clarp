@@ -331,13 +331,25 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn observe(at_ms: i64) -> Self {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static SEQ: AtomicU64 = AtomicU64::new(1);
-        Self {
-            at_ms,
-            seq: SEQ.fetch_add(1, Ordering::Relaxed),
-        }
+    /// Sample the Host clock and allocate the complete stamp at one serialization point.
+    pub fn observe(clock: &dyn clarp_ports::clock::Clock) -> Self {
+        static LAST: std::sync::Mutex<Order> = std::sync::Mutex::new(Order {
+            at_ms: i64::MIN,
+            seq: 0,
+        });
+        Self::allocate(&LAST, || clock.now_ms())
+    }
+
+    fn allocate(last: &std::sync::Mutex<Self>, sample: impl FnOnce() -> i64) -> Self {
+        let mut last = last
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let next = Self {
+            at_ms: last.at_ms.max(sample()),
+            seq: last.seq + 1,
+        };
+        *last = next;
+        next
     }
 
     fn put(self, v: &mut Value, read: bool) {
@@ -1202,6 +1214,7 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
 }
 
 #[cfg(test)]
+#[allow(clippy::unwrap_used)]
 mod read_tests {
     use super::*;
 
@@ -1228,6 +1241,44 @@ mod read_tests {
         assert!(reads.due(&newer));
         assert!(!reads.due(&first));
         assert!(reads.opened_since("vera", newer.order));
+    }
+
+    #[test]
+    fn wall_clock_rollback_preserves_a_new_alert_and_its_escalation() {
+        let last = std::sync::Mutex::new(Order::default());
+        let read = Read {
+            session: "vera".into(),
+            order: Order::allocate(&last, || 1000),
+            ..Default::default()
+        };
+        let alert = Order::allocate(&last, || 999);
+        let mut reads = Reads::default();
+        assert!(reads.due(&read));
+        assert!(!reads.opened_since("vera", alert));
+
+        let boundary = payload(&Job::Read(read), "host-1", ("", "")).0;
+        let shown = payload(
+            &Job::Request(Requested {
+                session: "vera".into(),
+                order: alert,
+                ..Default::default()
+            }),
+            "host-1",
+            ("", ""),
+        )
+        .0;
+        assert_eq!(shown["order_epoch"], boundary["order_epoch"]);
+        let through = (
+            boundary["read_through_ms"].as_i64().unwrap(),
+            boundary["read_through_seq"].as_u64().unwrap(),
+        );
+        let event = (
+            shown["event_at_ms"].as_i64().unwrap(),
+            shown["event_seq"].as_u64().unwrap(),
+        );
+        assert_eq!(through, (1000, 1));
+        assert_eq!(event, (1000, 2));
+        assert!(event > through);
     }
 
     #[test]

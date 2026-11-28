@@ -4383,7 +4383,7 @@ impl Worker {
                     told["event"] = json!(event.id());
                     told["alert"] = json!(alert);
                     told["message_id"] = told["source_message_id"].clone();
-                    let order = crate::pusher::Order::observe(now);
+                    let order = crate::pusher::Order::observe(self.setup.clock.as_ref());
                     order.event(&mut told);
                     let (body_loc, extra) = crate::pusher::preview_keys(record, &told);
                     // A phone that is not listening is pushed to, when the rule says so.
@@ -6942,7 +6942,7 @@ impl Worker {
                 told["event"] = json!(event.id());
                 told["alert"] = json!(alert);
                 told["message_id"] = told["source_message_id"].clone();
-                let order = crate::pusher::Order::observe(now);
+                let order = crate::pusher::Order::observe(self.setup.clock.as_ref());
                 order.event(&mut told);
                 let (body_loc, extra) = crate::pusher::preview_keys(&record, &told);
                 // A phone that is not listening is pushed to, when the rule says so. With a
@@ -7001,7 +7001,7 @@ impl Worker {
             if alert {
                 alert_queued = true;
                 let mut push = crate::pusher::failed(&record, &told);
-                push.order = crate::pusher::Order::observe(now);
+                push.order = crate::pusher::Order::observe(self.setup.clock.as_ref());
                 push.order.event(&mut told);
                 self.setup.pusher.turn_done(push);
             } else {
@@ -7053,7 +7053,7 @@ impl Worker {
                         && crate::notify_settings::alerts_in(directory.as_deref(), event, &record)
                     {
                         let mut push = crate::pusher::job_done(&record, &done);
-                        push.order = crate::pusher::Order::observe(now);
+                        push.order = crate::pusher::Order::observe(self.setup.clock.as_ref());
                         push.order.event(&mut done);
                         self.setup.pusher.turn_done(push);
                         hub.publish(done, now);

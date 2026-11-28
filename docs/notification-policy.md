@@ -435,7 +435,8 @@ collapse id `read-<session>` for a chat read and `read-decision-<decision_id>` f
 For a chat read, compare `(read_through_ms, read_through_seq)` with the displayed
 notification's `(event_at_ms, event_seq)` as integer pairs in lexicographic order.
 Scope comparisons to the same Host instance, session and opaque `order_epoch` (one per Host
-process lifetime). APNs and SSE use JSON integers. FCM uses decimal strings. Record the
+process lifetime). The Host samples its clock and allocates the sequence together. During a
+backward clock step it retains the last millisecond and advances the sequence. APNs and SSE use JSON integers. FCM uses decimal strings. Record the
 maximum boundary. Remove a displayed notification or suppress a late alert only when its
 order is at or below that boundary. Preserve it if either order is missing or malformed or
 the epochs differ. Use the sequence to break ties within a millisecond. Thus reading A,

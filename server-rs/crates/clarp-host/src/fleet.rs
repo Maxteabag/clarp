@@ -4651,7 +4651,7 @@ impl Fleet {
             &[crate::pusher::display_name(helper)],
         );
         let notification_id = format!("helper-{}-{now}", helper.agent_id);
-        let order = crate::pusher::Order::observe(now);
+        let order = crate::pusher::Order::observe(self.works.clock.as_ref());
         let mut told = serde_json::json!({
             "type": "user-notification",
             "event": Event::HelperReport.id(),
@@ -5062,7 +5062,7 @@ impl Fleet {
         }
         if announce {
             let now = self.now_ms();
-            let order = crate::pusher::Order::observe(now);
+            let order = crate::pusher::Order::observe(self.works.clock.as_ref());
             let mut focus = wire::focus(&record);
             order.boundary(&mut focus);
             self.works.hub.publish(focus, now);

@@ -1613,7 +1613,7 @@ fn push_request(app: &App, artifact: &Value) {
         told["body_loc_args"] = serde_json::json!(loc.args);
     }
     let now = app.clock.now_ms();
-    let order = crate::pusher::Order::observe(now);
+    let order = crate::pusher::Order::observe(app.clock.as_ref());
     order.event(&mut told);
     app.hub.publish(told, now);
     app.pusher.requested(Requested {
