@@ -139,6 +139,17 @@ newer message, as above, and their message runs next. Those are the user's actio
 from the app; do not call them for the user, and do not use them for your own
 messages, which they refuse.
 
+With feature `queue_action_expected_turn` (Host contract 225), a client can bind
+either action to the running primary turn the user sees. Keep the complete
+`turn.queue_action_binding` from that chat's `GET /live?session=<agent>` in the
+current Host, agent and visit. Send it as `{"expected_turn": <binding>}`.
+The object contains `server_id`, `agent_id` and journal `turn_id` in the inclusive integer range 1 to 9223372036854775807. The outer live turn's `turn_id` can be a caller-supplied trace.
+Discard the saved binding when the displayed turn changes or ends, when leaving
+the chat, and on resume or reconnect. Read a fresh live snapshot before enabling
+a guarded action again. An ended or foreign binding returns 409 `stale_turn`.
+Refresh the chat and queue and let the user choose again. Never retry the action
+or switch it to take-over automatically. Old clients may omit the guard.
+
 What the user's Send does while an agent works is one owner setting on a Rust Host
 from contract 208 (feature `send_while_busy`): `GET /send-settings` says `while_busy`,
 `steer` (the default), `after_turn` or `take_over`; the apps send it with the user's

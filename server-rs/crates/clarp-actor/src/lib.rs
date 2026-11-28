@@ -497,9 +497,18 @@ pub enum ByHand {
     AtWork,
 }
 
+/// Numeric range exposed to clients for a journal turn in a queue action binding.
+pub fn queue_action_turn_id(turn: TurnId) -> Option<std::num::NonZeroI64> {
+    i64::try_from(turn.0)
+        .ok()
+        .and_then(std::num::NonZeroI64::new)
+}
+
 /// What became of a waiting message its user had take over the running turn (issue 867).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TakenOver {
+    /// The displayed turn has ended or belongs elsewhere.
+    StaleTurn,
     /// The running turn was told to stop for it, and it runs next.
     Done,
     /// It does not wait: it ran, was taken back, never was, or is being read into the turn.
@@ -515,6 +524,8 @@ pub enum TakenOver {
 /// What became of a waiting message its user had read into the running turn (issue 867).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Steered {
+    /// The displayed turn has ended or belongs elsewhere.
+    StaleTurn,
     /// It is given to the running turn's tool now, after the user's older waiting words.
     Done,
     /// It does not wait: it ran, was taken back, never was, or is being read in already.
@@ -2020,8 +2031,18 @@ impl Actor {
             return whole;
         }
         match self.shown.snapshot(now_ms) {
-            Some((snapshot, events)) => {
+            Some((mut snapshot, events)) => {
                 self.shown_events.extend(events);
+                if let Some((turn, _)) = self.shown_turn.as_ref()
+                    && self.live_turn() == Some(*turn)
+                    && self.shown.has_open_turn()
+                    && let Some(wire_id) = queue_action_turn_id(*turn)
+                {
+                    snapshot["turn"]["queue_action_binding"] = serde_json::json!({
+                        "agent_id": self.profile.agent_id,
+                        "turn_id": wire_id,
+                    });
+                }
                 snapshot
             }
             None => {
@@ -3178,6 +3199,14 @@ impl Actor {
         now: i64,
     ) -> Result<clarp_kernel::experience::Window, ActorError> {
         Ok(self.recorder.experience_window(since, now)?)
+    }
+
+    /// Origin of a message still present in the visible queue, from its admission record.
+    pub fn waiting_origin(&self, turn: TurnId) -> Option<&Origin> {
+        self.recorder
+            .unshown_waiting()
+            .find(|queued| queued.id == turn)
+            .map(|queued| &queued.origin)
     }
 
     /// The item a user can edit or withdraw while it is waiting.

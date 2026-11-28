@@ -95,6 +95,14 @@ impl Unavailable {
     }
 }
 
+/// The edge resolves immutable Host and agent scope. Only the actor resolves the turn.
+#[derive(Debug, Clone, Copy)]
+pub enum ExpectedTurn {
+    Omitted,
+    OtherScope,
+    Here(TurnId),
+}
+
 pub type Answer<T> = oneshot::Sender<Result<T, Unavailable>>;
 
 /// The terminal owns this permit from actor admission until the socket closes. If the
@@ -378,11 +386,13 @@ enum Ask {
     /// The owner's waiting message is read into the running turn now (issue 867).
     Steer {
         turn: TurnId,
+        expected: ExpectedTurn,
         answer: Answer<Steered>,
     },
     /// The owner's waiting message takes over the running turn (issue 867).
     TakeOver {
         turn: TurnId,
+        expected: ExpectedTurn,
         by: String,
         answer: Answer<TakenOver>,
     },
@@ -1515,14 +1525,34 @@ impl AgentHandle {
 
     /// The owner's waiting message is read into the running turn now, after the user's older
     /// waiting words, where the turn's tool takes it now (issue 867).
-    pub async fn steer(&self, turn: TurnId) -> Result<Steered, Unavailable> {
-        self.ask(|answer| Ask::Steer { turn, answer }).await
+    pub async fn steer(
+        &self,
+        turn: TurnId,
+        expected: ExpectedTurn,
+    ) -> Result<Steered, Unavailable> {
+        self.ask(|answer| Ask::Steer {
+            turn,
+            expected,
+            answer,
+        })
+        .await
     }
 
     /// The owner's waiting message takes over the running turn: that turn ends as stopped for
     /// it, and it runs next. The queue is not held (issue 867).
-    pub async fn take_over(&self, turn: TurnId, by: String) -> Result<TakenOver, Unavailable> {
-        self.ask(|answer| Ask::TakeOver { turn, by, answer }).await
+    pub async fn take_over(
+        &self,
+        turn: TurnId,
+        by: String,
+        expected: ExpectedTurn,
+    ) -> Result<TakenOver, Unavailable> {
+        self.ask(|answer| Ask::TakeOver {
+            turn,
+            by,
+            expected,
+            answer,
+        })
+        .await
     }
 
     /// Changes the words of a message that waits outside the conversation, and with `speak`
@@ -3718,7 +3748,47 @@ impl Worker {
         Ok(())
     }
 
+    /// Check before releasing a selected takeover or reading a steering fence, and again
+    /// after those operations, which can advance the journal to another turn.
+    fn check_queue_turn(&self, ask: Ask) -> Option<Ask> {
+        let (turn, expected) = match &ask {
+            Ask::Steer { turn, expected, .. } | Ask::TakeOver { turn, expected, .. } => {
+                (turn, expected)
+            }
+            _ => return Some(ask),
+        };
+        let Some(actor) = self.actor.as_ref() else {
+            return Some(ask);
+        };
+        let (steer, take_over) = match actor.waiting_origin(*turn) {
+            None => (Steered::NotWaiting, TakenOver::NotWaiting),
+            Some(origin) if !origin.is_user_send() => {
+                (Steered::NotTheOwners, TakenOver::NotTheOwners)
+            }
+            Some(_) => match expected {
+                ExpectedTurn::Omitted => return Some(ask),
+                ExpectedTurn::Here(id) if actor.live_turn() == Some(*id) && !actor.fork_runs() => {
+                    return Some(ask);
+                }
+                _ => (Steered::StaleTurn, TakenOver::StaleTurn),
+            },
+        };
+        match ask {
+            Ask::Steer { answer, .. } => {
+                let _ = answer.send(Ok(steer));
+            }
+            Ask::TakeOver { answer, .. } => {
+                let _ = answer.send(Ok(take_over));
+            }
+            _ => unreachable!(),
+        }
+        None
+    }
+
     fn handle(&mut self, ask: Ask) -> Result<(), ActorError> {
+        let Some(ask) = self.check_queue_turn(ask) else {
+            return Ok(());
+        };
         let ask = match ask {
             Ask::NativeGoal {
                 action,
@@ -3866,7 +3936,7 @@ impl Worker {
                 }
             }
         }
-        let mut ask = match ask {
+        let ask = match ask {
             Ask::OpenTerminal { answer } => {
                 if let Some(actor) = self.actor.as_ref()
                     && let Err(why) = actor.require_here()
@@ -4066,6 +4136,9 @@ impl Worker {
                 }
             }
         }
+        let Some(mut ask) = self.check_queue_turn(ask) else {
+            return Ok(());
+        };
         // The owner's message never waits behind a turn that is not a person's (issue 839):
         // another agent's, a trigger's, a goal's wake. Where that turn takes it on its input
         // now, it is steered in and nothing is cut: from its reading on, the turn is his and
@@ -4659,7 +4732,7 @@ impl Worker {
                 }
                 answered(sent, answer)?
             }
-            Ask::Steer { turn, answer } => {
+            Ask::Steer { turn, answer, .. } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
                     return Ok(());
@@ -4667,7 +4740,9 @@ impl Worker {
                 let steered = actor.steer_waiting(turn, can_offer_steering, now);
                 answered(steered, answer)?
             }
-            Ask::TakeOver { turn, by, answer } => {
+            Ask::TakeOver {
+                turn, by, answer, ..
+            } => {
                 if let Err(why) = actor.require_here() {
                     let _ = answer.send(Err(unavailable(&why)));
                     return Ok(());
