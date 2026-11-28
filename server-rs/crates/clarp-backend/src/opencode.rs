@@ -308,28 +308,30 @@ impl Stream {
         self.part += 1;
     }
     fn text(&mut self, id: &str, text: &str, delta: bool, out: &mut Vec<Signal>) {
+        let filed = self.filed.get(id);
         let s = self.texts.entry(id.into()).or_default();
         if delta {
             s.push_str(text);
+            if filed.is_some() && s.trim().is_empty() {
+                s.clear();
+                return;
+            }
         } else {
-            *s = text.into();
-        }
-        // A part whose words a reply holds already: told whole again, it says nothing new, and
-        // is no second reply of the same words. Only what it says beyond them is new.
-        if let Some(filed) = self.filed.get(id) {
-            let whole = if delta {
-                format!("{filed}{s}")
-            } else {
-                s.clone()
-            };
-            match whole.strip_prefix(filed.as_str()) {
-                Some(rest) if rest.trim().is_empty() => {
-                    s.clear();
+            let mut pending = text;
+            if let Some(filed) = filed {
+                // A replay of an older cumulative snapshot can arrive on either side of the
+                // flush. Keep the suffix we already have, whether it is filed or still pending.
+                if filed.starts_with(text) {
                     return;
                 }
-                Some(rest) => *s = rest.to_owned(),
-                None => {}
+                if let Some(suffix) = text.strip_prefix(filed.as_str()) {
+                    if suffix.trim().is_empty() || s.starts_with(suffix) {
+                        return;
+                    }
+                    pending = suffix;
+                }
             }
+            *s = pending.to_owned();
         }
         if !self.order.iter().any(|x| x == id) {
             self.order.push(id.into());
