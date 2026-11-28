@@ -24,7 +24,10 @@ export struct MessageImage {
     foreign: bool,
 }
 
+export struct CodeMark { line-index: int, prefix: string, matched: string }
+
 export struct MessageBlock {
+    code-marks: [CodeMark],
     // prose, heading, code, quote, table, rule, images (one image or a
     // gallery: gallery true)
     kind: string,
@@ -868,6 +871,34 @@ export component Block inherits VerticalLayout {
             font-size: root.body-size * Look.code-scale;
             color: Palette.text;
             wrap: no-wrap;
+        }
+        for mark in root.block.code-marks: Rectangle {
+            x: code-text.x + prefix.preferred-width - sentinel.preferred-width;
+            y: code-text.y + (mark.line-index + 1) * matched.preferred-height - 2px;
+            height: 2px;
+            width: matched.preferred-width;
+            background: Palette.warning;
+            prefix := Text {
+                visible: false;
+                // A trailing glyph keeps leading or trailing spaces in the measured prefix.
+                text: mark.prefix + "|";
+                font-family: Palette.code-family;
+                font-size: root.body-size * Look.code-scale;
+                wrap: no-wrap;
+            }
+            sentinel := Text {
+                visible: false;
+                text: "|";
+                font-family: Palette.code-family;
+                font-size: root.body-size * Look.code-scale;
+            }
+            matched := Text {
+                visible: false;
+                text: mark.matched;
+                font-family: Palette.code-family;
+                font-size: root.body-size * Look.code-scale;
+                wrap: no-wrap;
+            }
         }
     }
     if root.block.kind == "quote": Rectangle {

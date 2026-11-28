@@ -396,6 +396,24 @@ fn highlighted(markdown: &str, parsed: &slint::StyledText) -> Option<slint::Styl
     (get_raw_text(&styled) == get_raw_text(parsed)).then_some(styled)
 }
 
+/// Positions in the original monospace lines, measured in the same font by Slint.
+fn code_marks(text: &str) -> ModelRc<crate::CodeMark> {
+    HIGHLIGHT.with_borrow(|highlight| {
+        let Some(mark) = highlight else { return ModelRc::default() };
+        let mut marks = Vec::new();
+        for (line_index, line) in text.split('\n').enumerate() {
+            for range in clarp_core::chat_find::ranges(line, &mark.terms) {
+                marks.push(crate::CodeMark {
+                    line_index: line_index as i32,
+                    prefix: line[..range.start].into(),
+                    matched: line[range].into(),
+                });
+            }
+        }
+        ModelRc::new(VecModel::from(marks))
+    })
+}
+
 pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) -> MessageBlock {
     use clarp_engine::blocks::Block;
     let empty = || ModelRc::new(VecModel::<TableRow>::default());
@@ -411,6 +429,7 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
         },
         Block::Code { language, text } => MessageBlock {
             kind: "code".into(),
+            code_marks: code_marks(text),
             styled: slint::StyledText::default(),
             text: text.clone().into(),
             language: language_name(language).into(),

@@ -519,12 +519,91 @@ fn marked_words(id: &str) -> Option<bool> {
     let row = rows.iter().find(|r| r.id == id)?;
     let block = row.blocks.row_data(0)?;
     let text = app_now().engine.borrow().conversation("oscar")?.rows().iter().find(|m| m.id == id)?.text.clone();
+    if block.kind == "code" { return Some(block.code_marks.row_count() > 0); }
     let plain = crate::view::message_block(&clarp_engine::blocks::blocks(&text)[0], row.author == "user").styled;
     Some(block.styled != plain)
 }
 
+const CODE: &str = concat!(
+    "heron! {\n",
+    "    heron(\"<Héron> & **lake**\");\n",
+    "\n",
+    "    // heron: Walk the northern lakes in survey order, counting the birds on each shore before crossing to the next inlet. ",
+    "Record the observation beside its station, preserve the route in the field notes, and finish the pass at the station\n",
+    "}",
+);
+
+fn fenced_message() -> String {
+    format!("```rust\n{CODE}\n```")
+}
+
+/// Check the actual code rectangle in the frame, excluding the find bar and the row ring.
+fn fenced_frame(out: &str, name: &str, window: &crate::AppWindow) {
+    use i_slint_backend_testing::ElementQuery;
+    use slint::ComponentHandle;
+
+    shot(out, name);
+    let row = ElementQuery::from_root(window).match_predicate(|e| e.accessible_id().as_deref() == Some("row:o-300")).find_first();
+    let rect = row.and_then(|e| e.query_descendants().match_id("Block::code-text").find_first());
+    let Some(rect) = rect else {
+        check(false, "the active fenced code is drawn");
+        return;
+    };
+    let pos = rect.absolute_position();
+    let size = rect.size();
+    let scale = window.window().scale_factor();
+    let mark = window.global::<crate::Palette>().get_warning();
+    let Ok(frame) = image::open(format!("{out}/{name}.png")) else {
+        check(false, "the fenced-code screenshot can be read");
+        return;
+    };
+    let frame = frame.to_rgb8();
+    let x = (pos.x * scale).round() as u32;
+    let y = (pos.y * scale).round() as u32;
+    let width = ((size.width * scale).round() as u32).min(frame.width().saturating_sub(x));
+    let height = ((size.height * scale).round() as u32).min(frame.height().saturating_sub(y));
+    if width == 0 || height == 0 {
+        check(false, "the active code is inside the frame");
+        return;
+    }
+    let crop = image::imageops::crop_imm(&frame, x, y, width, height).to_image();
+    // The underline spans the word in the mark colour. The first two
+    // physical lines start with identical words, four monospace columns apart.
+    let ink = [mark.red(), mark.green(), mark.blue()];
+    let mut underlines = Vec::new();
+    let mut previous_y = None;
+    for (y, row) in crop.rows().enumerate() {
+        let mut run = 0;
+        for (x, pixel) in row.enumerate() {
+            run = if pixel.0 == ink { run + 1 } else { 0 };
+            if run == 12 {
+                if previous_y != Some(y.saturating_sub(1)) {
+                    underlines.push((x + 1 - run, y));
+                }
+                previous_y = Some(y);
+                break;
+            }
+        }
+    }
+    if let [(first_x, first_y), (indented_x, second_y), (_, last_y)] = underlines.as_slice() {
+        // The second line's first underline is displaced by four character
+        // cells. Measure one five-letter word from the first underline.
+        let word_width = (*first_x..crop.width() as usize).take_while(|x| crop.get_pixel(*x as u32, *first_y as u32).0 == ink).count();
+        let indent = indented_x.saturating_sub(*first_x);
+        check((5 * indent).abs_diff(4 * word_width) <= 10, &format!("the rendered indent is four monospace columns: indent={indent}px, five-letter word={word_width}px, marks={underlines:?}"));
+        check((last_y - first_y).abs_diff(3 * (second_y - first_y)) <= 3, "the blank line and unwrapped source lines keep their spacing");
+    } else {
+        check(false, &format!("expected find underlines on three separate code lines, found {underlines:?}"));
+    }
+    let zoom = image::imageops::resize(&crop, width * 2, height * 2, image::imageops::FilterType::Nearest);
+    check(zoom.save(format!("{out}/{name}-code.png")).is_ok(), "saved the enlarged code and its active highlight");
+    let block = app_now().active_messages().and_then(|rows| rows.iter().find(|r| r.id == "o-300")?.blocks.row_data(0));
+    check(block.is_some_and(|b| b.text.as_str() == CODE), "the displayed code keeps its literal text and spacing");
+}
+
 pub fn find_in_chat_check(out: String) {
     use slint::platform::Key;
+    let stepped = out.clone();
     let (out1, out2, out3, out3b, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
     // Oscar's long chat: four rows hold "heron", the oldest far above what
     // opening the chat loads.
@@ -538,9 +617,9 @@ pub fn find_in_chat_check(out: String) {
             }
             let turns: Vec<Value> = (0..700)
                 .map(|i| {
-                    let role = if i % 2 == 0 { "user" } else { "assistant" };
-                    let at = format!("2026-11-20T{:02}:{:02}:{:02}Z", 8 + i / 3600, (i / 60) % 60, i % 60);
-                    let text = if MATCHES.contains(&i) { format!("Row {i}: the heron survey of the northern lakes.") } else { format!("Row {i}: a routine note about the build.") };
+                    let role = if i != 300 && i % 2 == 0 { "user" } else { "assistant" };
+                    let at = format!("2020-03-20T{:02}:{:02}:{:02}Z", 8 + i / 3600, (i / 60) % 60, i % 60);
+                    let text = if i == 300 { fenced_message() } else if MATCHES.contains(&i) { format!("Row {i}: the heron survey of the northern lakes.") } else { format!("Row {i}: a routine note about the build.") };
                     json!({"id": id(i), "role": role, "text": text, "timestamp": at})
                 })
                 .collect();
@@ -630,12 +709,13 @@ pub fn find_in_chat_check(out: String) {
             headless::press_with(&[Key::Shift], Key::Return);
             true
         })),
-        ("newer", Box::new(|_, window, elapsed| {
+        ("newer", Box::new(move |_, window, elapsed| {
             let (_, count, ..) = find_bar(window);
-            if !(count == "2/4" && app_now().marked_row() == "o-300") {
+            if !(count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300") && elapsed >= Duration::from_millis(300)) {
                 check(elapsed < Duration::from_secs(5), &format!("Shift+Enter goes to the newer match, 2/4: {count:?}"));
                 return elapsed >= Duration::from_secs(5);
             }
+            fenced_frame(&stepped, "find-in-chat-02b-fenced-step", window);
             headless::type_text(" zebra");
             true
         })),
@@ -743,6 +823,22 @@ pub fn find_in_chat_check(out: String) {
                 return elapsed >= Duration::from_secs(3);
             }
             check(window.get_switcher_note().is_empty() && window.get_switcher_hint().is_empty(), "the page says nothing more");
+            let app = app_now();
+            let original = crate::language::stored(app.engine.borrow().settings());
+            // The fixture timestamp of o-300, converted to the device's calendar day.
+            let day = chrono::DateTime::parse_from_rfc3339("2020-03-20T08:05:00Z").unwrap().with_timezone(&chrono::Local).date_naive();
+            let expected = |tag| clarp_core::i18n::format::date_short(tag, day);
+            let (english, french) = (expected("en"), expected("fr"));
+            check(english != french, "the fixture date distinguishes the two selected locales");
+            for (tag, stamp) in [("en", english), ("fr", french)] {
+                crate::language::choose(&app, window, tag);
+                let has_stamp = |label: &str| label.split(" · ").any(|field| field == stamp);
+                let hits: Vec<_> = window.get_switcher_rows().iter().filter(|r| r.kind == "message").collect();
+                check(hits.len() == 4 && hits.iter().all(|r| has_stamp(&r.label)), &format!("the four displayed Host hits use the selected {tag} date {stamp}"));
+                let local = crate::search_view::items(&mut app.engine.borrow_mut(), "heron", 50).0;
+                check(local.iter().any(|r| crate::search_view::split(&r.target) == Some(("oscar", "o-300")) && has_stamp(&r.label)), &format!("the loaded fenced hit uses the selected {tag} date {stamp}"));
+            }
+            crate::language::choose(&app, window, &original);
             shot(&out4, "find-in-chat-04-search-page");
             // Newest first: the third is o-300.
             window.invoke_switcher_chosen(2);
@@ -751,14 +847,20 @@ pub fn find_in_chat_check(out: String) {
         ("opened at the hit", Box::new(move |_, window, elapsed| {
             use slint::ComponentHandle;
             let (open, count, ..) = find_bar(window);
-            let done = open && count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300");
+            let done = open && count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300") && elapsed >= Duration::from_millis(300);
             if !done {
                 check(elapsed < Duration::from_secs(8), &format!("the hit opens with the bar at it: {open} {count:?} {:?}", app_now().marked_row()));
                 return elapsed >= Duration::from_secs(8);
             }
             check(window.global::<crate::FindBridge>().get_text() == "heron", "the bar holds the words searched");
             check(marked_words("o-300") == Some(true), "and the words are marked");
-            shot(&out5, "find-in-chat-05-from-search");
+            fenced_frame(&out5, "find-in-chat-05-from-search", window);
+            if let Some(file) = std::env::var_os("CLARP_TEST_CLIPBOARD") {
+                window.invoke_copy_message(app_now().active_id(), "o-300".into());
+                check(std::fs::read(file).ok().as_deref() == Some(fenced_message().as_bytes()), "copy keeps the original fences, whitespace and markup byte for byte");
+            } else {
+                check(false, "the isolated check clipboard is configured");
+            }
             true
         })),
     ];
