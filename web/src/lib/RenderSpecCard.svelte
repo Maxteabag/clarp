@@ -8,14 +8,16 @@
   } from '@core/render-spec.js';
   import { mountForm } from './render-spec-draw.js';
   import { clog } from './net.js';
+  import { t } from '../stores/i18n.svelte.js';
 
   let { row } = $props();
 
   // loading | form | newer | unreadable | failed
   let phase = $state('loading');
   // 'Answered · <button label>' once answered (a form this build cannot read: 'Answered').
-  let answered = $state('');
-  let status = $derived(answered || (row.status === 'completed' ? 'Answered' : ''));
+  let shownForm = $state(null);
+  let answered = $derived(shownForm ? answeredLine(shownForm.form, shownForm.accepted, t) : '');
+  let status = $derived(answered || (row.status === 'completed' ? t('form.answered') : ''));
   let host = $state(null);
   let pending = null;
   let controller = null;
@@ -89,7 +91,7 @@
 
   function show(content) {
     phase = 'form';
-    answered = answeredLine(content.form, content.accepted);
+    shownForm = content;
     pending = content;
     if (host) draw();
   }
@@ -115,7 +117,7 @@
     } catch (_) {
       // Outcome unknown: the same id goes out again on the next press.
       clog('renderSpec', 'event=receipt outcome=unknown');
-      controller?.setSending(false, 'Could not send. Check the connection and try again.');
+      controller?.setSending(false, t('form.send_failed'));
       return;
     }
     let data = null;
@@ -136,33 +138,33 @@
     const refusal = data && data.error && typeof data.error === 'object' ? data.error : null;
     clog('renderSpec', `event=receipt outcome=refused code=${refusal ? refusal.code : r.status}`);
     if (!refusal) {
-      controller.setSending(false, 'Could not send. Check the connection and try again.');
+      controller.setSending(false, t('form.send_failed'));
       return;
     }
     // Whatever goes out next is a new attempt.
     submissionId = newSubmissionId();
     switch (refusalMeaning(refusal.code)) {
       case 'reopen':
-        load({ typed: controller.values(), note: 'The form changed. Check your answers and send again.' });
+        load({ typed: controller.values(), note: t('form.changed') });
         break;
       case 'answered': case 'reused':
         load();
         break;
       case 'closed':
         clearDraft(f.version);
-        controller.close('This form is closed.');
+        controller.close(t('form.closed'));
         break;
       case 'too_old':
         phase = 'newer';
         break;
       case 'answer':
-        controller.setSending(false, 'The Host did not take these answers. Check them and send again.');
+        controller.setSending(false, t('form.not_taken'));
         break;
       case 'host_fault':
-        controller.setSending(false, 'The Host cannot check forms right now. Try again later.');
+        controller.setSending(false, t('form.host_fault'));
         break;
       default:
-        controller.setSending(false, 'The Host refused the form. Try again later.');
+        controller.setSending(false, t('form.refused'));
     }
   }
 
@@ -180,22 +182,22 @@
   onDestroy(() => { gone = true; clearTimeout(saveTimer); });
 </script>
 
-<article class="turn rs-artifact" data-artifact-id={row.artifact_id} aria-label={row.title || 'Form'}>
+<article class="turn rs-artifact" data-artifact-id={row.artifact_id} aria-label={row.title || t('form.kind')}>
   <header class="rs-head">
-    <span class="rs-kind">Form{#if status}<span class="rs-status">{status}</span>{/if}</span>
+    <span class="rs-kind">{t('form.kind')}{#if status}<span class="rs-status">{status}</span>{/if}</span>
     {#if row.title}<h2 class="rs-title">{row.title}</h2>{/if}
     {#if row.summary}<p class="rs-summary">{row.summary}</p>{/if}
   </header>
   {#if phase === 'loading'}
-    <div class="rs-notice">Loading…</div>
+    <div class="rs-notice">{t('form.loading')}</div>
   {:else if phase === 'newer'}
-    <div class="rs-notice">Update Clarp to view this form.</div>
+    <div class="rs-notice">{t('form.newer')}</div>
   {:else if phase === 'unreadable'}
-    <div class="rs-notice">Form unavailable.</div>
+    <div class="rs-notice">{t('form.unreadable')}</div>
   {:else if phase === 'failed'}
     <div class="rs-notice">
-      Couldn't load form.
-      <button type="button" class="rs-retry start-btn" onclick={() => load()}>Retry</button>
+      {t('form.load_failed')}
+      <button type="button" class="rs-retry start-btn" onclick={() => load()}>{t('form.retry')}</button>
     </div>
   {/if}
   <div class="rs-form" bind:this={host} hidden={phase !== 'form'}></div>

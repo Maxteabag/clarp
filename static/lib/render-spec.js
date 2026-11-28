@@ -7,6 +7,8 @@
 // app's reader checks. A form this build cannot draw is 'newer' (a catalog, version, component
 // or property it does not know) or 'unreadable' (broken against the catalog it knows).
 
+import { english } from './i18n-en.js';
+
 // The client contract this web build declares in X-Clarp-Client (`web/<build> contract=<n>`).
 // The web app's own series: 1 is the first build that draws and answers render_spec (v1), 2 the
 // first that also draws v2 (chart, table, button). The Host admits it by these numbers
@@ -523,15 +525,15 @@ export function acceptedSubmission(value) {
  * The answered card's line (issue 673): 'Answered · <button label>' for a button form, naming
  * the button that was chosen; 'Answered' for any other answered form; '' while it is open.
  */
-export function answeredLine(form, accepted) {
+export function answeredLine(form, accepted, tr = english) {
   if (!accepted) return '';
   const chosen = form && form.buttons && form.buttons.find(b => b.action === accepted.state[ACTION_KEY]);
-  return chosen ? `Answered · ${chosen.label}` : 'Answered';
+  return chosen ? tr('form.answered_with', { label: chosen.label }) : tr('form.answered');
 }
 
 /** The words a state-bound text shows for a value. */
-export function words(value) {
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+export function words(value, tr = english) {
+  if (typeof value === 'boolean') return tr(value ? 'form.yes' : 'form.no');
   if (value === undefined || value === null) return '';
   return String(value);
 }
@@ -540,21 +542,23 @@ export function words(value) {
  * The line above Submit: the answered note, a note from the owner, or why Submit is off.
  * `captions` maps a key to its control's label.
  */
-export function footnote({ form, values, accepted = null, note = '', closed = false, captions = {} }) {
+export function footnote({ form, values, accepted = null, note = '', closed = false, captions = {},
+  tr = english, formatWhen = ms => new Date(ms).toLocaleString('en', { dateStyle: 'medium', timeStyle: 'short' }) }) {
   if (accepted) {
-    const when = new Date(accepted.acceptedAt).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-    return `Answered ${when}. ` + (accepted.deliveryStatus === 'delivered'
-      ? 'The agent has it.' : 'The agent gets it when it is next awake.');
+    const when = formatWhen(new Date(accepted.acceptedAt).getTime());
+    return tr(accepted.deliveryStatus === 'delivered' ? 'form.answered_at_delivered' : 'form.answered_at_pending', { when });
   }
   if (note) return note;
   if (closed) return '';
   const result = submission(form, values);
   if (result.ready) return '';
-  if (result.gaps.some(g => g.gap === 'too_large')) return 'The answers are too long to send. Shorten the text.';
+  if (result.gaps.some(g => g.gap === 'too_large')) return tr('form.too_long');
   const missing = result.gaps.filter(g => g.gap === 'missing').length;
-  if (missing) return missing === 1 ? 'One required answer is missing.' : `${missing} required answers are missing.`;
+  if (missing) return tr('form.missing', { count: missing });
   const short = result.gaps.filter(g => g.gap === 'too_short').sort((a, b) => (a.key < b.key ? -1 : 1))[0];
-  if (short) return `${captions[short.key] || 'A text'} needs at least ${short.limit} characters.`;
+  if (short) {
+    return tr('form.too_short', { field: captions[short.key] || tr('form.a_text'), count: short.limit });
+  }
   return '';
 }
 

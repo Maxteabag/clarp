@@ -518,5 +518,41 @@
   "chat.load_failed": "failed to load",
   "chat.no_conversation_in": "no conversation yet in {folder}",
   "chat.no_messages_in": "no messages in {folder}",
-  "chat.is_working": "{name} is working"
+  "chat.is_working": "{name} is working",
+  "form.answered": "Answered",
+  "form.answered_with": "Answered · {label}",
+  "form.yes": "Yes",
+  "form.no": "No",
+  "form.answered_at_delivered": "Answered {when}. The agent has it.",
+  "form.answered_at_pending": "Answered {when}. The agent gets it when it is next awake.",
+  "form.too_long": "The answers are too long to send. Shorten the text.",
+  "form.missing": {
+    "one": "One required answer is missing.",
+    "other": "{count} required answers are missing."
+  },
+  "form.too_short": {
+    "one": "{field} needs at least {count} character.",
+    "other": "{field} needs at least {count} characters."
+  },
+  "form.a_text": "A text",
+  "form.required": "Required",
+  "form.no_answer": "No answer",
+  "form.cancel": "Cancel",
+  "form.ok": "OK",
+  "form.at_least": {
+    "one": "At least {count} character.",
+    "other": "At least {count} characters."
+  },
+  "form.send_failed": "Could not send. Check the connection and try again.",
+  "form.changed": "The form changed. Check your answers and send again.",
+  "form.closed": "This form is closed.",
+  "form.not_taken": "The Host did not take these answers. Check them and send again.",
+  "form.host_fault": "The Host cannot check forms right now. Try again later.",
+  "form.refused": "The Host refused the form. Try again later.",
+  "form.kind": "Form",
+  "form.loading": "Loading…",
+  "form.newer": "Update Clarp to view this form.",
+  "form.unreadable": "Form unavailable.",
+  "form.load_failed": "Couldn't load form.",
+  "form.retry": "Retry"
 }
