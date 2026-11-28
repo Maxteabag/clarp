@@ -590,7 +590,7 @@ fn fenced_frame(out: &str, name: &str, window: &crate::AppWindow) {
         // cells. Measure one five-letter word from the first underline.
         let word_width = (*first_x..crop.width() as usize).take_while(|x| crop.get_pixel(*x as u32, *first_y as u32).0 == ink).count();
         let indent = indented_x.saturating_sub(*first_x);
-        check((5 * indent).abs_diff(4 * word_width) <= 10, "the rendered indent is four monospace columns");
+        check((5 * indent).abs_diff(4 * word_width) <= 10, &format!("the rendered indent is four monospace columns: indent={indent}px, five-letter word={word_width}px, marks={underlines:?}"));
         check((last_y - first_y).abs_diff(3 * (second_y - first_y)) <= 3, "the blank line and unwrapped source lines keep their spacing");
     } else {
         check(false, &format!("expected find underlines on three separate code lines, found {underlines:?}"));

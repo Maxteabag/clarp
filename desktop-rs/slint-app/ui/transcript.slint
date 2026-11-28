@@ -873,17 +873,24 @@ export component Block inherits VerticalLayout {
             wrap: no-wrap;
         }
         for mark in root.block.code-marks: Rectangle {
-            x: code-text.x + prefix.preferred-width;
+            x: code-text.x + prefix.preferred-width - sentinel.preferred-width;
             y: code-text.y + (mark.line-index + 1) * matched.preferred-height - 2px;
             height: 2px;
             width: matched.preferred-width;
             background: Palette.warning;
             prefix := Text {
                 visible: false;
-                text: mark.prefix;
+                // A trailing glyph keeps leading or trailing spaces in the measured prefix.
+                text: mark.prefix + "|";
                 font-family: Palette.code-family;
                 font-size: root.body-size * Look.code-scale;
                 wrap: no-wrap;
+            }
+            sentinel := Text {
+                visible: false;
+                text: "|";
+                font-family: Palette.code-family;
+                font-size: root.body-size * Look.code-scale;
             }
             matched := Text {
                 visible: false;
