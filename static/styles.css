@@ -2170,6 +2170,8 @@ details.tool.error { border-color: rgba(200, 65, 42, .45); }
     background var(--t-snap) var(--ease);
 }
 .chat-send:active { transform: scale(.95); }
+/* Held while the Host does not answer (HostDownPanel): the draft stays, sending waits. */
+.chat-send:disabled { opacity: .4; cursor: default; transform: none; }
 
 .start-btn.primary {
   border-radius: 10px;

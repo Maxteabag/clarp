@@ -10,6 +10,9 @@
   import { PRIMARY, mergeChats } from '@core/all-hosts.js';
   import { listedHostIds, hostBadgeFor } from '../stores/app.svelte.js';
   import { hostsState, openOnHost, readHosts } from '../stores/hosts.svelte.js';
+  import { formatRelative } from './i18n/format.js';
+  import { t } from '../stores/i18n.svelte.js';
+  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -38,6 +41,7 @@
       const isUnread = !remote && isUserNotificationUnread(row.sid);
       return {
         key: row.key, sid: row.sid, name: row.name, remote,
+        hostDown: isDown(remote ? remote.id : SERVING),
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
@@ -47,6 +51,13 @@
           : isUnread ? 'new' : 'idle',
       };
     });
+  });
+
+  // One line per Host that does not answer, above its dimmed rows; it opens the full panel.
+  let down = $derived.by(() => {
+    const others = readHosts();
+    return downHosts([...(others.length ? [SERVING] : []), ...others.map(h => h.id)])
+      .map(h => ({ id: h.id, text: t('host_down.list_row', { host: h.label, when: formatRelative(h.since, reach.now) }) }));
   });
 
   function pick(item) {
@@ -72,8 +83,13 @@
 
 {#if open}
   <div class="agent-switcher" role="menu" aria-label="Quick switch agent">
+    {#each down as line (line.id)}
+      <button class="switcher-host-down" onclick={() => { openPanel(line.id); open = false; }}>
+        <span class="switcher-offline-dot" aria-hidden="true"></span>{line.text}
+      </button>
+    {/each}
     {#each items as item, i (item.key)}
-      <button class="switcher-item" style="animation-delay:{i * 35}ms" onclick={() => pick(item)}>
+      <button class="switcher-item" class:host-down={item.hostDown} style="animation-delay:{i * 35}ms" onclick={() => pick(item)}>
         <span class="switcher-avatar {item.cls}"
               style="background-image:url('{item.avatar}')">
           {#if !item.avatar}
@@ -86,3 +102,27 @@
     {/each}
   </div>
 {/if}
+
+<style>
+.switcher-host-down {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--ink-edge);
+  background: transparent;
+  color: var(--washi-dim);
+  font: 400 12px/1.3 var(--font-ui);
+  text-align: left;
+  cursor: pointer;
+}
+.switcher-offline-dot {
+  flex: 0 0 auto;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  border: 1.5px solid var(--washi-low);
+}
+.agent-switcher :global(.switcher-item.host-down) { opacity: .55; }
+</style>

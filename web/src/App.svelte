@@ -18,6 +18,9 @@
   import StatusToast from './lib/StatusToast.svelte';
   import SvgDefs from './lib/SvgDefs.svelte';
   import VoiceDialog from './lib/VoiceDialog.svelte';
+  import HostDownDialog from './lib/HostDownDialog.svelte';
+  import OfflineBanner from './lib/OfflineBanner.svelte';
+  import { PRIMARY, isDown, onRecover, reach, startReach } from './stores/reach.svelte.js';
 
   import {
     app, isDesktop, refreshAgentSnapshot, setVersion,
@@ -131,6 +134,9 @@
 
     // Bootstrap per docs/protocol.md: snapshot, then the open chat, then the
     // event stream (which itself refetches the snapshot on connect).
+    startReach();
+    // The serving Host answers again: the open chat, if it could not load, loads now.
+    onRecover(PRIMARY, () => ensureLoaded(app.session));
     refreshAgentSnapshot();
     startHosts();
     ensureLoaded(app.session);
@@ -243,7 +249,9 @@
   />
 {/if}
 
-{#if app.authRejected}
+{#if isDown(PRIMARY) || !reach.deviceOnline}
+  <!-- The Host-down panel (in the chat) or the offline banner says it; nothing more here. -->
+{:else if app.authRejected}
   <!-- The server is reachable and refusing every request: the saved token is
        wrong. Waiting or reconnecting cannot fix that, only a fresh link can. -->
   <div class="reconnect auth-rejected" role="alert">
@@ -259,6 +267,8 @@
 {/if}
 
 <StatusToast />
+<OfflineBanner />
+<HostDownDialog />
 
 <Overview
   bind:open={overviewOpen}

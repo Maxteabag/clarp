@@ -17,7 +17,7 @@ vi.mock('../../web/src/lib/net.js', () => ({
 vi.mock('../../web/src/stores/app.svelte.js', () => ({
   app: { session: 'mike' }, flash() {}, setSession: async () => {},
   agentSnapshot: {}, chipLabel() {}, mirrorFocus() {}, refreshAgentSnapshot: async () => {},
-  rememberUserNotification() {}, setConn() {}, setVersion() {}, syncStatus() {},
+  rememberUserNotification() {}, setConn() {}, setVersion() {}, syncStatus() {}, statusFor: () => ({}),
 }));
 vi.mock('../../web/src/stores/audio.svelte.js', () => ({
   audio: { muted: true }, chime() {}, machine: { settle() {}, send() {} },

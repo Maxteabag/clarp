@@ -45,6 +45,27 @@ export function bootstrapAuth() {
   } catch (_) {}
 }
 
+/** The web app's own version (package.json), for the diagnostics text. */
+export const APP_VERSION = appVersion;
+
+/**
+ * Saves a new token for this Host (the Host-down panel's Pair again): what a fresh `?token=`
+ * link does, without the reload. Accepts the token or the whole link.
+ */
+export function setAuthToken(input) {
+  let t = String(input || '').trim();
+  try {
+    const fromLink = new URL(t, window.location.href).searchParams.get('token');
+    if (fromLink) t = fromLink;
+  } catch (_) {}
+  if (!t || /\s/.test(t)) return false;
+  try { localStorage.setItem(AUTH_KEY, t); } catch (_) {}
+  try {
+    document.cookie = 'claude_pwa_token=' + encodeURIComponent(t) + '; Path=/; SameSite=Lax';
+  } catch (_) {}
+  return true;
+}
+
 export function getAuthToken() {
   try { return localStorage.getItem(AUTH_KEY) || ''; } catch (_) { return ''; }
 }

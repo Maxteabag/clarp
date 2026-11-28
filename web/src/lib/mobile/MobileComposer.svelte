@@ -10,6 +10,8 @@
   import { unlockAudio } from '../../stores/audio.svelte.js';
   import { send, sendText } from '../../stores/send.svelte.js';
   import { Timing } from '@core/protocol.js';
+  import { t } from '../../stores/i18n.svelte.js';
+  import { PRIMARY, isDown, reach } from '../../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -55,9 +57,15 @@
   // An agent that moved to another Host takes no turn here (contract 125).
   let held = $derived((app.tick, movedLine(statusFor(app.session).moved)));
 
+  // The serving Host does not answer, or this device has no network: the chat is its saved
+  // messages, the draft stays, and sending waits (docs/design/host-not-answering.md).
+  let readOnly = $derived(isDown(PRIMARY) || !reach.deviceOnline);
+  let readOnlyNote = $derived(t('host_down.read_only', { host: reach.hosts[PRIMARY]?.label || location.host }));
+
   function submit() {
     const text = value.trim();
     if (!text) { close(); return; }
+    if (readOnly) return;
     unlockAudio();
     close();
     send.captureTarget = app.session;
@@ -86,9 +94,11 @@
       autocomplete="off"
       bind:this={inputEl}
       bind:value
+      placeholder={readOnly ? readOnlyNote : undefined}
+      title={readOnly ? readOnlyNote : undefined}
       onkeydown={keydown}
     />
-    <button class="chat-send" aria-label="Send" onclick={submit}>
+    <button class="chat-send" aria-label="Send" disabled={readOnly} onclick={submit}>
       <svg class="btn-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
         <path fill="currentColor" d="M3.4 20.4 21 12 3.4 3.6 3.4 10l12 2-12 2z"/>
       </svg>

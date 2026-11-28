@@ -7,13 +7,20 @@
   import ConnDot from './ConnDot.svelte';
   import Transcript from './Transcript.svelte';
   import StatusLine from './live/StatusLine.svelte';
-  import { reload } from '../stores/conversations.svelte.js';
+  import HostDownPanel from './HostDownPanel.svelte';
+  import { conversation, reload } from '../stores/conversations.svelte.js';
+  import { PRIMARY, isDown, panelShown } from '../stores/reach.svelte.js';
   import { live, setExplanationsEnabled } from '../stores/live.svelte.js';
   import { toggleToolsFor, toolActivityFor } from '../stores/chat-choices.svelte.js';
 
   // `active` is false for a chat kept mounted behind the open one: it keeps
   // its DOM and scroll position but is hidden and gives up the element ids.
   let { session, showConnDot = false, onTapAgent, onHoldAgent, active = true } = $props();
+
+  // Every chat here is the serving Host's. While it does not answer, the panel sits above the
+  // saved messages; with nothing saved, the full page stands in for the transcript.
+  let hostPanel = $derived(panelShown(PRIMARY));
+  let nothingSaved = $derived(isDown(PRIMARY) && !conversation(session).turns.length);
 </script>
 
 <section id={active ? 'history' : undefined} class="history" class:hidden={!active}
@@ -49,7 +56,16 @@
               onclick={() => reload(session)}>↻</button>
     </div>
   </header>
+  {#if hostPanel && !nothingSaved}<HostDownPanel id={PRIMARY} />{/if}
   <AgentBanner {session} />
-  <Transcript {session} {active} />
+  {#if nothingSaved}
+    <div class="host-down-page"><HostDownPanel id={PRIMARY} full /></div>
+  {:else}
+    <Transcript {session} {active} />
+  {/if}
   <StatusLine {session} />
 </section>
+
+<style>
+.host-down-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; }
+</style>
