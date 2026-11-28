@@ -437,6 +437,7 @@ pub const FAILURE: &str = "failure:";
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 struct Shown {
     id: u32,
+    action_generation: u64,
     session: String,
     message_id: String,
     decision_id: String,
@@ -587,6 +588,7 @@ fn close_id(id: u32) {
 fn shown_of(note: &Note, id: u32) -> Shown {
     Shown {
         id,
+        action_generation: 0,
         session: note.session.clone(),
         message_id: note.message_id.clone(),
         decision_id: note.decision_id.clone(),
@@ -644,6 +646,15 @@ pub fn action_invoked(id: u32, key: &str) {
         return;
     }
     let Some(popup) = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.id == id).cloned()) else { return };
+    let key = if key == "default" {
+        key
+    } else {
+        let Some((generation, action)) = key.split_once(':') else { return };
+        if generation.parse::<u64>().ok() != Some(popup.action_generation) {
+            return;
+        }
+        action
+    };
     close_id(id);
     act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
 }
@@ -785,7 +796,20 @@ fn send(note: Note, closed: Option<u32>) {
     let Some(note) = note else { return };
     // The shown popup's buttons stay its own until this Notify returns.
     let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
-    let actions = actions(&note);
+    // The daemon may reuse a popup ID. Give each explicit button an identity
+    // that stays with the popup that supplied it, even if its signal arrives late.
+    thread_local! {
+        static ACTION_GENERATION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    }
+    let action_generation = ACTION_GENERATION.with(|counter| {
+        let next = counter.get().wrapping_add(1);
+        counter.set(next);
+        next
+    });
+    let mut actions = actions(&note);
+    for pair in actions.chunks_exact_mut(2).skip(1) {
+        pair[0] = format!("{action_generation}:{}", pair[0]);
+    }
     runtime::handle().spawn(async move {
         let sent = async {
             let connection = zbus::Connection::session().await?;
@@ -815,7 +839,9 @@ fn send(note: Note, closed: Option<u32>) {
             eprintln!("clarp-slint: notification failed: {error}");
         }
         let id = answered.ok();
-        later(move || delivered(shown_of(&note, id.unwrap_or(0)), id));
+        let mut popup = shown_of(&note, id.unwrap_or(0));
+        popup.action_generation = action_generation;
+        later(move || delivered(popup, id));
     });
 }
 

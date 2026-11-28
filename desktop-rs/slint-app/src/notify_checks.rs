@@ -48,13 +48,13 @@ impl Daemon {
         _app_icon: String,
         _summary: String,
         body: String,
-        _actions: Vec<String>,
+        actions: Vec<String>,
         _hints: std::collections::HashMap<String, zbus::zvariant::OwnedValue>,
         _expire_timeout: i32,
     ) -> u32 {
         tokio::time::sleep(DELAY).await;
         let id = if replaces_id != 0 { replaces_id } else { NEXT_ID.fetch_add(1, Ordering::Relaxed) };
-        record(json!({"call": "Notify", "id": id, "replaces_id": replaces_id, "body": body}));
+        record(json!({"call": "Notify", "id": id, "replaces_id": replaces_id, "body": body, "actions": actions}));
         if let Ok(mut visible) = VISIBLE.lock() {
             visible.insert(id, body);
         }
@@ -78,7 +78,7 @@ impl Daemon {
 }
 
 /// The daemon says a button of popup `id` was pressed, as a desktop does.
-fn press(id: u32, key: &'static str) {
+fn press(id: u32, key: String) {
     crate::platform::runtime::handle().spawn(async move {
         let Some(connection) = DAEMON.get() else { return };
         let sent = connection
@@ -280,7 +280,8 @@ pub fn notify_daemon_check(_out: String) {
             if elapsed < Duration::from_millis(400) {
                 return false;
             }
-            press(PRESSED_ID.load(Ordering::Relaxed), "choice:accepted");
+            let Some(key) = approval_key("Approve A3?") else { return false };
+            press(PRESSED_ID.load(Ordering::Relaxed), key);
             true
         })),
         ("ambiguous click ignored", Box::new(|_, _window, elapsed| {
@@ -289,7 +290,18 @@ pub fn notify_daemon_check(_out: String) {
             }
             check(super::posts("/decisions/d-a3/resolve").is_empty(), "a click during replacement does not answer the older card");
             check(super::posts("/decisions/d-b3/resolve").is_empty(), "a click during replacement does not answer the newer card");
-            press(PRESSED_ID.load(Ordering::Relaxed), "choice:accepted");
+            let Some(key) = approval_key("Approve A3?") else { return false };
+            press(PRESSED_ID.load(Ordering::Relaxed), key);
+            true
+        })),
+        ("late action from the old popup ignored", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(super::posts("/decisions/d-a3/resolve").is_empty(), "the late button did not answer the old question");
+            check(super::posts("/decisions/d-b3/resolve").is_empty(), "the late button did not answer the replacement");
+            let Some(key) = approval_key("Approve B3?") else { return false };
+            press(PRESSED_ID.load(Ordering::Relaxed), key);
             true
         })),
         ("settled replacement answers its own question", Box::new(|_, _window, _| {
@@ -310,3 +322,13 @@ static PRESSED_ID: AtomicU32 = AtomicU32::new(0);
 
 /// Where the question's calls begin in the daemon's record.
 static QUESTION_FROM: AtomicU32 = AtomicU32::new(0);
+
+fn approval_key(body: &str) -> Option<String> {
+    let calls = since(QUESTION_FROM.load(Ordering::Relaxed) as usize);
+    let call = calls.iter().find(|call| call["call"] == "Notify" && call["body"] == body)?;
+    call["actions"].as_array()?.chunks_exact(2).find_map(|pair| {
+        let key = pair[0].as_str()?;
+        let (_, action) = key.split_once(':')?;
+        (action == "choice:accepted").then(|| key.to_owned())
+    })
+}
