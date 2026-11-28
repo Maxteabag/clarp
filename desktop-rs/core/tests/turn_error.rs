@@ -203,3 +203,37 @@ fn prompt_too_long_off_claude_offers_a_fresh_session() {
         "actions": [{"id": "fresh_retry", "label": {"en": "New session, try again"}}, {"id": "switch_model", "label": {"en": "Switch"}}]})).unwrap();
     assert_eq!(error.retry_body("s", &error.actions[0]).unwrap(), json!({"session": "s", "message_id": "u1", "fresh": true}));
 }
+
+#[test]
+fn a_language_without_its_own_catalog_says_the_hosts_words() {
+    let usage = rows().into_iter().find(|r| r.id == "marker-u3").unwrap().turn_error.unwrap();
+    assert_eq!(usage.sentence_in("nb", 0), usage.text.nb, "no nb catalog yet: the Host's Norwegian, not English");
+    assert_eq!(usage.sentence_in("fr", 0), usage.text.en, "a language the Host does not write: its English");
+    assert_eq!(usage.actions[0].label_in("nb", 0), usage.actions[0].label.nb, "the button too");
+    assert_eq!(text::word("nb", "error.details"), "Details", "words the Host sends none for: the English source");
+}
+
+#[test]
+fn a_retry_at_without_its_own_time_takes_the_reset() {
+    let error = TurnError::from_json(&json!({"code": "usage_limit", "key": "error.usage_limit_until", "text": {"en": "Out."}, "message_id": "u1",
+        "resets_at_ms": 5_000, "params": {"backend": "Codex", "time_ms": 5_000},
+        "actions": [{"id": "retry_at", "label": {"en": "Try again later"}}]})).unwrap();
+    let action = &error.actions_at(1_000)[0];
+    assert_eq!((action.id.as_str(), action.at_ms), ("retry_at", Some(5_000)));
+    assert!(action.label_in("en", 1_000).starts_with("Try again at "), "{}", action.label_in("en", 1_000));
+    assert_eq!(error.retry_body("s", action).unwrap()["at_ms"], 5_000);
+}
+
+#[test]
+fn an_automated_row_is_neither_a_card_nor_a_reply() {
+    let mut rows = rows();
+    let mut automated = rows.iter().find(|r| r.id == "marker-u3").unwrap().clone();
+    automated.id = "auto-1".into();
+    automated.automated = true;
+    rows.push(automated);
+    rows.push(Message::from_json(json!({"id": "auto-2", "role": "assistant", "text": "Heartbeat ok.", "automated": true}).as_object().unwrap()));
+    let plan = turn_error::plan(&rows, None);
+    assert_eq!(plan.count("marker-u3"), 3, "the automated failure does not join the run");
+    assert!(!plan.hidden.contains("auto-1") && !plan.counts.contains_key("auto-1"));
+    assert_eq!(plan.actionable.as_deref(), Some("marker-u6"), "nor does the automated reply end the newest card's retry");
+}

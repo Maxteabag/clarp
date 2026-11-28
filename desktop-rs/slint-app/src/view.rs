@@ -683,7 +683,7 @@ pub(crate) fn message_row(
     // A failure the Host explains (`turn_error_explained`) is its card.
     let author = if row.activity {
         "activity"
-    } else if m.turn_error.is_some() && m.role != "user" {
+    } else if m.turn_error.is_some() && m.role != "user" && !m.automated {
         "error"
     } else if m.role == "user" {
         "user"

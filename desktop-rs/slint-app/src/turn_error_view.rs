@@ -85,7 +85,7 @@ fn retry_note(state: &RetryState, action: &Action, language: &str, now: i64) -> 
             if let Some(at) = action.at_ms {
                 params.insert("time_ms".into(), at.into());
             }
-            (text::say(language, "error.retry_scheduled", &params, now).unwrap_or_else(|| text::word(language, "error.retry_sent")), false)
+            (text::say_any(language, "error.retry_scheduled", &params, now).unwrap_or_else(|| text::word(language, "error.retry_sent")), false)
         }
         RetryState::Done(_) => (text::word(language, "error.retry_sent"), false),
         RetryState::Failed(status, words) => {

@@ -922,6 +922,11 @@ component TurnErrorCard inherits Rectangle {
     in property <ErrorCard> card;
     in property <bool> measuring;
     property <color> tone: root.card.severity == "warning" ? Palette.warning : root.card.severity == "info" ? Palette.muted : Palette.danger;
+    // The primary button's fill: the tone, but on a quiet info card the
+    // text colour (muted grey under window-coloured words is too faint in
+    // the light theme), nearly opaque.
+    property <color> primary-fill: root.card.severity == "info" ? Palette.text : root.tone;
+    property <float> primary-alpha: root.card.severity == "info" ? 0.9 : 0.7;
     border-radius: 6px * ChatText.scale;
     border-width: 1px;
     border-color: root.tone.with-alpha(root.card.severity == "info" ? 0.25 : 0.45);
@@ -988,8 +993,8 @@ component TurnErrorCard inherits Rectangle {
                 min-width: action-row.preferred-width;
                 border-radius: 4px * ChatText.scale;
                 border-width: 1px;
-                border-color: action.primary ? root.tone : Palette.border;
-                background: action.primary ? (action-touch.has-hover && self.enabled ? root.tone.with-alpha(0.85) : root.tone.with-alpha(action.done ? 0.35 : 0.7))
+                border-color: action.primary ? root.primary-fill : Palette.border;
+                background: action.primary ? (action-touch.has-hover && self.enabled ? root.primary-fill.with-alpha(Math.min(1, root.primary-alpha + 0.15)) : root.primary-fill.with-alpha(action.done ? 0.35 : root.primary-alpha))
                     : action-touch.has-hover && self.enabled ? Palette.hover : Palette.control;
                 accessible-role: button;
                 accessible-id: root.measuring ? "" : "error-action:" + action.id + ":" + root.card.id;

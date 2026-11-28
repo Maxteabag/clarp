@@ -64,10 +64,17 @@ pub const ENGLISH: &[(&str, &str)] = &[
 pub const REPEAT_COUNT: &str = "error.repeat_count";
 const REPEAT_COUNT_ENGLISH: &[(&str, &str)] = &[("one", "{count}×"), ("other", "{count}×")];
 
-/// The catalog's string for `key` in `language`: the translation where
-/// there is one (none yet: clarp-i18n adds them), else the English source.
+/// The catalog's own string for `key` in `language`: the English source in
+/// English, a translation in a language that has one (none yet: clarp-i18n
+/// adds them here), else `None`, so a sentence falls back to the Host's text
+/// in that language rather than to English (docs/turn-errors.md, "key and
+/// params").
 pub fn tr(language: &str, key: &str) -> Option<&'static str> {
-    let _ = language;
+    if language == "en" { english(key) } else { None }
+}
+
+/// The English source for `key`.
+pub fn english(key: &str) -> Option<&'static str> {
     ENGLISH.iter().find(|(k, _)| *k == key).map(|(_, text)| *text)
 }
 
@@ -109,27 +116,58 @@ fn locale(language: &str) -> icu_locale_core::Locale {
 /// against `now_ms`: the time alone when it is today, with the weekday
 /// within a week, else with the date. Empty when it cannot be formatted.
 pub fn format_time(language: &str, at_ms: i64, now_ms: i64) -> String {
-    use icu_datetime::fieldsets::{E, MD, T, YMD};
     use icu_datetime::input::{Date, DateTime, Time};
-    use icu_datetime::{DateTimeFormatter, NoCalendarFormatter};
     let (Some(at), Some(now)) = (Local.timestamp_millis_opt(at_ms).single(), Local.timestamp_millis_opt(now_ms).single()) else {
         return String::new();
     };
     let Ok(time) = Time::try_new(at.hour() as u8, at.minute() as u8, 0, 0) else { return String::new() };
     let Ok(date) = Date::try_new_iso(at.year(), at.month() as u8, at.day() as u8) else { return String::new() };
     let datetime = DateTime { date, time };
-    let prefs = locale(language).into();
     let days = (at.date_naive() - now.date_naive()).num_days();
-    let written = if days == 0 {
-        NoCalendarFormatter::try_new(prefs, T::hm()).map(|f| f.format(&time).to_string())
-    } else if days.abs() < 7 {
-        DateTimeFormatter::try_new(prefs, E::short().with_time_hm()).map(|f| f.format(&datetime).to_string())
-    } else if at.year() == now.year() {
-        DateTimeFormatter::try_new(prefs, MD::medium().with_time_hm()).map(|f| f.format(&datetime).to_string())
-    } else {
-        DateTimeFormatter::try_new(prefs, YMD::medium().with_time_hm()).map(|f| f.format(&datetime).to_string())
-    };
-    written.unwrap_or_default()
+    FORMATTERS.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if cell.as_ref().is_none_or(|f| f.language != language) {
+            *cell = Some(Formatters { language: language.to_owned(), ..Formatters::default() });
+        }
+        let Some(f) = cell.as_mut() else { return String::new() };
+        let prefs = || locale(language).into();
+        let written = if days == 0 {
+            made(&mut f.time, || NoCalendarFormatter::try_new(prefs(), T::hm()).ok()).map(|f| f.format(&time).to_string())
+        } else if days.abs() < 7 {
+            made(&mut f.weekday, || DateTimeFormatter::try_new(prefs(), E::short().with_time_hm()).ok()).map(|f| f.format(&datetime).to_string())
+        } else if at.year() == now.year() {
+            made(&mut f.date, || DateTimeFormatter::try_new(prefs(), MD::medium().with_time_hm()).ok()).map(|f| f.format(&datetime).to_string())
+        } else {
+            made(&mut f.year, || DateTimeFormatter::try_new(prefs(), YMD::medium().with_time_hm()).ok()).map(|f| f.format(&datetime).to_string())
+        };
+        written.unwrap_or_default()
+    })
+}
+
+use icu_datetime::fieldsets::{E, ET, MD, MDT, T, YMD, YMDT};
+use icu_datetime::{DateTimeFormatter, NoCalendarFormatter};
+
+/// The `{time}` formatters of one language, made the first time each is
+/// needed and kept until the language changes.
+#[derive(Default)]
+struct Formatters {
+    language: String,
+    time: Option<NoCalendarFormatter<T>>,
+    weekday: Option<DateTimeFormatter<ET>>,
+    date: Option<DateTimeFormatter<MDT>>,
+    year: Option<DateTimeFormatter<YMDT>>,
+}
+
+thread_local! {
+    static FORMATTERS: std::cell::RefCell<Option<Formatters>> = const { std::cell::RefCell::new(None) };
+}
+
+/// The formatter in `slot`, made by `make` when it is not there yet.
+fn made<F>(slot: &mut Option<F>, make: impl FnOnce() -> Option<F>) -> Option<&F> {
+    if slot.is_none() {
+        *slot = make();
+    }
+    slot.as_ref()
 }
 
 /// `error.repeat_count` for `count` in the app's language.
@@ -178,9 +216,16 @@ pub fn say(language: &str, key: &str, params: &Object, now_ms: i64) -> Option<St
     tr(language, key).and_then(|template| fill(template, params, language, now_ms))
 }
 
-/// A catalog string that needs no parameters (always in the catalog).
+/// A string the Host sends no words for (a note, a label): the catalog's in
+/// `language`, else its English source, filled from `params`.
+pub fn say_any(language: &str, key: &str, params: &Object, now_ms: i64) -> Option<String> {
+    say(language, key, params, now_ms).or_else(|| english(key).and_then(|template| fill(template, params, language, now_ms)))
+}
+
+/// A string without parameters the Host sends no words for: the catalog's
+/// in `language`, else its English source.
 pub fn word(language: &str, key: &str) -> String {
-    tr(language, key).unwrap_or(key).to_owned()
+    tr(language, key).or_else(|| english(key)).unwrap_or(key).to_owned()
 }
 
 /// The Host's own words for a fallback: Norwegian when the app speaks it,

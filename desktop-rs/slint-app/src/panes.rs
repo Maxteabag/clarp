@@ -998,7 +998,7 @@ impl App {
                     shown.work_open = work.open;
                 }
                 // A failed turn's card: its count, buttons and Details.
-                if let Some(error) = row.message.turn_error.as_ref().filter(|_| shown.author == "error") {
+                if let Some(error) = row.message.turn_error.as_ref().filter(|_| shown.author == "error" && !row.message.automated) {
                     shown.error = crate::turn_error_view::finish(error, &row.message.id, &pane.session, &errors, &self.engine.borrow());
                 }
                 // A message addressed to this chat's agent by an @-mention.

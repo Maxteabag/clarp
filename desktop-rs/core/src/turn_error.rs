@@ -153,6 +153,8 @@ impl TurnError {
             let action = match action.at_ms.or(self.resets_at_ms) {
                 // Its words come from the catalog (`error.action.retry`).
                 Some(at) if action.id == "retry_at" && at <= now_ms => Action { id: "retry".into(), ..Action::default() },
+                // A scheduled retry without its own time takes the reset's.
+                Some(at) if action.id == "retry_at" => Action { at_ms: Some(at), ..action.clone() },
                 _ => action.clone(),
             };
             if !out.iter().any(|a| a.id == action.id) {
@@ -253,36 +255,40 @@ pub fn plan(rows: &[Message], live: Option<(&str, TurnError)>) -> Plan {
         })
     });
     let live_key = live.as_ref().map(|(turn_id, _)| format!("{LIVE_PREFIX}{turn_id}"));
-    // (id, its error), in order, with the replies between them.
-    let mut items: Vec<(String, Option<&TurnError>)> =
-        rows.iter().map(|row| (row.id.clone(), row.turn_error.as_ref().filter(|_| !row.automated))).collect();
-    let replied: Vec<bool> = rows.iter().map(agent_reply).collect();
-    if let (Some(key), Some((_, error))) = (&live_key, &live) {
-        items.push((key.clone(), Some(error)));
-    }
-    // Fingerprint → the card drawn for its open run.
-    let mut open: HashMap<&str, String> = HashMap::new();
-    let mut newest: Option<String> = None;
-    for (index, (id, error)) in items.iter().enumerate() {
-        if replied.get(index).copied().unwrap_or(false) {
+    // Row by row (the live failure last): the card ids it draws, by index,
+    // so a chat's rows are not copied on every refresh.
+    let id_of = |index: usize| rows.get(index).map_or_else(|| live_key.clone().unwrap_or_default(), |row| row.id.clone());
+    let error_of = |index: usize| match rows.get(index) {
+        // An automated row is neither a failure card nor a reply (it is not drawn).
+        Some(row) => row.turn_error.as_ref().filter(|_| !row.automated),
+        None => live.as_ref().map(|(_, error)| error),
+    };
+    let count = rows.len() + usize::from(live.is_some());
+    // Fingerprint → the index of the card drawn for its open run.
+    let mut open: HashMap<&str, usize> = HashMap::new();
+    let mut newest: Option<usize> = None;
+    for index in 0..count {
+        if rows.get(index).is_some_and(agent_reply) {
             open.clear();
             newest = None;
             continue;
         }
-        let Some(error) = error else { continue };
+        let Some(error) = error_of(index) else { continue };
         let trace = if error.trace_id.is_empty() { rows.get(index).map(|r| r.trace_id.as_str()).unwrap_or_default() } else { error.trace_id.as_str() };
         if !trace.is_empty() {
             plan.traces.insert(trace.to_owned());
         }
-        if !error.fingerprint.is_empty() {
-            if let Some(older) = open.insert(error.fingerprint.as_str(), id.clone()) {
-                let count = plan.counts.remove(&older).unwrap_or(1) + 1;
-                plan.hidden.insert(older);
-                plan.counts.insert(id.clone(), count);
-            }
+        if !error.fingerprint.is_empty()
+            && let Some(older) = open.insert(error.fingerprint.as_str(), index)
+        {
+            let older = id_of(older);
+            let repeats = plan.counts.remove(&older).unwrap_or(1) + 1;
+            plan.hidden.insert(older);
+            plan.counts.insert(id_of(index), repeats);
         }
-        newest = Some(id.clone());
+        newest = Some(index);
     }
+    let newest = newest.map(id_of);
     if let Some((turn_id, _)) = &live {
         plan.traces.insert((*turn_id).to_owned());
     }
