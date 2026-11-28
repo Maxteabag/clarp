@@ -26,7 +26,8 @@ pub fn copy(text: &str) -> Result<(), String> {
         return std::fs::write(&path, text).map_err(|e| format!("{}: {e}", std::path::Path::new(&path).display()));
     }
     let mut guard = clipboard().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    let clipboard = guard.as_mut().ok_or("No clipboard is available")?;
+    // i18n: error: this computer has no clipboard to copy to or paste from
+    let clipboard = guard.as_mut().ok_or_else(|| clarp_core::tr!("No clipboard is available"))?;
     clipboard.set_text(text).map_err(|e| e.to_string())
 }
 
@@ -47,19 +48,23 @@ pub fn paste_image(engine: &mut clarp_engine::Engine, session: &str) -> bool {
     const MAX_IMAGE_BYTES: usize = 256 * 1024 * 1024;
     let Some(png) = image_png() else { return false };
     if session.is_empty() {
-        engine.report_error("Select a conversation before pasting an image");
+        // i18n: composer, error banner: an image was pasted with no chat open
+        engine.report_error(&clarp_core::tr!("Select a conversation before pasting an image"));
         return true;
     }
     if png.is_empty() || png.len() > MAX_IMAGE_BYTES {
-        engine.report_error("Clipboard image is empty or too large");
+        // i18n: composer, error banner: the pasted image is empty or too big
+        engine.report_error(&clarp_core::tr!("Clipboard image is empty or too large"));
         return true;
     }
     if png.len() as u64 > clarp_core::attachments::MAX_UPLOAD_BYTES {
-        engine.report_error("Could not store the pasted image (maximum 50 MB)");
+        // i18n: composer, error banner: the pasted image could not be kept; images up to 50 MB
+        engine.report_error(&clarp_core::tr!("Could not store the pasted image (maximum 50 MB)"));
         return true;
     }
     let Some(folder) = clarp_core::media::cache_dir().map(|dir| dir.join("clipboard-images")) else {
-        engine.report_error("Could not store the pasted image");
+        // i18n: composer, error banner: the pasted image could not be kept
+        engine.report_error(&clarp_core::tr!("Could not store the pasted image"));
         return true;
     };
     let path = folder.join(format!("{}.png", uuid::Uuid::new_v4()));
@@ -70,7 +75,8 @@ pub fn paste_image(engine: &mut clarp_engine::Engine, session: &str) -> bool {
     });
     if let Err(error) = stored {
         eprintln!("clarp-slint: could not store a pasted image at {}: {error}", path.display());
-        engine.report_error("Could not store the pasted image");
+        // i18n: composer, error banner: the pasted image could not be kept
+        engine.report_error(&clarp_core::tr!("Could not store the pasted image"));
         return true;
     }
     engine.attach_file(session, &path);

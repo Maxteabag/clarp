@@ -64,14 +64,16 @@ fn data_dir() -> Option<PathBuf> {
 /// Written atomically and readable only by the user.
 fn save(shared: &mut Shared, journal: Journal) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
-    let path = shared.journal_path.clone().ok_or("Cannot persist shared audio state")?;
+    // i18n: voice replies error: the shared playback state could not be saved
+    let path = shared.journal_path.clone().ok_or_else(|| clarp_core::tr!("Cannot persist shared audio state"))?;
     let temporary = path.with_extension("json.tmp");
     let written = std::fs::write(&temporary, journal.to_json())
         .and_then(|()| std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600)))
         .and_then(|()| std::fs::rename(&temporary, &path));
     if let Err(error) = written {
         eprintln!("AudioCoordinator: could not write {}: {error}", path.display());
-        return Err("Cannot persist shared audio state".into());
+        // i18n: voice replies error: the shared playback state could not be saved
+        return Err(clarp_core::tr!("Cannot persist shared audio state"));
     }
     shared.journal = journal;
     Ok(())
@@ -177,7 +179,8 @@ impl Coordinator {
         }
         self.stop();
         let Some(directory) = data_dir() else {
-            (self.sink)(Event::Error("Cannot create the shared audio journal directory".into()));
+            // i18n: voice replies error: the folder for shared playback could not be made
+            (self.sink)(Event::Error(clarp_core::tr!("Cannot create the shared audio journal directory")));
             return;
         };
         let created = std::fs::create_dir_all(&directory).and_then(|()| {
@@ -186,7 +189,8 @@ impl Coordinator {
         });
         if let Err(error) = created {
             eprintln!("AudioCoordinator: could not create {}: {error}", directory.display());
-            (self.sink)(Event::Error("Cannot create the shared audio journal directory".into()));
+            // i18n: voice replies error: the folder for shared playback could not be made
+            (self.sink)(Event::Error(clarp_core::tr!("Cannot create the shared audio journal directory")));
             return;
         }
         let generation = {
@@ -213,7 +217,8 @@ impl Coordinator {
                 Err(error) => {
                     eprintln!("AudioCoordinator: no session bus: {error}");
                     // Fail closed: never create an uncoordinated second player.
-                    (coordinator.sink)(Event::Error("Shared audio requires a desktop session bus".into()));
+                    // i18n: voice replies error: playback cannot be shared between windows without the desktop's session bus (D-Bus)
+                    (coordinator.sink)(Event::Error(clarp_core::tr!("Shared audio requires a desktop session bus")));
                     return;
                 }
             };
@@ -315,7 +320,8 @@ impl Coordinator {
         let saved = match path.as_ref().filter(|p| p.exists()).map(std::fs::read_to_string) {
             Some(Err(error)) => {
                 eprintln!("AudioCoordinator: could not read the journal: {error}");
-                return Err("Cannot read shared audio state".into());
+                // i18n: voice replies error: the shared playback state could not be read
+                return Err(clarp_core::tr!("Cannot read shared audio state"));
             }
             Some(Ok(text)) => Some(text),
             None => None,
@@ -353,7 +359,8 @@ impl Coordinator {
             Ok(file) => file,
             Err(error) => {
                 eprintln!("AudioCoordinator: could not open {}: {error}", std::path::Path::new(&lock_path).display());
-                (self.sink)(Event::Error("Cannot coordinate voice replies".into()));
+                // i18n: voice replies error: windows could not agree who plays
+                (self.sink)(Event::Error(clarp_core::tr!("Cannot coordinate voice replies")));
                 return;
             }
         };
@@ -365,7 +372,8 @@ impl Coordinator {
             }
             Err(std::fs::TryLockError::Error(error)) => {
                 eprintln!("AudioCoordinator: could not lock {}: {error}", std::path::Path::new(&lock_path).display());
-                (self.sink)(Event::Error("Cannot coordinate voice replies".into()));
+                // i18n: voice replies error: windows could not agree who plays
+                (self.sink)(Event::Error(clarp_core::tr!("Cannot coordinate voice replies")));
                 return;
             }
         }
@@ -486,7 +494,8 @@ impl Coordinator {
             }
             if let Err(error) = reply {
                 eprintln!("AudioCoordinator: control failed: {error}");
-                (coordinator.sink)(Event::Error("The audio owner changed; please retry the playback control".into()));
+                // i18n: voice replies error: another window took over playback; press the control again
+                (coordinator.sink)(Event::Error(clarp_core::tr!("The audio owner changed; please retry the playback control")));
             }
             coordinator.tick(generation).await;
         });

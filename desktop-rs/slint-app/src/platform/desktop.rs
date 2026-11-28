@@ -55,9 +55,11 @@ impl ksni::Tray for ClarpTray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         use ksni::menu::{CheckmarkItem, MenuItem, StandardItem};
         vec![
-            StandardItem { label: "Show Clarp".into(), activate: Box::new(|tray: &mut Self| (tray.act)(Action::Show)), ..Default::default() }.into(),
+            // i18n: tray icon menu: bring the Clarp window forward
+            StandardItem { label: clarp_core::tr!("Show Clarp"), activate: Box::new(|tray: &mut Self| (tray.act)(Action::Show)), ..Default::default() }.into(),
             CheckmarkItem {
-                label: "Mute voice replies".into(),
+                // i18n: tray icon menu, check item: stop reading agents' replies aloud
+                label: clarp_core::tr!("Mute voice replies"),
                 checked: self.muted,
                 activate: Box::new(|tray: &mut Self| {
                     tray.muted = !tray.muted;
@@ -67,7 +69,8 @@ impl ksni::Tray for ClarpTray {
             }
             .into(),
             MenuItem::Separator,
-            StandardItem { label: "Quit".into(), activate: Box::new(|tray: &mut Self| (tray.act)(Action::Quit)), ..Default::default() }.into(),
+            // i18n: tray icon menu: quit Clarp (imperative verb)
+            StandardItem { label: clarp_core::tr!("verb" => "Quit"), activate: Box::new(|tray: &mut Self| (tray.act)(Action::Quit)), ..Default::default() }.into(),
         ]
     }
 }

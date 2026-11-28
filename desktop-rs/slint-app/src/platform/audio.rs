@@ -302,7 +302,8 @@ impl Audio {
             }
             OutputEvent::Ended { result: Err(error), .. } => {
                 eprintln!("clarp-slint audio: an artifact's audio failed: {error}");
-                media.state = MediaState::Failed("Couldn't play audio".into());
+                // i18n: audio card and voice replies: the audio could not be played
+                media.state = MediaState::Failed(clarp_core::tr!("Couldn't play audio"));
                 media.since = None;
                 self.output_generation += 1;
             }
@@ -512,7 +513,8 @@ impl Audio {
                 eprintln!("clarp-slint audio: an artifact's audio could not be fetched: {message} ({status})");
                 if let Some(media) = self.media.as_mut() {
                     media.tag.clear();
-                    media.state = MediaState::Failed("Couldn't prepare audio".into());
+                    // i18n: audio card: the audio could not be loaded
+                    media.state = MediaState::Failed(clarp_core::tr!("Couldn't prepare audio"));
                 }
                 self.notices.push(Notice::Changed);
             }
@@ -604,7 +606,8 @@ impl Audio {
         let session = self.recording_session.clone();
         if !self.lease.acquire(&session) {
             self.recording_session.clear();
-            self.notices.push(Notice::Error("Another Clarp window is recording. Stop that recording before starting here.".into()));
+            // i18n: dictation error: another window records already
+            self.notices.push(Notice::Error(clarp_core::tr!("Another Clarp window is recording. Stop that recording before starting here.")));
             return;
         }
         self.silence();
@@ -634,7 +637,8 @@ impl Audio {
         self.notices.push(Notice::Changed);
         let wav = clarp_core::audio::encode_wav(&pcm, format);
         if wav.len() <= clarp_core::audio::MIN_WAV_BYTES {
-            self.notices.push(Notice::Error("Recording was too short".into()));
+            // i18n: dictation error: the recording was too short to send
+            self.notices.push(Notice::Error(clarp_core::tr!("Recording was too short")));
             return;
         }
         self.transcribe_recording(wav, &target);

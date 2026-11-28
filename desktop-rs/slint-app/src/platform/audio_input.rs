@@ -12,6 +12,18 @@ use clarp_core::audio::PcmFormat;
 pub const NO_MICROPHONE: &str = "No microphone is available";
 pub const NOT_STARTED: &str = "The microphone could not be started";
 
+/// `NO_MICROPHONE` in the app's language.
+fn no_microphone() -> String {
+    // i18n: dictation error: this computer has no microphone
+    clarp_core::tr!("No microphone is available")
+}
+
+/// `NOT_STARTED` in the app's language.
+fn not_started() -> String {
+    // i18n: dictation error: the microphone did not start
+    clarp_core::tr!("The microphone could not be started")
+}
+
 /// A running recording; `finish` stops it and returns 16-bit PCM.
 pub struct Recording {
     stop: Arc<AtomicBool>,
@@ -36,7 +48,7 @@ fn to_pcm16(samples: impl Iterator<Item = f32>) -> Vec<u8> {
 
 pub fn start() -> Result<Recording, String> {
     match std::env::var("CLARP_AUDIO_INPUT") {
-        Ok(input) if input == "none" => Err(NO_MICROPHONE.into()),
+        Ok(input) if input == "none" => Err(no_microphone()),
         Ok(input) if input.starts_with("file:") => from_file(input.trim_start_matches("file:")),
         _ => from_microphone(),
     }
@@ -44,8 +56,8 @@ pub fn start() -> Result<Recording, String> {
 
 fn from_file(path: &str) -> Result<Recording, String> {
     use rodio::Source;
-    let bytes = std::fs::read(path).map_err(|error| format!("{NO_MICROPHONE}: {path}: {error}"))?;
-    let decoder = rodio::Decoder::new(std::io::Cursor::new(bytes)).map_err(|error| format!("{NOT_STARTED}: {error}"))?;
+    let bytes = std::fs::read(path).map_err(|error| format!("{}: {path}: {error}", no_microphone()))?;
+    let decoder = rodio::Decoder::new(std::io::Cursor::new(bytes)).map_err(|error| format!("{}: {error}", not_started()))?;
     let format = PcmFormat { sample_rate: decoder.sample_rate().get(), channels: decoder.channels().get(), bytes_per_sample: 2, float: false };
     let pcm = to_pcm16(decoder);
     let (sender, result) = mpsc::channel();
@@ -69,7 +81,7 @@ fn from_microphone() -> Result<Recording, String> {
             Err(error) => {
                 eprintln!("AudioController: no microphone: {error}");
                 // from_microphone waits on this; it cannot be gone.
-                let _ = started.send(Err(NO_MICROPHONE.into()));
+                let _ = started.send(Err(no_microphone()));
                 return;
             }
         };
@@ -80,7 +92,7 @@ fn from_microphone() -> Result<Recording, String> {
             Ok(microphone) => microphone,
             Err(error) => {
                 eprintln!("AudioController: the microphone did not open: {error}");
-                let _ = started.send(Err(NOT_STARTED.into()));
+                let _ = started.send(Err(not_started()));
                 return;
             }
         };
@@ -104,11 +116,11 @@ fn from_microphone() -> Result<Recording, String> {
     });
     if let Err(error) = spawned {
         eprintln!("AudioController: could not start the microphone thread: {error}");
-        return Err(NOT_STARTED.into());
+        return Err(not_started());
     }
     match opened.recv() {
         Ok(Ok(())) => Ok(Recording { stop, result }),
         Ok(Err(message)) => Err(message),
-        Err(_) => Err(NOT_STARTED.into()),
+        Err(_) => Err(not_started()),
     }
 }

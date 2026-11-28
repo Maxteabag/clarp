@@ -153,7 +153,8 @@ fn load() -> Result<Lib, String> {
         let c = CString::new(name).expect("symbol name");
         // SAFETY: dlsym on a handle dlopen returned.
         let found = unsafe { libc::dlsym(handle, c.as_ptr()) };
-        if found.is_null() { Err(format!("Video needs a newer mpv (libmpv lacks {name})")) } else { Ok(found) }
+        // i18n: video player error: the installed mpv is too old; {} is the missing function's name (mpv and libmpv stay)
+        if found.is_null() { Err(clarp_core::tr!("Video needs a newer mpv (libmpv lacks {})", name)) } else { Ok(found) }
     };
     macro_rules! sym {
         ($name:literal) => {
@@ -167,7 +168,8 @@ fn load() -> Result<Lib, String> {
     // SAFETY: a plain getter.
     let version = unsafe { version() };
     if version >> 16 != 2 {
-        return Err(format!("Video needs libmpv 2 (found API {}.{})", version >> 16, version & 0xffff));
+        // i18n: video player error: the installed libmpv is too old; {0}.{1} is the version found (libmpv stays)
+        return Err(clarp_core::tr!("Video needs libmpv 2 (found API {0}.{1})", version >> 16, version & 0xffff));
     }
     Ok(Lib {
         create: sym!("mpv_create"),
@@ -190,7 +192,13 @@ fn load() -> Result<Lib, String> {
 }
 
 fn missing() -> String {
-    if cfg!(target_os = "macos") { "Video needs mpv: brew install mpv".into() } else { "Video needs mpv (libmpv) installed".into() }
+    if cfg!(target_os = "macos") {
+        // i18n: video player error on macOS: mpv is not installed; the command stays as it is
+        clarp_core::tr!("Video needs mpv: brew install mpv")
+    } else {
+        // i18n: video player error: mpv is not installed (mpv and libmpv stay)
+        clarp_core::tr!("Video needs mpv (libmpv) installed")
+    }
 }
 
 fn error_text(lib: &Lib, code: c_int) -> String {
@@ -425,7 +433,8 @@ impl Player {
         let mpv = unsafe { (lib.create)() };
         if mpv.is_null() {
             sources().lock().expect("sources").remove(&source);
-            return Err("Couldn't start the video player".into());
+            // i18n: video player error: the player did not start
+                return Err(clarp_core::tr!("Couldn't start the video player"));
         }
         let set = |name: &str, value: &str| {
             let (n, v) = (CString::new(name).expect("option"), CString::new(value).expect("value"));
@@ -471,13 +480,15 @@ impl Player {
         // SAFETY: the handle is configured and not yet initialized.
         let code = unsafe { (lib.initialize)(mpv) };
         if code < 0 {
-            return Err(fail("Couldn't start the video player", code));
+            // i18n: video player error: the player did not start
+            return Err(fail(&clarp_core::tr!("Couldn't start the video player"), code));
         }
         let protocol = CString::new(PROTOCOL).expect("protocol");
         // SAFETY: an initialized handle; stream_open has the required signature.
         let code = unsafe { (lib.stream_cb_add_ro)(mpv, protocol.as_ptr(), std::ptr::null_mut(), stream_open) };
         if code < 0 {
-            return Err(fail("Couldn't start the video player", code));
+            // i18n: video player error: the player did not start
+            return Err(fail(&clarp_core::tr!("Couldn't start the video player"), code));
         }
         let mut api_type = *b"sw\0";
         let mut params = [
@@ -488,7 +499,8 @@ impl Player {
         // SAFETY: an initialized handle and a terminated parameter list.
         let code = unsafe { (lib.render_create)(&mut render, mpv, params.as_mut_ptr()) };
         if code < 0 {
-            return Err(fail("Couldn't start the video renderer", code));
+            // i18n: video player error: the video drawing did not start
+            return Err(fail(&clarp_core::tr!("Couldn't start the video renderer"), code));
         }
         for (id, name, format) in [(1, "pause", FORMAT_FLAG), (2, "time-pos", FORMAT_DOUBLE), (3, "duration", FORMAT_DOUBLE), (4, "paused-for-cache", FORMAT_FLAG), (5, "volume", FORMAT_DOUBLE), (6, "mute", FORMAT_FLAG), (7, "eof-reached", FORMAT_FLAG), (8, "seeking", FORMAT_FLAG)] {
             let n = CString::new(name).expect("property");
@@ -517,7 +529,8 @@ impl Player {
             Err(error) => {
                 // SAFETY: nothing else uses the context or handle yet.
                 unsafe { (lib.render_free)(render) };
-                return Err(fail(&format!("Couldn't start the video renderer ({error})"), ERROR_GENERIC));
+                // i18n: video player error: the video drawing did not start; {} is the technical reason
+                return Err(fail(&clarp_core::tr!("Couldn't start the video renderer ({})", error), ERROR_GENERIC));
             }
         };
         {
@@ -540,7 +553,8 @@ impl Player {
             if spawned.is_err() {
                 player.stopping.store(true, Ordering::SeqCst);
                 player.wake.ring();
-                return Err("Couldn't start the video player".into());
+                // i18n: video player error: the player did not start
+                return Err(clarp_core::tr!("Couldn't start the video player"));
             }
         }
         let uri = CString::new(format!("{PROTOCOL}://{source}")).expect("uri");
@@ -714,7 +728,8 @@ fn event_loop(lib: &'static Lib, mpv: Ptr, stopping: &AtomicBool, deliver: &(dyn
                 let end = unsafe { &*event.data.cast::<RawEndFile>() };
                 if end.reason == END_FILE_ERROR {
                     eprintln!("clarp-slint video: playback failed: {}", error_text(lib, end.error));
-                    state.failed = Some("Couldn't play this video".into());
+                    // i18n: video player error: the video could not be played
+                    state.failed = Some(clarp_core::tr!("Couldn't play this video"));
                 }
             }
             EVENT_PROPERTY_CHANGE if !event.data.is_null() => {

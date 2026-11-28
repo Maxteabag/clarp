@@ -134,7 +134,8 @@ impl Player {
         }
         let entries: [(&str, Value<'_>); 3] = [
             ("mpris:trackid", ObjectPath::from_static_str_unchecked("/org/mpris/MediaPlayer2/Track/Voice").into()),
-            ("xesam:title", "Clarp voice reply".into()),
+            // i18n: the system media controls' title while Clarp reads a reply aloud
+            ("xesam:title", clarp_core::tr!("Clarp voice reply").into()),
             ("xesam:artist", vec!["Clarp"].into()),
         ];
         for (key, value) in entries {
