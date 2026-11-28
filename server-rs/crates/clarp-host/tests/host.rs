@@ -11726,6 +11726,7 @@ fn an_agent_makes_a_helper_and_the_helpers_work_is_followed_to_its_end() {
             "backend": "scripted",
             "role": "helper",
             "parent_agent_id": maker_id,
+            "helper_defaults": null,
             "helper_state": "running",
             "helper_completed_at": null,
             "archived_at": null,

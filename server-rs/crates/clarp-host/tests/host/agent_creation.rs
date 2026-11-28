@@ -517,8 +517,14 @@ echo '{"type":"turn.completed","usage":{}}'
         }
     }
     host.send("mixed", "ready", "ready");
-    wait_for("mixed parent conversation", || {
-        host.state("mixed") == "done"
+    // Outstanding helpers keep the roster state in background after the turn settles.
+    wait_for("mixed parent's completed seed turn", || {
+        host.get("/agents/mixed")["backend_session_id"] == "stand-in"
+            && host.turns("mixed").iter().any(|row| {
+                row["role"] == "assistant"
+                    && row["text"] == "on it"
+                    && row["turn"]["status"] == "completed"
+            })
     });
     let forked = host.post(
         "/agents/mixed/fork",
