@@ -51,7 +51,7 @@ fn bounded_notification_reads() {
     // SAFETY: this binary has one test; configure the peer before starting threads.
     unsafe { std::env::set_var("CLARP_PEER_TOKEN", "probe-token") };
     let primary = Host::start("read-primary");
-    let peer = Host::start_with("read-peer", &["--peer"]);
+    let peer = Host::start_with("read-peer", &["--peer", "--without-notification-events"]);
     peer.control(
         "/__control/add-agent",
         json!({"session":"mike","persona":"Mike"}),
@@ -68,16 +68,11 @@ fn bounded_notification_reads() {
     let unread = |d: &Driver, chat: &str| d.engine.roster().find(chat).unwrap().unread;
     let mut b = alert("b", 2);
     b["decision_id"] = "question".into();
-    deliver(&mut d, &primary, &[alert("a", 1), b, read("chat-read", 1)]);
+    let mut receipt = read("chat-read", 1);
+    receipt["server_instance_id"] = "non-authoritative push field".into();
+    deliver(&mut d, &primary, &[alert("a", 1), b, receipt]);
     assert!(unread(&d, "mike"));
-    d.engine.mark_popup_read(
-        "mike",
-        "fake-host-1",
-        Some(&clarp_core::notify_events::AlertOrder {
-            epoch: "one".into(),
-            position: (42, 1),
-        }),
-    );
+    d.engine.mark_popup_read("mike", "fake-host-1");
     assert!(unread(&d, "mike"));
     let mut stale = read("agent-focus", 0);
     assert!(deliver(&mut d, &primary, &[stale.clone(), alert("late-a", 1)]).is_empty());
@@ -132,7 +127,7 @@ fn bounded_notification_reads() {
     );
     assert!(unread(&d, "mike"));
     assert_eq!(
-        deliver(&mut d, &peer, &[alert("peer-a", 1)]),
+        deliver(&mut d, &peer, &[read("chat-read", 100), alert("peer-a", 1)]),
         vec![("@fake-host-2/mike".to_owned(), "peer-a".to_owned())]
     );
     assert!(unread(&d, "@fake-host-2/mike"));

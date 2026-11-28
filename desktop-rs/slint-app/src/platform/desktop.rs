@@ -683,7 +683,7 @@ fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, 
     let Some(app) = crate::app() else { return };
     match key {
         "mark-read" => {
-            app.engine.borrow_mut().mark_popup_read(session, shown.map_or("", |s| s.host.as_str()), shown.and_then(|s| s.order.as_ref()));
+            app.engine.borrow_mut().mark_popup_read(session, shown.map_or("", |s| s.host.as_str()));
             crate::pump_now(&app);
             return;
         }

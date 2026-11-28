@@ -432,7 +432,7 @@ impl Incoming {
             event: if event_id.is_empty() { "reply".into() } else { event_id },
             alert: event.get("alert").and_then(Value::as_bool),
             unread: event.get("unread").and_then(Value::as_bool),
-            host: json::string(event, "server_instance_id"),
+            host: String::new(), // The SSE receiver supplies its authenticated Host identity.
             order: if json::string(event, "event") == "call" { None } else { AlertOrder::parse(event, "event_at_ms", "event_seq") },
             notification_id: json::string(event, "notification_id"),
             // A failed turn's is the message it answered (`cause_message_id`).

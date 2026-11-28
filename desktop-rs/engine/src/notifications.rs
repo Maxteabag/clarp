@@ -153,24 +153,17 @@ impl Engine {
 
     /// Asks the Host to mark the chat read; its receipt supplies the boundary.
     pub fn mark_chat_read(&mut self, session: &str) {
-        self.mark_popup_read(session, "", None);
+        self.mark_popup_read(session, "");
     }
 
-    /// A native action can also apply the order of the popup actually pressed.
-    pub fn mark_popup_read(&mut self, session: &str, host: &str, order: Option<&AlertOrder>) {
-        on_peer!(self.peer_mut(session), |engine, local| engine.mark_popup_read(local, host, order));
-        if session.is_empty() || (!host.is_empty() && !self.server_id.is_empty() && host != self.server_id) {
+    /// A popup action addresses the Host that originally displayed the alert.
+    pub fn mark_popup_read(&mut self, session: &str, host: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.mark_popup_read(local, host));
+        if !self.notifications.offered || session.is_empty() || self.server_id.is_empty() || (!host.is_empty() && host != self.server_id) {
             return;
         }
-        if !host.is_empty() && let Some(order) = order {
-            self.apply_read(session, host.to_owned(), ReadTarget::Through(order.clone()));
-            // POST /chat-read stamps the Host's current position. Sending it for
-            // an older popup would mark later alerts read on every device.
-            return;
-        }
-        if self.notifications.offered {
-            self.api.post_json(&format!("chat-read:{session}"), "/chat-read", json!({"session": session}), None);
-        }
+        let tag = format!("chat-read:{}", json!([self.server_id, session]));
+        self.api.post_json(&tag, "/chat-read", json!({"session": session}), None);
     }
 
     /// Answers a question from a popup's button, at the newest revision the
@@ -451,9 +444,13 @@ impl Engine {
             self.undo_answered(decision_id, object);
             return true;
         }
-        if let Some(session) = tag.strip_prefix("chat-read:") {
-            if object.get("session").and_then(Value::as_str) == Some(session) {
-                self.chat_read_event(session, object);
+        if let Some(scope) = tag.strip_prefix("chat-read:") {
+            if let Ok((host, session)) = serde_json::from_str::<(String, String)>(scope)
+                && host == self.server_id
+                && object.get("ok").and_then(Value::as_bool) == Some(true)
+                && object.get("session").and_then(Value::as_str) == Some(session.as_str())
+            {
+                self.chat_read_event(&session, object);
             }
             return true;
         }
@@ -505,8 +502,8 @@ impl Engine {
     }
 
     pub(crate) fn chat_read_event(&mut self, session: &str, event: &Object) {
-        let host = self.notification_host(event);
-        if session.is_empty() || host.is_empty() {
+        let host = self.server_id.clone();
+        if !self.notifications.offered || session.is_empty() || host.is_empty() {
             return;
         }
         let decision = json::string(event, "decision_id");
@@ -519,11 +516,13 @@ impl Engine {
         self.apply_read(session, host, target);
     }
 
-    fn apply_read(&mut self, session: &str, host: String, mut target: ReadTarget) {
-        if let ReadTarget::Through(order) = &mut target {
-            let boundary = self.notifications.boundaries.entry((host.clone(), session.into(), order.epoch.clone())).or_default();
-            *boundary = (*boundary).max(order.position);
-            order.position = *boundary;
+    fn apply_read(&mut self, session: &str, host: String, target: ReadTarget) {
+        if let ReadTarget::Through(order) = &target {
+            let scope = (host.clone(), session.into(), order.epoch.clone());
+            if self.notifications.boundaries.get(&scope).is_some_and(|saved| *saved >= order.position) {
+                return;
+            }
+            self.notifications.boundaries.insert(scope, order.position);
         }
         if let Some(unread) = self.notifications.unread.get_mut(session) {
             unread.retain(|source, position| {
@@ -541,16 +540,12 @@ impl Engine {
         self.changes.push(Change::NotificationRead(session.into(), host, target));
     }
 
-    fn notification_host(&self, event: &Object) -> String {
-        match event.get("server_instance_id") {
-            Some(value) => value.as_str().unwrap_or_default().into(),
-            None => self.server_id.clone(),
-        }
-    }
-
     pub(crate) fn notification_event(&mut self, event: &Object) {
         let mut incoming = Incoming::parse(event);
-        incoming.host = self.notification_host(event);
+        incoming.host = self.server_id.clone();
+        if !self.notifications.offered || incoming.host.is_empty() {
+            incoming.order = None;
+        }
         let session = incoming.session.clone();
         if let Some(order) = &incoming.order {
             let scope = (incoming.host.clone(), session.clone(), order.epoch.clone());

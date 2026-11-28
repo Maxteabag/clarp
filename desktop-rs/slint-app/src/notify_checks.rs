@@ -390,7 +390,7 @@ pub fn restart_check() {
             wrong["order_epoch"] = "other".into();
             send(wrong);
             let mut foreign = read(9);
-            foreign["server_instance_id"] = "foreign".into();
+            foreign["session"] = "rachel".into();
             send(foreign);
             send(json!({"type":"agent-focus","session":"mike"}));
         }
@@ -432,12 +432,16 @@ pub fn restart_check() {
             if !journal().iter().any(|r| r["pressed"] == "stale") || elapsed < Duration::from_millis(500) { return false; }
             check(super::posts("/chat-read").is_empty() && app.engine.borrow().roster().find("mike").unwrap().unread,
                   "the old action cannot act on the reused ID");
+            check(control("/__control/chat-read-receipt", &json!({"order_epoch":"one","read_through_ms":51,"read_through_seq":4})).is_ok(),
+                  "the Host will return its boundary before the SSE echo");
             press_fixture("current");
             true
         })));
         stages.push(("current popup read", Box::new(|app, _, _| {
             if !journal().iter().any(|r| r["close"] == "after restart") { return false; }
             check(!app.engine.borrow().roster().find("mike").unwrap().unread, "the covering read clears the current evidence");
+            check(super::posts("/chat-read").last().is_some_and(|r| r["body"] == json!({"session":"mike"})), "Mark read posts only the session");
+            send(read(4));
             send(json!({"type":"chat-unread","session":"mike","unread":true,"preview":"quiet failure"}));
             send(read(99));
             send(json!({"type":"agent-focus","session":"rachel"}));

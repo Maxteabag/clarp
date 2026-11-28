@@ -2081,6 +2081,7 @@ impl Engine {
             clarp_core::notify_events::CHAT_READ => self.chat_read_event(&session, event),
             clarp_core::notify_events::SETTINGS_CHANGED => self.notification_settings_event(event),
             "queue-updated" => self.mutate_roster(|r| r.apply_queue_event(event)),
+            "chat-unread" if !self.notification_events_offered() => {}
             "user-notification" | "chat-unread" => {
                 self.request_snapshot();
                 self.notification_event(event);
