@@ -70,23 +70,26 @@ fn an_agent_on_antigravity_over_acp_answers_and_continues_its_conversation() {
 const RECORD: &str = "--- Clarp restored conversation ---";
 
 /// A Host running the ACP peer in a home of the test's own.
-fn antigravity(name: &str) -> (Place, Host) {
-    let place = Place::new(name);
+fn open_antigravity(place: &Place) -> Host {
     let agy = place.root.join("agy");
-    program(&agy, FAKE);
     let world = [
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let host = place.start_in("", &[], &world);
-    (place, host)
+    place.start_in("", &[], &world)
 }
 
 /// The lines of a file the stand-in wrote, each a JSON object.
 pub(super) fn written(place: &Place, file: &str) -> Vec<Value> {
-    std::fs::read_to_string(place.root.join(file))
-        .unwrap_or_default()
-        .lines()
+    let contents = match std::fs::read_to_string(place.root.join(file)) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => panic!("reading {file}: {error}"),
+    };
+    // A concurrent append may be between writing the JSON and its terminating newline.
+    contents
+        .split_inclusive('\n')
+        .filter(|line| line.ends_with('\n'))
         .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
@@ -116,10 +119,12 @@ pub(super) fn prompt_text(place: &Place, n: usize) -> String {
         .to_string()
 }
 
-/// Create real journal and conversation rows, then change only the stopped fleet's
-/// execution backend to the spelling used by a standalone Host.
+/// Seed a stopped fleet with a legacy backend and a pinned model, keeping its real
+/// journal and native conversation. Exercise each side of the durable switch.
 fn legacy_fleet(name: &str, archived: bool) -> (Place, Host, String) {
-    let (place, host) = antigravity(name);
+    let place = Place::new(name);
+    program(&place.root.join("agy"), FAKE);
+    let host = open_antigravity(&place);
     let made = host.post("/agents", json!({"name":"Mover","backend":"agy"}));
     let session = made["session"].as_str().unwrap().to_string();
     let row = |host: &Host| {
@@ -161,20 +166,20 @@ fn legacy_fleet(name: &str, archived: bool) -> (Place, Host, String) {
     let id = before["agent_id"].as_str().unwrap();
     let mut record = kept_records(&place, "agent").remove(id).unwrap();
     record["backend"] = json!("agy");
+    record["model"] = json!("claude-b");
     keep_record(&place, "agent", id, &record);
     std::fs::remove_file(place.root.join("acp.log")).unwrap();
-    let program = place.root.join("agy");
-    let host = place.start_in(
-        "",
-        &[],
-        &[
-            ("HOME", place.root.to_str().unwrap()),
-            ("CLARP_AGY_PROGRAM", program.to_str().unwrap()),
-        ],
-    );
-    wait_for("legacy fleet record to move", || {
-        row(&host)["backend"] == "agy-acp" && row(&host)["busy"] == false
-    });
+    let migrated = |host: &Host| {
+        wait_for("legacy fleet record to move", || {
+            let lineage = host.get(&format!("/agent-helper-state?session={session}"));
+            let current = row(host);
+            lineage["backend"] == "agy-acp"
+                && current["backend"] == "agy-acp"
+                && current["busy"] == false
+        });
+    };
+    let host = open_antigravity(&place);
+    migrated(&host);
     let after = row(&host);
     for key in [
         "agent_id",
@@ -194,6 +199,40 @@ fn legacy_fleet(name: &str, archived: bool) -> (Place, Host, String) {
         ),
         "{current:?}"
     );
+    if !archived {
+        assert!(!place.root.join("print.log").exists());
+        return (place, host, session);
+    }
+
+    // A crash can leave the agent journal switched while the fleet still names the old
+    // backend. Reopen this precise combination and verify the repair is idempotent.
+    host.kill();
+    let switched = kept_records(&place, "agent").remove(id).unwrap();
+    assert_eq!(switched["backend"], "agy-acp");
+    assert_eq!(switched["model"], record["model"]);
+    assert_eq!(switched["archived_at_ms"], record["archived_at_ms"]);
+    assert_eq!(switched["archived_by"], record["archived_by"]);
+    keep_record(&place, "agent", id, &record);
+    let host = open_antigravity(&place);
+    migrated(&host);
+    assert_eq!(
+        host.conversation(&session),
+        current,
+        "a replayed switch added a chat row"
+    );
+    let visible = host.get("/agents/snapshot?include_archived=0");
+    assert!(
+        !visible["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|agent| agent["agent_id"] == id)
+    );
+    assert_eq!(row(&host)["archived_at"], before["archived_at"]);
+    assert_eq!(
+        row(&host)["backend_session_id"],
+        before["backend_session_id"]
+    );
     assert!(!place.root.join("print.log").exists());
     (place, host, session)
 }
@@ -206,7 +245,7 @@ fn an_archived_legacy_agent_resumes_its_own_conversation_over_acp() {
         "POST",
         "/agent-transit",
         Some(&json!({
-            "session":session, "backend":"agy", "model":""
+            "session":session, "backend":"agy", "model":"claude-b"
         })),
     );
     assert_eq!(status, 400, "{refused}");
@@ -215,6 +254,7 @@ fn an_archived_legacy_agent_resumes_its_own_conversation_over_acp() {
         "/agent-archive",
         json!({"session":session,"archived":false}),
     );
+    let opened = asked(&place, "session/new").len();
     host.send(&session, "what was the word?", "m-2");
     wait_for("the resumed answer", || {
         asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
@@ -223,7 +263,12 @@ fn an_archived_legacy_agent_resumes_its_own_conversation_over_acp() {
         asked(&place, "session/resume")[0]["params"]["sessionId"],
         "conv-new"
     );
-    assert!(asked(&place, "session/new").is_empty());
+    assert_eq!(asked(&place, "session/new").len(), opened);
+    assert!(asked(&place, "session/set_config_option").iter().any(
+        |message| message["params"]["sessionId"] == "conv-new"
+            && message["params"]["configId"] == "model"
+            && message["params"]["value"] == "claude-b"
+    ));
     let text = prompt_text(&place, 0);
     assert!(
         text.contains("what was the word?") && !text.contains(RECORD) && !text.contains("lantern"),
@@ -235,12 +280,14 @@ fn an_archived_legacy_agent_resumes_its_own_conversation_over_acp() {
     let persisted = &kept_records(&place, "agent")[&id];
     assert_eq!(persisted["backend"], "agy-acp");
     assert_eq!(persisted["session"], session);
+    assert_eq!(persisted["model"], "claude-b");
     assert!(!place.root.join("print.log").exists());
 }
 
 #[test]
 fn a_conversation_lost_after_a_same_store_move_goes_on_with_the_hosts_record() {
     let (place, host, session) = legacy_fleet("agy-same-store-lost", false);
+    let opened = asked(&place, "session/new").len();
     std::fs::write(place.root.join("scenario"), "resume-lost").unwrap();
     host.send(&session, "what was the word?", "m-2");
     wait_for("the resume agy refuses", || {
@@ -252,7 +299,7 @@ fn a_conversation_lost_after_a_same_store_move_goes_on_with_the_hosts_record() {
     wait_for("a turn in a new conversation", || {
         asked(&place, "session/prompt").len() == 1 && idle(&host, &session)
     });
-    assert_eq!(asked(&place, "session/new").len(), 1);
+    assert_eq!(asked(&place, "session/new").len(), opened + 1);
     assert_eq!(
         asked(&place, "session/prompt")[0]["params"]["sessionId"],
         "conv-replacement"

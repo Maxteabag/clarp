@@ -101,6 +101,8 @@ def new_id():
     if scenario == "keeper":
         return str(uuid.uuid4())
     if scenario == "lost":
+        if os.environ.get("CLARP_AGY_MANAGED_TURN") != "1":
+            return "conv-probe"
         path = root / "begun"
         number = int(path.read_text()) + 1 if path.exists() else 1
         path.write_text(str(number))
