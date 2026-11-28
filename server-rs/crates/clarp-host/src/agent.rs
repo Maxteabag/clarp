@@ -722,7 +722,6 @@ pub struct View {
     pub status: Status,
     /// The newest row of the conversation: what a list of chats shows of it.
     pub newest: Option<Versioned>,
-    pub(crate) newest_is_form_answer: bool,
     pub(crate) visible_previews: (Option<Versioned>, Option<Versioned>),
     pub(crate) working: Option<wire::WorkingWith>,
     pub(crate) can_leave_note: bool,
@@ -2037,7 +2036,6 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
     let (view_tx, view) = watch::channel(Arc::new(View {
         team_activity_ms: setup.record.created_at_ms,
         last_real_message_ms: 0,
-        newest_is_form_answer: false,
         native_goal: None,
         latest_turn_start: 0,
         latest_turn_activity: None,
@@ -6101,8 +6099,28 @@ impl Worker {
         if wire::previewed(&newest) {
             return Some(newest);
         }
-        let back = actor.tail_of_any(50, which).ok()?.entries;
-        back.into_iter().rev().find(wire::previewed)
+        // Audit rows do not consume the existing lookback for other kinds.
+        let mut limit = 50;
+        loop {
+            let page = actor.tail_of_any(limit, which).ok()?;
+            let mut ordinary = 0;
+            for row in page.entries.into_iter().rev() {
+                if wire::previewed(&row) {
+                    return Some(row);
+                }
+                if !matches!(&row.entry, Entry::Notice(n) if n.code == clarp_kernel::conversation::Notice::TRANSIT)
+                {
+                    ordinary += 1;
+                    if ordinary >= 50 {
+                        return None;
+                    }
+                }
+            }
+            if !page.has_more {
+                return None;
+            }
+            limit = limit.checked_mul(2)?;
+        }
     }
 
     fn update_previews(&mut self) {
@@ -6427,10 +6445,6 @@ impl Worker {
             stalled_since: self.stall.since,
             status,
             newest: self.listed_preview.clone(),
-            newest_is_form_answer: self
-                .newest
-                .as_ref()
-                .is_some_and(|row| clarp_kernel::artifacts::forms::is_answer_row(row.entry.id())),
             visible_previews: self.visible_previews.clone(),
             working,
             can_leave_note: actor.profile().hides_coordination,
@@ -7499,7 +7513,6 @@ mod mailbox_tests {
         let (_, view) = watch::channel(Arc::new(View {
             team_activity_ms: 0,
             last_real_message_ms: 0,
-            newest_is_form_answer: false,
             native_goal: None,
             latest_turn_start: 0,
             latest_turn_activity: None,

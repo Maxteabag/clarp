@@ -792,3 +792,124 @@ fn a_failed_transit_returns_waiting_messages_to_the_source_backend() {
             .any(|(_, text)| text == "Heard: Still there?")
     });
 }
+
+/// Run inside the isolated Docker replay (no route to an installed Host).
+#[test]
+#[ignore = "disposable Docker Host replay"]
+fn transit_preserves_chat_list_promotion() {
+    assert!(std::path::Path::new("/.dockerenv").exists());
+    assert_eq!(std::fs::read_dir("/sys/class/net").unwrap().count(), 1);
+    assert!(std::path::Path::new("/sys/class/net/lo").exists());
+    let setting = Setting::new("transit-preview");
+    let start = || {
+        let host = setting.start();
+        let addr: std::net::SocketAddr = host.address.parse().unwrap();
+        assert!(addr.ip().is_loopback() && addr.port() != 7690);
+        host
+    };
+    let host = start();
+    let create = |name| {
+        host.post("/agents", json!({"name":name,"backend":"claude"}))["session"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let a = create("Fixture A");
+    let b = create("Fixture B");
+    let audit = create("Fixture Audit");
+    let fields = |r: &Value| {
+        json!({
+            "last_message_id": r["last_message_id"], "last_message": r["last_message"],
+            "last_message_preview": r["last_message_preview"], "last_activity": r["last_activity"]
+        })
+    };
+    let move_agent = |s: &str| {
+        let done = transit(
+            &host,
+            json!({"session":s,"backend":"codex","model":"gpt-5.5","request_id":format!("move-{s}")}),
+        );
+        assert_eq!(done["phase"], "done", "{done}");
+    };
+    let empty = fields(&row(&host, &audit));
+    assert_eq!(empty["last_message_id"], "");
+    assert!(empty["last_message_preview"].is_null());
+    move_agent(&audit);
+    assert_eq!(fields(&row(&host, &audit)), empty);
+    let heard = host.listen_at("/events?live=&visible=&live_change=1&chat_previews=1");
+    wait_for("preview stream", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "agent-roster")
+    });
+    talked(&host, &a);
+    let before = row(&host, &a);
+    let a1 = fields(&before);
+    talked(&host, &b);
+    let b2 = fields(&row(&host, &b));
+    assert!(b2["last_activity"].as_i64().unwrap() > a1["last_activity"].as_i64().unwrap());
+    move_agent(&a);
+    let after = row(&host, &a);
+    assert_eq!(fields(&after), a1);
+    assert!(after["head_revision"].as_u64() > before["head_revision"].as_u64());
+    let log = host.turns(&a);
+    let notice = log.iter().find(|r| r["kind"] == "agent-transit").unwrap();
+    let at_revision = |revision: &Value| {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|e| {
+                e["session"] == a
+                    && e["kind"] == "preview"
+                    && &e["fields"]["head_revision"] == revision
+            })
+            .map(|e| fields(&e["fields"]))
+    };
+    wait_for("audit invalidation with stable SSE preview", || {
+        at_revision(&after["head_revision"]) == Some(a1.clone())
+    });
+    eprintln!(
+        "A@t1={a1} B@t2={b2} transit@t3={notice} revisions={} -> {} SSE={a1}",
+        before["head_revision"], after["head_revision"]
+    );
+    drop(host);
+    let host = start();
+    wait_for("cold snapshot", || {
+        fields(&row(&host, &a)) == a1 && fields(&row(&host, &b)) == b2
+    });
+    assert_eq!(fields(&row(&host, &audit)), empty);
+    // Keep the answer pending so we observe the owner's actual row.
+    program(
+        &setting.codex,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.167.1'; else exec sleep 60; fi\n",
+    );
+    let heard = host.listen_at("/events?live=&visible=&live_change=1&chat_previews=1");
+    wait_for("second stream", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["type"] == "agent-roster")
+    });
+    host.send(&a, "Now on the literal owner line", "owner-literal");
+    wait_for("real owner send", || {
+        row(&host, &a)["last_message_preview"]["own"] == true
+    });
+    let a4 = fields(&row(&host, &a));
+    assert_eq!(
+        a4["last_message_preview"]["text"],
+        "Now on the literal owner line"
+    );
+    assert!(a4["last_activity"].as_i64().unwrap() > b2["last_activity"].as_i64().unwrap());
+    wait_for("SSE owner send", || {
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|e| e["session"] == a && e["kind"] == "preview" && fields(&e["fields"]) == a4)
+    });
+    eprintln!("cold A={a1} cold B={b2} audit-only={empty} A@t4={a4}");
+}
