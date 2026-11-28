@@ -138,6 +138,7 @@ pub const ABSENT: &[(&str, &str)] = &[
     ("CLARP_APNS_ENDPOINT", "endpoint"),
     ("CLARP_CARTESIA_ENDPOINT", "endpoint"),
     ("CLARP_DEEPGRAM_VOICE_ENDPOINT", "endpoint"),
+    ("CLARP_ELEVEN_REALTIME_ENDPOINT", "endpoint"),
     ("CLARP_ELEVEN_VOICE_ENDPOINT", "endpoint"),
     ("CLARP_FCM_ENDPOINT", "endpoint"),
     ("CLARP_FLUX_ENDPOINT", "endpoint"),
