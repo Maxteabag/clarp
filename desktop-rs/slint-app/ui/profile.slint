@@ -468,7 +468,7 @@ export component AgentProfile inherits Modal {
                         HorizontalLayout {
                             spacing: 8px;
                             // i18n: agent profile, This chat section, row label (noun) beside a drop-down: how the agent's tool steps (commands, file reads) are shown in this chat
-                            Text { text: @tr("Tool activity"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: min(210 * Look.unit, parent.width * 0.4); wrap: word-wrap; vertical-alignment: center; }
+                            Text { text: @tr("Tool activity"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 210 * Look.unit; wrap: word-wrap; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.tool-activity-choices;
