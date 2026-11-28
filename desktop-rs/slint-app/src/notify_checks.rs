@@ -77,6 +77,19 @@ impl Daemon {
     }
 }
 
+/// The daemon says a button of popup `id` was pressed, as a desktop does.
+fn press(id: u32, key: &'static str) {
+    crate::platform::runtime::handle().spawn(async move {
+        let Some(connection) = DAEMON.get() else { return };
+        let sent = connection
+            .emit_signal(None::<&str>, "/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked", &(id, key))
+            .await;
+        if let Err(error) = sent {
+            eprintln!("clarp-slint: the check's daemon could not say a button was pressed: {error}");
+        }
+    });
+}
+
 fn start_daemon() {
     crate::platform::runtime::handle().spawn(async {
         let served = async {
@@ -246,11 +259,46 @@ pub fn notify_daemon_check(_out: String) {
                   &format!("answering the replaced question closes nothing: the id is the reply's: {later:?}"));
             let shown = visible();
             check(shown.iter().any(|v| v == "Reply B2") && !shown.iter().any(|v| v == "Approve A2?"), &format!("the reply stays, the question is gone: {shown:?}"));
+            // A question shown, a newer question replacing it, and Yes pressed
+            // on the older popup while that replacement is on its way.
+            QUESTION_FROM.store(calls().len() as u32, Ordering::Relaxed);
+            send(ask("q-a3", "d-a3", "Approve A3?"));
+            true
+        })),
+        ("older question shown", Box::new(|_, _window, elapsed| {
+            let later = since(QUESTION_FROM.load(Ordering::Relaxed) as usize);
+            let Some(a) = later.iter().find(|c| c["call"] == "Notify" && c["body"] == "Approve A3?") else { return false };
+            // The app has the daemon's answer, and so the popup's buttons.
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            PRESSED_ID.store(a["id"].as_u64().unwrap_or(0) as u32, Ordering::Relaxed);
+            send(ask("q-b3", "d-b3", "Approve B3?"));
+            true
+        })),
+        ("pressed during the replacement", Box::new(|_, _window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            press(PRESSED_ID.load(Ordering::Relaxed), "choice:accepted");
+            true
+        })),
+        ("older card answered", Box::new(|_, _window, elapsed| {
+            if elapsed < DELAY * 2 {
+                return false;
+            }
+            let newer = super::posts("/decisions/d-b3/resolve");
+            check(newer.is_empty(), &format!("a button of the older popup resolves nothing on the newer question: {newer:?}"));
+            let older = super::posts("/decisions/d-a3/resolve");
+            check(older.first().is_some_and(|r| r["body"]["choice"] == "accepted"), &format!("it answers the older question it was pressed on, still pending: {older:?}"));
             true
         })),
     ];
     run_stages(stages);
 }
+
+/// The older question's popup id, whose button the daemon presses.
+static PRESSED_ID: AtomicU32 = AtomicU32::new(0);
 
 /// Where the question's calls begin in the daemon's record.
 static QUESTION_FROM: AtomicU32 = AtomicU32::new(0);
