@@ -41,6 +41,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -412,9 +413,27 @@ impl At {
     }
 }
 
+/// A row can expose a brief account wait between two publisher samples.
+#[derive(Default)]
+pub(crate) struct SwitchRead(AtomicBool);
+
+impl SwitchRead {
+    fn row(&self, state: &str) {
+        if state == "switching_account" {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    fn take(&self) -> bool {
+        self.0.load(Ordering::Relaxed) && self.0.swap(false, Ordering::Relaxed)
+    }
+}
+
 /// An agent's availability as its row has it.
 pub fn of_member(member: &Member, view: &crate::agent::View, at: &At) -> Value {
-    of(member, view, at).to_json()
+    let availability = of(member, view, at);
+    member.agent.switch_read.row(availability.state);
+    availability.to_json()
 }
 
 fn of(member: &Member, view: &crate::agent::View, at: &At) -> Availability {
@@ -578,6 +597,8 @@ fn look(
             continue;
         }
         seen.insert(id.clone());
+        // Consume before sampling: a concurrent row read is covered here or on the next look.
+        let switch_read = tell && member.agent.switch_read.take();
         let view = member.agent.view();
         let now = of(member, &view, &at);
         // An agent first seen able to answer has nothing to tell: its row says so.
@@ -585,7 +606,7 @@ fn look(
             Some(before) => before.shown() != now.shown(),
             None => now.state != "ok",
         };
-        if changed && tell {
+        if tell && (changed || clears_read_switch(switch_read, now.state)) {
             app.hub.publish(event(member, now.to_json()), at.now_ms);
         }
         told.insert(id.clone(), now);
@@ -594,6 +615,10 @@ fn look(
         // An agent the Host no longer has is forgotten.
         told.retain(|id, _| seen.contains(id));
     }
+}
+
+fn clears_read_switch(read: bool, state: &str) -> bool {
+    read && state != "switching_account"
 }
 
 #[cfg(test)]
@@ -605,6 +630,18 @@ mod tests {
     use super::*;
 
     const NOW: i64 = 1_900_000_000_000;
+
+    #[test]
+    fn a_switch_seen_only_in_a_row_gets_one_recovery_event() {
+        let recovered = SwitchRead::default();
+        let waiting = SwitchRead::default();
+        recovered.row("switching_account");
+        waiting.row("switching_account");
+        assert!(clears_read_switch(recovered.take(), "ok"));
+        assert!(!clears_read_switch(waiting.take(), "switching_account"));
+        recovered.row("ok");
+        assert!(!clears_read_switch(recovered.take(), "ok"));
+    }
 
     fn idle() -> Status {
         Status {
