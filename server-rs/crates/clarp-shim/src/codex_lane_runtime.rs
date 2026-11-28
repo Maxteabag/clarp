@@ -57,18 +57,22 @@ const PROVIDER_MISMATCH: &str = "provider_mismatch:";
 pub(super) fn account(auth: &Value) -> Option<String> {
     let tokens = &auth["tokens"];
     let workspace = tokens["account_id"].as_str()?;
-    let Some(token) = tokens.get("id_token") else {
-        return Some(json!([workspace]).to_string());
-    };
-    // Read stable identity claims for local comparison. A refreshed token can have
-    // different timestamps and signatures for the same user and workspace.
-    let payload = token.as_str()?.split('.').nth(1)?;
+    // An access token may carry the identity when the login has no usable ID
+    // token. Opaque credentials fall back to Login's file comparison.
+    let user = ["id_token", "access_token"]
+        .iter()
+        .find_map(|key| user_identity(tokens[*key].as_str()?))?;
+    Some(json!([workspace, user]).to_string())
+}
+
+fn user_identity(token: &str) -> Option<String> {
+    let payload = token.split('.').nth(1)?;
     let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
-    let user = claims["https://api.openai.com/auth"]["chatgpt_user_id"]
+    claims["https://api.openai.com/auth"]["chatgpt_user_id"]
         .as_str()
         .filter(|id| !id.is_empty())
-        .or_else(|| claims["sub"].as_str().filter(|id| !id.is_empty()))?;
-    Some(json!([workspace, user]).to_string())
+        .or_else(|| claims["sub"].as_str().filter(|id| !id.is_empty()))
+        .map(str::to_owned)
 }
 
 impl Input {
