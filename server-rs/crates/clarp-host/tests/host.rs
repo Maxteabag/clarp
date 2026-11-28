@@ -14947,6 +14947,23 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
     let profile = place.root.join("agent-profile");
     let agy = host_acp_peer(&place, "router");
     let asked = place.root.join("asked");
+    let shim = place.root.join("configured-shim");
+    let through_shim = place.root.join("configured-shim-calls");
+    let real_shim = Path::new(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
+    program(
+        &shim,
+        &format!(
+            r#"#!/usr/bin/env python3
+import os, sys
+if sys.argv[1:2] == ["agy-acp-turn"]:
+    with open({marks}, "a") as written:
+        written.write("ACP\n")
+os.execv({binary}, [{binary}, *sys.argv[1:]])
+"#,
+            marks = json!(through_shim),
+            binary = json!(real_shim),
+        ),
+    );
     let gemini = place.root.join(".gemini");
     std::fs::create_dir_all(&gemini).unwrap();
     std::fs::write(gemini.join("oauth_creds.json"), "{}").unwrap();
@@ -14955,7 +14972,7 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
         ("HOME", place.root.to_str().unwrap()),
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
-    let host = place.start_in("", &[], &world);
+    let host = place.start_in("", &["--shim", shim.to_str().unwrap()], &world);
     let (mike, anna) = (host.new_agent("Mike"), host.new_agent("Anna"));
     let set = |settings: Value| host.ask("POST", "/orchestrator/settings", Some(&settings));
     let questions = || -> Vec<Value> {
@@ -15087,6 +15104,10 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
     assert_eq!((status, &sent["session"]), (200, &json!(anna)), "{sent}");
     assert!(sent.get("orchestrator").is_none(), "{sent}");
     assert_eq!(questions().len(), 3);
+    assert_eq!(
+        std::fs::read_to_string(&through_shim).unwrap(),
+        "ACP\n".repeat(3)
+    );
     let decisions = host.get("/orchestrator/decisions?limit=1");
     let newest = &decisions["decisions"][0];
     assert_eq!(

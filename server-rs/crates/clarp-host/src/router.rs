@@ -320,6 +320,7 @@ async fn ask(app: &App, routing: &Routing, phase: &str) -> Result<Map<String, Va
                 .map_err(|_| Failure::model("tool_unavailable", "The login lock is unavailable"))?;
             let answer = once::ask(
                 &app.config.run_dir,
+                &app.config.shim,
                 &pick.backend,
                 &question,
                 &app.config.default_cwd,

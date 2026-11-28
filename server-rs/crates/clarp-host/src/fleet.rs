@@ -3920,7 +3920,7 @@ impl Fleet {
     ) -> Result<AgentRecord, NotMade> {
         if let Some(backend) = request.backend.as_mut() {
             let canonical = clarp_backend::canonical_id(backend.trim());
-            if canonical != backend {
+            if canonical != backend.as_str() {
                 *backend = canonical.to_owned();
             }
         }
