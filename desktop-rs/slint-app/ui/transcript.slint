@@ -139,7 +139,6 @@ export struct ErrorCard {
     detail: string,
     // backend · model · trace_id.
     meta: string,
-    details-label: string,
     // The key that opens or closes Details.
     details-key: string,
     details-open: bool,
@@ -1046,7 +1045,8 @@ component TurnErrorCard inherits Rectangle {
             height: 18px * ChatText.scale;
             accessible-role: button;
             accessible-id: root.measuring ? "" : "error-details:" + root.card.id;
-            accessible-label: root.card.details-label;
+            // i18n: chat, failed-turn card, accessibility label of the disclosure (noun): opens the provider's raw error text
+            accessible-label: @tr("error.details" => "Details");
             accessible-expandable: true;
             accessible-expanded: root.card.details-open;
             accessible-action-default => { ArtifactBridge.open(root.card.details-key); }
@@ -1054,7 +1054,8 @@ component TurnErrorCard inherits Rectangle {
                 alignment: start;
                 spacing: 4px * ChatText.scale;
                 Text { text: root.card.details-open ? "▾" : "▸"; color: Palette.faint; font-size: ChatText.detail; vertical-alignment: center; }
-                Text { text: root.card.details-label; color: Palette.muted; font-size: ChatText.detail; vertical-alignment: center; }
+                // i18n: chat, failed-turn card, disclosure label (noun): opens the provider's raw error text
+                Text { text: @tr("error.details" => "Details"); color: Palette.muted; font-size: ChatText.detail; vertical-alignment: center; }
             }
             TouchArea {
                 enabled: !root.measuring;

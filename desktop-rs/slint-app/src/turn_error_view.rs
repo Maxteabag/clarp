@@ -4,7 +4,7 @@
 //! closed Details. `clarp_core::turn_error` decides what shows; this fills the
 //! card and does what its buttons say.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
@@ -24,28 +24,22 @@ const DETAILS: &str = "details";
 const COPIED_FOR: Duration = Duration::from_secs(2);
 
 thread_local! {
-    /// The language the cards speak: the app's, or a check's choice.
-    static LANGUAGE: Cell<Option<&'static str>> = const { Cell::new(None) };
     /// Cards whose Details are open (`<session>␟<card id>`).
     static OPEN: RefCell<HashSet<String>> = RefCell::default();
     /// Cards whose details were just copied, and when.
     static COPIED: RefCell<HashMap<String, Instant>> = RefCell::default();
 }
 
-/// The app's language (one of `turn_error_text::LANGUAGES`).
+/// The language in use (`clarp_core::i18n::current()`), read each time a
+/// card is drawn so a language change reaches it at once.
 pub(crate) fn language() -> &'static str {
-    LANGUAGE.with(|l| {
-        if l.get().is_none() {
-            l.set(Some(text::app_language()));
-        }
-        l.get().unwrap_or("en")
-    })
+    clarp_core::i18n::current()
 }
 
 /// A check speaks the language it shows.
 #[allow(dead_code)]
 pub(crate) fn set_language(language: &'static str) {
-    LANGUAGE.with(|l| l.set(Some(language)));
+    clarp_core::i18n::set_current(language);
 }
 
 fn card_key(session: &str, id: &str) -> String {
@@ -70,7 +64,6 @@ pub(crate) fn card(error: &TurnError) -> ErrorCard {
         count: 1,
         detail: error.detail.as_str().into(),
         meta: error.meta().into(),
-        details_label: text::word(language, "error.details").into(),
         ..ErrorCard::default()
     }
 }
