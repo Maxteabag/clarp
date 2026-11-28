@@ -2647,6 +2647,7 @@ pub(crate) async fn make_agent_as(
             .map(|member| member.record.clone())
     });
     if replaces.is_none()
+        && request.test != Some(true)
         && !["resume_session_id", "fork_session_id", "codex_provider"]
             .iter()
             .any(|key| plain(key).is_some_and(|v| !v.trim().is_empty()))

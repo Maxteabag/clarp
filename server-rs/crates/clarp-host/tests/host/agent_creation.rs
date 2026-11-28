@@ -385,6 +385,40 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     )
     .unwrap();
     let host = place.start_with("", &["--config", place.root.to_str().unwrap()]);
+    // The restart rig creates a top-level agent for the backend under test.
+    // The soak later starts that same agent again in place using its backend.
+    for (session, backend, model) in [
+        ("restart-23", "claude", Some("sonnet")),
+        ("restart-codex-23", "codex", None),
+    ] {
+        let mut request = json!({"name":session,"session":session,"cwd":product,"backend":backend});
+        if let Some(model) = model {
+            request["model"] = json!(model);
+        }
+        let made = host.post("/agents", request);
+        let again = host.post(
+            "/agents",
+            json!({"name":session,"replace_sid":session,"backend":backend}),
+        );
+        for result in [&made, &again] {
+            assert_eq!(result["agent"]["backend"], backend, "{result}");
+            assert_ne!(result["agent"]["model"], selection["model"], "{result}");
+            assert_ne!(result["agent"]["effort"], selection["effort"], "{result}");
+        }
+        assert_eq!(made["agent"]["agent_id"], again["agent"]["agent_id"]);
+        assert!(
+            host.get(&format!("/agent-helper-state?session={session}"))["helper_defaults"]
+                .is_null()
+        );
+    }
+    // A disposable test helper under an enrolled lead keeps its backend and cannot
+    // pass that lead's selection on to the subjects of its own tests.
+    let fixture = host.post(
+        "/agents",
+        json!({"name":"rig","role":"helper","parent":"lead","test":true,"backend":"codex"}),
+    );
+    assert_ne!(fixture["agent"]["model"], selection["model"]);
+    assert!(host.get("/agent-helper-state?session=rig")["helper_defaults"].is_null());
     for (name, parent) in [("child", "lead"), ("nested", "child"), ("control", "other")] {
         let made = host.post(
             "/agents",

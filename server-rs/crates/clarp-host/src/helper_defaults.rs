@@ -35,7 +35,7 @@ impl ScopedDefaults {
         let mut record = &directory.named(parent.trim())?.record;
         let mut seen = HashSet::new();
         loop {
-            if record.bound() || !seen.insert(&record.agent_id) {
+            if record.is_test || record.bound() || !seen.insert(&record.agent_id) {
                 return None;
             }
             if self.parent_ids.contains(&record.agent_id) {
