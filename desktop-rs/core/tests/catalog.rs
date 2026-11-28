@@ -28,13 +28,12 @@ fn antigravity_launches_only_with_an_offered_acp_row() {
     let mut catalog = json!({"providers": {
         "agy": {"label": "Antigravity", "models": [{"id": "legacy", "label": "Legacy model"}]}
     }}).as_object().unwrap().clone();
-    let ids = |catalog| backend_options(catalog).into_iter().map(|o| o["id"].clone()).collect::<Vec<_>>();
-    assert!(ids(&catalog).is_empty());
+    assert!(backend_options(&catalog).is_empty());
     assert_eq!(models_for_backend(&catalog, "agy")[1]["label"], "Legacy model");
 
     for acp in [json!({"available": false}), json!({"hidden": true}), json!({"installed": false})] {
         catalog.get_mut("providers").unwrap()["agy-acp"] = acp;
-        assert!(ids(&catalog).is_empty());
+        assert!(backend_options(&catalog).is_empty());
     }
     catalog.get_mut("providers").unwrap()["agy-acp"] = json!({
         "label": "Antigravity ACP", "available": true, "models": [{"id": "acp-model", "label": "ACP model"}]
