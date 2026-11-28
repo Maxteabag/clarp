@@ -5116,6 +5116,30 @@ impl Actor {
         Ok((TakenOver::Done, goes, out))
     }
 
+    /// Withdraws a queued answer and saves its reopened card in the same journal append.
+    /// A refusal leaves both as they were.
+    pub fn withdraw_with(
+        &mut self,
+        kept: &Kept<'_>,
+        turn: TurnId,
+        by: &str,
+        now_ms: i64,
+    ) -> Result<(bool, Outputs), ActorError> {
+        let mut written = self.written(kept, now_ms)?;
+        let mut batch = self.recorder.batch();
+        let command = Command::Withdraw { turn, by: by.to_string() };
+        if batch.command(command, now_ms).is_err() {
+            return Ok((false, Outputs::default()));
+        }
+        for item in std::mem::take(&mut written.items) {
+            batch.item(item);
+        }
+        let effects = batch.commit()?.effects;
+        let mut out = self.after_command(effects, now_ms)?;
+        self.take_written(&written, &mut out);
+        Ok((true, out))
+    }
+
     /// A command a client asked for, which the agent may refuse. Returns whether it was done.
     fn asked(&mut self, command: Command, now_ms: i64) -> Result<(bool, Outputs), ActorError> {
         let effects = match self.recorder.handle(command, now_ms) {
@@ -5123,6 +5147,10 @@ impl Actor {
             Err(JournalError::Refused(_)) => return Ok((false, Outputs::default())),
             Err(error) => return Err(error.into()),
         };
+        Ok((true, self.after_command(effects, now_ms)?))
+    }
+
+    fn after_command(&mut self, effects: Vec<Effect>, now_ms: i64) -> Result<Outputs, ActorError> {
         self.say_owed_compaction()?;
         let mut out = Outputs {
             changed: Changed {
@@ -5134,7 +5162,7 @@ impl Actor {
             ..Outputs::default()
         };
         self.carry_out(effects, &mut out, now_ms)?;
-        Ok((true, out))
+        Ok(out)
     }
 
     /// Whether the actor follows this attempt of this turn. What is said of another attempt's

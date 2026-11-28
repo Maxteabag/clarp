@@ -548,38 +548,29 @@ fn reopened(
             });
         }
     };
-    // The message is looked for first, then the card is open again, then the message leaves
-    // the queue: nothing starts in between on this thread, and should a write fail, a card
-    // open again with its message still waiting is the half that is sorted out later.
-    let found = match queued {
-        None => None,
-        Some(message_id) => {
-            let waiting = actor.queue()?;
-            match waiting.into_iter().find(|w| w.message_id == message_id) {
-                Some(waiting) => Some(waiting),
-                None => {
-                    return Ok(Carried {
-                        said: Err(Refused {
-                            why: Why::Value,
-                            message: decisions::TOO_LATE.to_string(),
-                        }),
-                        outs,
-                        taken_back: None,
-                    });
-                }
+    let records = kept(std::slice::from_ref(&artifact));
+    let mut taken_back = None;
+    if let Some(message_id) = queued {
+        let waiting = actor.queue()?.into_iter().find(|w| w.message_id == message_id);
+        if let Some(waiting) = waiting {
+            let (withdrawn, out) = actor.withdraw_with(&records, waiting.turn, "user", now)?;
+            if withdrawn {
+                outs.push(out);
+                taken_back = Some(waiting);
             }
         }
-    };
-    if changed {
-        outs.push(actor.keep(&kept(std::slice::from_ref(&artifact)), now)?);
-    }
-    let mut taken_back = None;
-    if let Some(waiting) = found {
-        let (withdrawn, out) = actor.withdraw(waiting.turn, "user", now)?;
-        outs.push(out);
-        if withdrawn {
-            taken_back = Some(waiting);
+        if taken_back.is_none() {
+            return Ok(Carried {
+                said: Err(Refused {
+                    why: Why::Value,
+                    message: decisions::TOO_LATE.to_string(),
+                }),
+                outs,
+                taken_back: None,
+            });
         }
+    } else if changed {
+        outs.push(actor.keep(&records, now)?);
     }
     let shown = artifact.public(&record.persona, actor.goals(), now);
     Ok(Carried {
