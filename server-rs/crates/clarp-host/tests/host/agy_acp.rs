@@ -363,7 +363,7 @@ fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
     let (status, refused) = host.ask(
         "POST",
         "/agents",
-        Some(&json!({"name": "Folded", "backend": "agy", "model": "gemini-4-carbon-high", "effort": "high"})),
+        Some(&json!({"name": "Folded", "backend": "agy", "model": "gemini-a-high", "effort": "high"})),
     );
     assert_eq!(status, 400, "{refused}");
     assert!(

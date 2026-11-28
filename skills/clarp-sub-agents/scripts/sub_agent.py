@@ -58,7 +58,7 @@ HEARTBEAT_SEC = 90
 PROGRESS_SEC = 20
 PROGRESS_MAX = 200
 POLL_SEC = 30
-CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "opencode", "deepseek")
+CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "agy-acp", "opencode", "deepseek")
 # A prompt longer than this many bytes is not inlined into the message; the helper is
 # told to read the copied prompt file instead (argv and chat rows stay small).
 INLINE_PROMPT_MAX = 60_000
@@ -486,7 +486,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("start")
     s.add_argument("name"); s.add_argument("workdir"); s.add_argument("prompt_file")
     s.add_argument("--model"); s.add_argument("--backend", choices=CLARP_BACKENDS, default="claude")
-    s.add_argument("--effort", help="reasoning effort for the helper (not on agy: it is in the model id)")
+    s.add_argument("--effort", help="reasoning effort for the helper (not on agy: it is in the model id; agy-acp takes it)")
     s.add_argument("--title")
     s.add_argument("--clarp-agent", action="store_true",
                    help="run as a Clarp helper agent the owner can open and steer")

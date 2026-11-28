@@ -2,7 +2,8 @@
 # A stand-in for `agy acp`: an Agent Client Protocol (v1) agent on standard input and output,
 # scripted by the file `scenario` beside it (one word; `turn` when there is none). Every
 # message it is sent is written to `acp.log` beside it, one per line, for the test to read.
-# Started with anything but `acp` first (`agy models`, `agy --version`), it says nothing.
+# Started as `agy models`, it lists its models as agy does, each with an effort in its name;
+# started with anything else but `acp` first (`agy --version`), it says nothing.
 #
 # Scenario `steer` meets a second session/prompt as agy 1.5 does (seen on 23 Nov 2026): the
 # running prompt is answered at once as ended and the work goes on under the new one. The
@@ -23,9 +24,15 @@ def keep(conversation):
     open(os.path.join(store, conversation + ".db"), "a").close()
 
 
+if sys.argv[1:] == ["models"]:
+    print("Fetching available models...")
+    for model, name in (("gemini-a", "Gemini A"), ("claude-b", "Claude B")):
+        for effort in ("low", "high"):
+            print(f"{model}-{effort}\t{name} ({effort.title()})")
+    sys.exit(0)
 if sys.argv[1:2] != ["acp"]:
     # `agy --print=<message>`, as the `agy` card runs a turn: one conversation, continued by
-    # `--conversation <id>`, its turn told as stream-json. Anything else (`agy models`) is silent.
+    # `--conversation <id>`, its turn told as stream-json. Anything else is silent.
     told = [arg[len("--print="):] for arg in sys.argv[1:] if arg.startswith("--print=")]
     if not told:
         sys.exit(0)

@@ -93,6 +93,11 @@ Effort is part of the model id (`claude-opus-5-5-low|medium|high`,
 offers. An AGY child of a fork is always a `seed` fork (see below), and AGY
 streams no thinking text, so its chat shows messages and tool rows only.
 
+`--backend agy-acp` runs Antigravity over the Agent Client Protocol with the
+same models: a folded id (`gemini-4-neon-medium`), or the model alone with
+`--effort` (`--model gemini-4-neon --effort medium`). A model Antigravity does
+not list is refused at once, and the refusal names the ones it does.
+
 ```bash
 clarp-sub-agent start research /path/to/wt prompt.md --clarp-agent \
   --backend agy --model claude-opus-5-5-high --title "Research"
@@ -200,7 +205,7 @@ start, and the command exits 1.
    <helper>`, and starts a small watcher unit that holds the background job
    until the helper reports (job finished) or fails or is abandoned (job
    failed). Any Clarp backend works (`claude`, `codex`, `grok`, `agy`,
-   `opencode`, `deepseek`), except under an agent bound to a model provider of
+   `agy-acp`, `opencode`, `deepseek`), except under an agent bound to a model provider of
    its own (`codex_provider` on its row): its helpers must be `--backend codex`,
    and are bound to its home and provider (another backend is refused, 409
    `own_provider`). `NAME.session` holds the helper's session.
