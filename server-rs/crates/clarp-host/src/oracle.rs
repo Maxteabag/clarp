@@ -3,7 +3,7 @@
 //!
 //! The Oracle is the voice a user speaks with hands-free. What it is asked to look into it
 //! hands to one agent, its contact: the Host keeps who that is (`GET` and `POST
-//! /oracle/contact`), and the owner's choice between the two voice models a call of it can
+//! /oracle/contact`), and the owner's choice of voice model a call of it can
 //! run on (`GET` and `POST /oracle/voice-provider`). Both are kept among the Host's settings
 //! under the names the Python Host keeps them under. The rules are in
 //! [`clarp_kernel::oracle`]; the routes answer as the Python Host's
@@ -17,7 +17,9 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::get;
 use axum::{Json, Router};
-use clarp_kernel::oracle::{self, Agent, CONTACT_KEY, VOICE_KEY, Voices};
+use clarp_kernel::oracle::{
+    self, Agent, CONTACT_KEY, ELEVEN_MODEL_KEY, ElevenVoice, VOICE_KEY, Voices,
+};
 use serde_json::{Value, json};
 use tokio::sync::Mutex;
 
@@ -28,6 +30,7 @@ use crate::personas::object;
 
 mod call;
 pub(crate) mod delegations;
+mod elevenlabs;
 pub(crate) mod handoffs;
 pub(crate) mod memory;
 mod router;
@@ -123,8 +126,7 @@ async fn choose_contact(State(app): State<App>, body: Bytes) -> Answered {
 }
 
 /// What is told of the voice a call of the Oracle runs on: the choice a phone made over the
-/// owner's file (`[oracle] voice_provider`, `gemini_model`, `gemini_voice`), and whether
-/// this Host has a key for the second voice. The owner's file is read now.
+/// owner's file and which provider keys this Host has. The owner's file is read now.
 fn voice_told(app: &App, directory: &Directory) -> Value {
     let owners = OwnerFile::new(app.config.speech_keys.clone());
     let file = owners.read().unwrap_or_default();
@@ -135,6 +137,8 @@ fn voice_told(app: &App, directory: &Directory) -> Value {
         text("gemini_voice"),
     );
     let said = owner::voices(&file);
+    let eleven_model = text("elevenlabs_model");
+    let eleven_voice = text("elevenlabs_voice");
     let voices = Voices {
         kept: directory.setting(VOICE_KEY),
         configured: configured.as_deref(),
@@ -143,6 +147,15 @@ fn voice_told(app: &App, directory: &Directory) -> Value {
         voice: voice.as_deref().unwrap_or(""),
         of_oracle: said.gemini_voice_for("Oracle"),
         usual: &said.gemini_voice,
+        elevenlabs: Some(ElevenVoice {
+            has_key: OwnerFile::key_from(Some(&file), "elevenlabs").is_some(),
+            model: directory
+                .setting(ELEVEN_MODEL_KEY)
+                .and_then(oracle::eleven_model)
+                .or_else(|| eleven_model.as_deref().and_then(oracle::eleven_model))
+                .unwrap_or(oracle::ELEVEN_MODELS[0]),
+            voice: eleven_voice.as_deref().unwrap_or(oracle::ELEVEN_VOICE),
+        }),
     };
     voices.status()
 }
@@ -152,15 +165,27 @@ async fn voice(State(app): State<App>) -> Json<Value> {
     Json(voice_told(&app, &app.fleet.directory()))
 }
 
-/// `POST /oracle/voice-provider` with `{"provider": "openai" | "gemini"}`: a phone chooses
-/// the voice of the calls to come. Anything else is refused, and what was kept stays.
+/// `POST /oracle/voice-provider`: a phone chooses the voice of the calls to come. An invalid
+/// Eleven Realtime model is refused before keeping any part of the choice.
 async fn choose_voice(State(app): State<App>, body: Bytes) -> Answered {
     let said = object(&body)?;
     let named = said.get("provider").unwrap_or(&Value::Null);
     let chosen = oracle::choose_voice(named);
     let chosen = chosen.map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+    let mut settings = vec![(VOICE_KEY.to_string(), chosen.to_string())];
+    if chosen == "elevenlabs"
+        && let Some(model) = said.get("model")
+    {
+        let model = model
+            .as_str()
+            .and_then(oracle::eleven_model)
+            .ok_or_else(|| {
+                ApiError::new(StatusCode::BAD_REQUEST, "Unknown Eleven Realtime model")
+            })?;
+        settings.push((ELEVEN_MODEL_KEY.to_string(), model.to_string()));
+    }
     let _turn = app.oracle.turn.lock().await;
-    keep(&app, VOICE_KEY, chosen.to_string()).await?;
+    app.fleet.set(settings).await?;
     let told = voice_told(&app, &app.fleet.directory());
     let (selected, effective) = (&told["selected"], &told["provider"]);
     eprintln!(
@@ -179,7 +204,7 @@ const FIRST_KIND: (&str, &str) = ("gpt-realtime-2.1", "cedar");
 /// The calls of the second kind (`GET /oracle/v2`) are built: they go on in the thread of
 /// their owner and contact, begin anew where that is asked, and go to the contact alone
 /// where that is asked. Routing requires the owner's OpenAI key.
-/// The owner can select Gemini Live when its key is present. Podcast detours, the
+/// The owner can select another provider when its key is present. Podcast detours, the
 /// first kind of call, WebRTC and the other engine of the second kind are not built,
 /// and nothing of them is claimed.
 async fn status(State(app): State<App>) -> Json<Value> {
@@ -187,8 +212,7 @@ async fn status(State(app): State<App>) -> Json<Value> {
     // The model is the one a call opens with (`app.config.live_model`): one value, one place.
     let (model, voice) = (app.config.live_model, oracle::voice::voice());
     let choice = voice_told(&app, &app.fleet.directory());
-    let selected = &choice["gemini"];
-    let second = choice["provider"] == "gemini";
+    let selected = &choice[choice["provider"].as_str().unwrap_or_default()];
     Json(json!({
         "available": false,
         "model": FIRST_KIND.0,
@@ -201,8 +225,8 @@ async fn status(State(app): State<App>) -> Json<Value> {
             "direct_contact": true,
             "direct_contact_available": key,
             "available": key,
-            "model": if second { selected["model"].as_str() } else { Some(model) },
-            "voice": if second { selected["voice"].as_str() } else { Some(voice) },
+            "model": selected["model"].as_str().unwrap_or(model),
+            "voice": selected["voice"].as_str().unwrap_or(voice),
             "podcast": false,
             "podcast_history": false,
             "voice_provider": choice["provider"],

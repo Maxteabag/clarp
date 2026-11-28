@@ -175,6 +175,8 @@ pub struct Config {
     /// The same for the voice of a ring held as a live voice call, which is a socket too.
     pub live_endpoint: String,
     pub gemini_live_endpoint: String,
+    /// A loopback stand-in for both Eleven Realtime credential minting and its socket.
+    pub eleven_realtime_endpoint: String,
     /// Where the router of the Oracle's calls is asked, in a test: an address on this machine.
     pub router_endpoint: String,
     /// The same for the engines that speak.
@@ -701,6 +703,14 @@ impl Config {
                 ..Local::SOCKET
             },
         )?;
+        let eleven_realtime_endpoint = here(
+            "CLARP_ELEVEN_REALTIME_ENDPOINT",
+            Local {
+                path: false,
+                query: false,
+                ..Local::WEB
+            },
+        )?;
         let router_endpoint = web("CLARP_ROUTER_ENDPOINT")?;
         let cartesia_endpoint = web("CLARP_CARTESIA_ENDPOINT")?;
         let apns_endpoint = web("CLARP_APNS_ENDPOINT")?;
@@ -833,6 +843,7 @@ impl Config {
             flux_endpoint,
             live_endpoint,
             gemini_live_endpoint,
+            eleven_realtime_endpoint,
             router_endpoint,
             cartesia_endpoint,
             deepgram_voice_endpoint,

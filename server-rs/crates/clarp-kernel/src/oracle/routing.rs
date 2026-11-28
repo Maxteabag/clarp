@@ -238,7 +238,7 @@ impl Conversation {
             // While the call is put through to an agent nothing is routed.
             Fed::Begin if self.held => Ok(Step::Over),
             Fed::Begin => {
-                if self.gemini {
+                if self.voice_protocol.adapted() {
                     wire.hook(super::conversation::Hook::DelegationRouting(
                         route.ident.clone(),
                     ));
@@ -260,7 +260,7 @@ impl Conversation {
         });
         if step == Step::Over {
             route.over = true;
-            if self.gemini {
+            if self.voice_protocol.adapted() {
                 wire.hook(super::conversation::Hook::DelegationFinished(
                     route.ident.clone(),
                 ));

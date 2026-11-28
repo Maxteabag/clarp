@@ -648,6 +648,10 @@ pub(crate) async fn dial(app: &App, key: &str) -> Option<Voice> {
         "" => VOICE_URL,
         stand_in => stand_in,
     };
+    dial_at(address, key).await
+}
+
+pub(crate) async fn dial_at(address: &str, key: &str) -> Option<Voice> {
     let mut request = address.into_client_request().ok()?;
     let token = format!("Bearer {key}").parse().ok()?;
     request.headers_mut().insert("Authorization", token);

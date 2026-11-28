@@ -35,9 +35,20 @@ pub const CONTACT_KEY: &str = "oracle.contact_session";
 pub const CONTACT_LONGEST: usize = 160;
 /// Under what the choice of a voice is kept, and the voices there are.
 pub const VOICE_KEY: &str = "oracle.voice_provider";
-pub const VOICES: [&str; 2] = ["openai", "gemini"];
+pub const ELEVEN_MODEL_KEY: &str = "oracle.elevenlabs_model";
+pub const VOICES: [&str; 3] = ["openai", "gemini", "elevenlabs"];
+pub const ELEVEN_MODELS: [&str; 2] = ["eleven_realtime_v1_mini", "eleven_realtime_v1_max"];
+pub const ELEVEN_VOICE: &str = "brian";
 /// The model of the second voice, where the owner names no other.
 pub const GEMINI_MODEL: &str = "gemini-3.8-live";
+
+/// What a realtime provider adapter sends upstream or presents as an Oracle Live event.
+#[derive(Debug)]
+pub enum VoiceEffect {
+    Send(Value),
+    Audio(Value),
+    Event(Value),
+}
 
 /// An agent of the Host, as the Oracle's contact is held against it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -230,6 +241,19 @@ pub struct Voices<'a> {
     /// The voice the owner gave the persona called Oracle, and his usual one.
     pub of_oracle: Option<&'a str>,
     pub usual: &'a str,
+    /// Eleven Realtime uses its own model and voice names.
+    pub elevenlabs: Option<ElevenVoice<'a>>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct ElevenVoice<'a> {
+    pub has_key: bool,
+    pub model: &'static str,
+    pub voice: &'a str,
+}
+
+pub fn eleven_model(name: &str) -> Option<&'static str> {
+    ELEVEN_MODELS.into_iter().find(|model| *model == name)
 }
 
 fn a_voice(name: &str) -> Option<&'static str> {
@@ -253,7 +277,15 @@ impl Voices<'_> {
     /// The voices this Host can run.
     pub fn available(&self) -> Vec<&'static str> {
         let second = self.has_gemini_key.then_some(VOICES[1]);
-        [VOICES[0]].into_iter().chain(second).collect()
+        let elevenlabs = self
+            .elevenlabs
+            .filter(|voice| voice.has_key)
+            .map(|_| VOICES[2]);
+        [VOICES[0]]
+            .into_iter()
+            .chain(second)
+            .chain(elevenlabs)
+            .collect()
     }
 
     /// The voice a new call runs on: the choice, or the first where the choice cannot run.
@@ -272,13 +304,21 @@ impl Voices<'_> {
         let model = first_said(&[self.model]).unwrap_or(GEMINI_MODEL);
         let voice = first_said(&[self.voice, self.of_oracle.unwrap_or(""), self.usual]);
         let voice = voice.unwrap_or("Kore");
-        let fallback =
-            (choice != current).then_some("Gemini Live needs a Gemini API key on this Host");
-        json!({
+        let fallback = (choice != current).then_some(match choice {
+            "elevenlabs" => "Eleven Realtime needs an ElevenLabs API key on this Host",
+            _ => "Gemini Live needs a Gemini API key on this Host",
+        });
+        let mut status = json!({
             "provider": current, "selected": choice, "default": VOICES[0],
             "available": self.available(), "fallback_reason": fallback,
             "gemini": { "model": model, "voice": voice },
-        })
+        });
+        if let Some(elevenlabs) = self.elevenlabs.filter(|voice| voice.has_key) {
+            status["elevenlabs"] = json!({
+                "model": elevenlabs.model, "voice": elevenlabs.voice, "models": ELEVEN_MODELS,
+            });
+        }
+        status
     }
 }
 
