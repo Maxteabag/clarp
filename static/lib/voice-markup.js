@@ -123,12 +123,23 @@ function dropVoxForDisplay(text) {
 
 export function stripVoiceMarkup(value, { streaming = false } = {}) {
   const source = streaming ? hideIncompleteStreamingVoiceMarkup(value) : String(value);
-  return dropVoxForDisplay(source
+  return tidySpaces(dropVoxForDisplay(source
     .replace(SPEAK_REGION_RE, (_, open, body, close) =>
       open + body.replace(EMOTION_TAG_RE, ' ') + close)
     .replace(SPEAK_TAG_RE, '')
-    .replace(VOICE_SSML_RE, ''))
-    .replace(/[ \t]{2,}/g, ' ')
-    .replace(/[ \t]+([,.;:!?])/g, '$1')
+    .replace(VOICE_SSML_RE, '')))
     .trim();
+}
+
+// Code is written exactly as it came: fenced blocks (closed or still
+// streaming) and inline code spans are kept out of the space cleanup.
+const CODE_SPAN_RE = /(```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|`[^`\n]+`)/;
+
+// A removed tag leaves double spaces and a space before punctuation; tidy
+// those in prose only, and never touch a line's indentation (nested lists,
+// indented code).
+function tidySpaces(text) {
+  return text.split(CODE_SPAN_RE).map((part, i) => (i % 2 ? part : part
+    .replace(/([^ \t\n])[ \t]{2,}/g, '$1 ')
+    .replace(/([^ \t\n])[ \t]+([,.;:!?])/g, '$1$2'))).join('');
 }

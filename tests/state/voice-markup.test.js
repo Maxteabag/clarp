@@ -53,3 +53,15 @@ describe('voice markup display cleanup', () => {
     )).toBe('Oh that worked. Finally. See [docs](https://x.y) [x]');
   });
 });
+
+describe('voice markup leaves code alone', () => {
+  it('keeps indentation and spacing inside code', () => {
+    const raw = 'Fix:\n\n```rust\nfn a() {\n    let x = y ? 1 : 2;\n}\n```\n\nRun `a  ;  b`  now <vox>um</vox>.';
+    expect(stripVoiceMarkup(raw)).toBe(
+      'Fix:\n\n```rust\nfn a() {\n    let x = y ? 1 : 2;\n}\n```\n\nRun `a  ;  b` now.');
+  });
+  it('keeps the indentation of a nested list', () => {
+    expect(stripVoiceMarkup('- one\n    - two  ,  three')).toBe('- one\n    - two, three');
+  });
+});
+
