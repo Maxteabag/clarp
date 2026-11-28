@@ -25,6 +25,9 @@ import {
 } from './audio.svelte.js';
 import { noteQueuedSendDeleted } from './delivery.svelte.js';
 import { noteArtifactUpdated, refreshRenderSpecs } from './artifacts.svelte.js';
+import {
+  PRIMARY, noteOk as noteHostOk, onRecover, reachOf, retry as retryHost, setServingIdentity, suspect,
+} from './reach.svelte.js';
 
 let es = null;
 let lastMsgAt = 0;
@@ -52,13 +55,23 @@ export function setSseHooks(next) {
   hooks = { ...hooks, ...next };
 }
 
+let reconnectTimer = null;
 export function scheduleReconnect() {
   setConn('dead', Timing.DEAD_OVERLAY_MS);
   if (es) { try { es.close(); } catch (_) {} es = null; }
   if (staleTimer) { clearInterval(staleTimer); staleTimer = null; }
-  setTimeout(connectSSE, reconnectMs);
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  // The stream dropped: ask the Host whether it answers at all (stores/reach.svelte.js).
+  suspect(PRIMARY);
+  // While it does not answer, its own backoff asks it, and an answer reopens the stream.
+  if (reachOf(PRIMARY)?.down) return;
+  reconnectTimer = setTimeout(connectSSE, reconnectMs);
   reconnectMs = Math.min(reconnectMs * 2, Timing.SSE_RECONNECT_MAX_MS);
 }
+
+// The serving Host answers again: open the stream now (its onopen refreshes the chats).
+onRecover(PRIMARY, () => forceReconnect());
 
 function eventsUrl() {
   const params = [];
@@ -84,6 +97,15 @@ export async function refreshServerInfo() {
     if (info && (info.server_id || info.name)) {
       app.hosts = [{ id: String(info.server_id || ''), name: String(info.name || '') }];
     }
+    setServingIdentity({
+      serverId: String((info && info.server_id) || ''),
+      previous: Array.isArray(info && info.previous_server_ids) ? info.previous_server_ids.map(String) : [],
+      label: String((info && info.name) || ''),
+    });
+    noteHostOk(PRIMARY, {
+      hostVersion: String((info && (info.version || info.clarp_version)) || ''),
+      contract: Number(info && info.contract && info.contract.host) || 0,
+    });
     loadExplanationSettings();
     loadCoordinationSettings();
   } catch (_) {}
@@ -126,6 +148,7 @@ export function connectSSE() {
 
   es.onopen = () => {
     reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
+    noteHostOk(PRIMARY);
     lastMsgAt = Date.now();
     setConn('live', Timing.DEAD_OVERLAY_MS);
     const planned = resubscribing;
@@ -171,6 +194,14 @@ addConditionSource(() => ({
 
 export function forceReconnect() {
   reconnectMs = Timing.SSE_RECONNECT_BASE_MS;
+  if (reachOf(PRIMARY)?.down) {
+    // Not answering: ask now (the Try again path) rather than reopening a stream that fails.
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+    if (es) { try { es.close(); } catch (_) {} es = null; }
+    retryHost(PRIMARY);
+    return;
+  }
   scheduleReconnect();
 }
 
