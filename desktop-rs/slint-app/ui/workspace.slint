@@ -177,7 +177,8 @@ export struct PaneView {
     // the header, and the composer's read-only note in place of sending.
     down-shown: bool,
     down: HostDownPanel,
-    read-only-note: string,
+    // The down Host's label while sending waits for it ("" otherwise).
+    read-only-host: string,
     transcribing: int,
     recording: bool,
     playing: bool,
@@ -939,7 +940,7 @@ export component Pane inherits Rectangle {
           accessible-id: "composer-box:" + root.pane.id;
           // Folded to its "[i] Insert" line until it has the keyboard (or
           // holds a draft, which stays in view).
-          property <bool> folded: !composer.editor-focused && composer.draft == "" && root.pane.read-only-note == "";
+          property <bool> folded: !composer.editor-focused && composer.draft == "" && root.pane.read-only-host == "";
           property <length> natural: root.pane.pair ? 0px : self.folded ? 16px : composer.preferred-height + Frame.top + Frame.bottom;
           // After a send it shrinks from its height then, with a spring.
           height: root.boxing ? root.box-from + (self.natural - root.box-from) * root.box-t : self.natural;
@@ -958,7 +959,7 @@ export component Pane inherits Rectangle {
             stop-notice: root.pane.stop-notice;
             busy: root.pane.busy;
             can-send: root.pane.can-send;
-            read-only-note: root.pane.read-only-note;
+            read-only-note: root.pane.read-only-host == "" ? "" : @tr("host_down.read_only" => "Showing saved messages. You can send again when {0} is back.", root.pane.read-only-host);
             transcribing: root.pane.transcribing;
             recording: root.pane.recording;
             playing: root.pane.playing && root.pane.active;

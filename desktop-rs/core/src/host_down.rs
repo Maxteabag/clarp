@@ -4,46 +4,19 @@
 //! diagnostics text free of private data. Everything here is pure; the engine
 //! probes and keeps the state per Host (`clarp_engine::host_down`).
 //!
-//! The copy is the spec's, word for word, the same on every Clarp app.
+//! The panel's words are each app's own, from the shared `host_down.*` keys.
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
-use chrono::{DateTime, Datelike, TimeZone, Utc};
+use chrono::{TimeZone, Utc};
 use sha2::{Digest, Sha256};
 
-// ---- copy -----------------------------------------------------------------
-
-/// `{Host} isn't answering`
-pub fn title(host: &str) -> String {
-    format!("{host} isn't answering")
-}
-
-/// `Showing saved messages. You can send again when {Host} is back.`
-pub fn read_only_note(host: &str) -> String {
-    format!("Showing saved messages. You can send again when {host} is back.")
-}
-
-/// The combined chat list's row: `{Host} isn't answering · since {time}`.
-pub fn list_row(host: &str, time: &str) -> String {
-    format!("{host} isn't answering · since {time}")
-}
-
-/// `Since {time}`.
-pub fn since_line(time: &str) -> String {
-    format!("Since {time}")
-}
-
-pub const DEVICE_OFFLINE: &str = "This device is offline";
-pub const RECONNECTING: &str = "Reconnecting automatically…";
-pub const BACK_ONLINE: &str = "Back online";
-pub const TRY_AGAIN: &str = "Try again";
-pub const CHECK_TAILSCALE: &str = "Check Tailscale";
-pub const PAIR_AGAIN: &str = "Pair again";
-pub const EDIT_ADDRESS: &str = "Edit address";
-pub const SWITCH_HOST: &str = "Switch Host";
-pub const COPY_DIAGNOSTICS: &str = "Copy diagnostics";
-pub const DIAGNOSTICS_COPIED: &str = "Diagnostics copied";
+// ---- words and times ------------------------------------------------------
+//
+// The panel's words are the apps' own (`host_down.*` keys in the shared
+// spec; on the desktop `@tr(...)` in host_down.slint). Here: the codes, and
+// the English diagnostics text, which stays English everywhere.
 
 /// How long `Back online` shows before the panel goes.
 pub const BACK_ONLINE_FOR: Duration = Duration::from_secs(2);
@@ -51,29 +24,28 @@ pub const BACK_ONLINE_FOR: Duration = Duration::from_secs(2);
 /// A probe waits this long for the Host's answer.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 
-/// `Trying again in {n} s`, or from a minute on `Trying again in {n} min`.
-pub fn trying_again_in(left: Duration) -> String {
-    let seconds = left.as_secs() + u64::from(left.subsec_nanos() > 0);
-    let seconds = seconds.max(1);
-    if seconds >= 60 { format!("Trying again in {} min", seconds.div_ceil(60)) } else { format!("Trying again in {seconds} s") }
+/// "2 hours ago" for `{when}` (`host_down.last_seen`, `host_down.list_row`),
+/// and the one place the desktop words a relative time until its locale
+/// formatter lands (desktop-rs docs/i18n.md): clarp-i18n swaps this out.
+pub fn ago(elapsed_ms: i64) -> String {
+    let seconds = (elapsed_ms / 1000).max(0);
+    let unit = |n: i64, one: &str| if n == 1 { format!("1 {one} ago") } else { format!("{n} {one}s ago") };
+    match seconds {
+        0..45 => "just now".to_owned(),
+        45..3600 => unit((seconds / 60).max(1), "minute"),
+        3600..86_400 => unit(seconds / 3600, "hour"),
+        _ => unit(seconds / 86_400, "day"),
+    }
 }
 
-/// The time in `Since {time}` and the list row, on a 24-hour clock: today
-/// `HH:mm`, yesterday `yesterday HH:mm`, older `d MMM HH:mm`.
-pub fn since_time<Tz: TimeZone>(since_ms: i64, now: &DateTime<Tz>) -> String
-where
-    Tz::Offset: std::fmt::Display,
-{
-    let Some(at) = now.timezone().timestamp_millis_opt(since_ms).single() else { return String::new() };
-    let (day, today) = (at.date_naive(), now.date_naive());
-    if day == today {
-        at.format("%H:%M").to_string()
-    } else if today.pred_opt() == Some(day) {
-        at.format("yesterday %H:%M").to_string()
-    } else if day.year() == today.year() || day > today {
-        at.format("%-d %b %H:%M").to_string()
+/// "in 30 seconds" for `{in}` (`host_down.status.retry_in`); see `ago`.
+pub fn within(left: Duration) -> String {
+    let seconds = (left.as_secs() + u64::from(left.subsec_nanos() > 0)).max(1);
+    if seconds < 60 {
+        if seconds == 1 { "in 1 second".to_owned() } else { format!("in {seconds} seconds") }
     } else {
-        at.format("%-d %b %Y %H:%M").to_string()
+        let minutes = seconds.div_ceil(60);
+        if minutes == 1 { "in 1 minute".to_owned() } else { format!("in {minutes} minutes") }
     }
 }
 
@@ -107,14 +79,6 @@ impl Action {
             Action::CheckTailscale => "tailscale",
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Action::PairAgain => PAIR_AGAIN,
-            Action::EditAddress => EDIT_ADDRESS,
-            Action::CheckTailscale => CHECK_TAILSCALE,
-        }
-    }
 }
 
 impl Reason {
@@ -130,17 +94,24 @@ impl Reason {
         }
     }
 
-    /// The panel's sentence, naming the Host where the spec does.
-    pub fn sentence(self, host: &str) -> String {
+    /// The body's English (`host_down.<reason>.body`), the Host named "the
+    /// Host": for the diagnostics text only, never the panel.
+    pub fn english_body(self) -> &'static str {
         match self {
-            Reason::DeviceOffline => "This device is offline.".into(),
-            Reason::AuthExpired => format!("This device is no longer signed in to {host}."),
-            Reason::WrongAddress => format!("Nothing at this address is {host}. The address may have changed."),
-            Reason::ServerStopped => "The computer is on, but Clarp isn't running on it.".into(),
-            Reason::TailscaleOff => "Tailscale doesn't seem to be connected on this device.".into(),
-            Reason::HostAsleep => "The computer seems to be off or asleep.".into(),
-            Reason::Unknown => format!("{host} isn't responding right now."),
+            Reason::DeviceOffline => "Clarp will reconnect when the network is back.",
+            Reason::AuthExpired => "This device is no longer signed in to the Host.",
+            Reason::WrongAddress => "The address may have changed.",
+            Reason::ServerStopped => "The computer is on, but Clarp isn't running on it.",
+            Reason::TailscaleOff => "Tailscale doesn't seem to be connected on this device.",
+            Reason::HostAsleep => "The computer seems to be off or asleep.",
+            Reason::Unknown => "The Host isn't responding right now.",
         }
+    }
+
+    /// The shared severity: warning (yellow) where the user must act,
+    /// info (grey) otherwise; never error (red).
+    pub fn warning(self) -> bool {
+        matches!(self, Reason::AuthExpired | Reason::WrongAddress)
     }
 
     pub fn action(self) -> Option<Action> {
@@ -440,7 +411,7 @@ pub fn diagnostics(d: &Diagnostics) -> String {
             None => d.host_version.to_owned(),
         }
     };
-    let sentence = d.reason.sentence("the Host");
+    let sentence = d.reason.english_body();
     let next = d.next_in.map_or_else(|| "now".to_owned(), |left| format!("{} s", left.as_secs()));
     [
         "Clarp diagnostics".to_owned(),
@@ -466,7 +437,6 @@ pub fn diagnostics(d: &Diagnostics) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::FixedOffset;
 
     fn context(address: AddressKind) -> Context {
         Context { address, device_online: Some(true), ..Context::default() }
@@ -525,35 +495,30 @@ mod tests {
     }
 
     #[test]
-    fn the_copy_is_the_specs() {
-        assert_eq!(title("laptopstudio"), "laptopstudio isn't answering");
-        assert_eq!(read_only_note("laptopstudio"), "Showing saved messages. You can send again when laptopstudio is back.");
-        assert_eq!(list_row("laptopstudio", "09:14"), "laptopstudio isn't answering · since 09:14");
-        assert_eq!(since_line("09:14"), "Since 09:14");
-        assert_eq!(Reason::AuthExpired.sentence("EliteBook"), "This device is no longer signed in to EliteBook.");
-        assert_eq!(Reason::WrongAddress.sentence("EliteBook"), "Nothing at this address is EliteBook. The address may have changed.");
-        assert_eq!(Reason::Unknown.sentence("EliteBook"), "EliteBook isn't responding right now.");
-        assert_eq!(Reason::TailscaleOff.action().map(Action::label), Some("Check Tailscale"));
-        assert_eq!(Reason::AuthExpired.action().map(Action::label), Some("Pair again"));
-        assert_eq!(Reason::WrongAddress.action().map(Action::label), Some("Edit address"));
+    fn reasons_carry_their_action_icon_and_severity() {
+        assert_eq!(Reason::TailscaleOff.action().map(Action::id), Some("tailscale"));
+        assert_eq!(Reason::AuthExpired.action().map(Action::id), Some("pair"));
+        assert_eq!(Reason::WrongAddress.action().map(Action::id), Some("address"));
         assert_eq!(Reason::HostAsleep.action(), None);
-        assert_eq!(trying_again_in(Duration::from_secs(5)), "Trying again in 5 s");
-        assert_eq!(trying_again_in(Duration::from_millis(4200)), "Trying again in 5 s");
-        assert_eq!(trying_again_in(Duration::from_secs(60)), "Trying again in 1 min");
-        assert_eq!(trying_again_in(Duration::from_secs(90)), "Trying again in 2 min");
-        assert_eq!(trying_again_in(Duration::ZERO), "Trying again in 1 s");
+        assert!(Reason::AuthExpired.warning() && Reason::WrongAddress.warning());
+        for info in [Reason::DeviceOffline, Reason::ServerStopped, Reason::TailscaleOff, Reason::HostAsleep, Reason::Unknown] {
+            assert!(!info.warning(), "{info:?} is info grey");
+        }
+        assert_eq!(Reason::ServerStopped.icon(), "plug");
+        assert_eq!(Reason::HostAsleep.icon(), "moon");
     }
 
     #[test]
-    fn since_says_today_yesterday_or_the_date_on_a_24_hour_clock() {
-        let zone = FixedOffset::east_opt(3600).unwrap();
-        let now = zone.with_ymd_and_hms(2026, 11, 28, 15, 30, 0).unwrap();
-        let at = |d, h, m| zone.with_ymd_and_hms(2026, 11, d, h, m, 0).unwrap().timestamp_millis();
-        assert_eq!(since_time(at(28, 9, 14), &now), "09:14");
-        assert_eq!(since_time(at(27, 21, 3), &now), "yesterday 21:03");
-        assert_eq!(since_time(at(25, 21, 3), &now), "25 Nov 21:03");
-        let last_year = zone.with_ymd_and_hms(2025, 12, 30, 8, 0, 0).unwrap().timestamp_millis();
-        assert_eq!(since_time(last_year, &now), "30 Dec 2025 08:00");
+    fn relative_times_read_naturally() {
+        assert_eq!(ago(10_000), "just now");
+        assert_eq!(ago(60_000), "1 minute ago");
+        assert_eq!(ago(25 * 60_000), "25 minutes ago");
+        assert_eq!(ago(2 * 3_600_000 + 5), "2 hours ago");
+        assert_eq!(ago(26 * 3_600_000), "1 day ago");
+        assert_eq!(within(Duration::from_millis(4200)), "in 5 seconds");
+        assert_eq!(within(Duration::from_secs(1)), "in 1 second");
+        assert_eq!(within(Duration::from_secs(60)), "in 1 minute");
+        assert_eq!(within(Duration::from_secs(90)), "in 2 minutes");
     }
 
     #[test]
@@ -619,7 +584,6 @@ mod tests {
         for private in ["100.101", "7690", "laptopstudio", "srv-", "://"] {
             assert!(!text.contains(private), "diagnostics leak {private}: {text}");
         }
-        // A sentence that names the Host never names it here.
         let auth = diagnostics(&Diagnostics { reason: Reason::AuthExpired, host_version: "", ..diagnostics_input(base) });
         assert!(auth.contains("Likely reason: auth_expired — This device is no longer signed in to the Host."));
         assert!(auth.contains("Host version: unknown"));

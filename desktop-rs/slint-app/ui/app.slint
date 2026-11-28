@@ -776,7 +776,7 @@ export component AppWindow inherits Window {
         HostDownToast {
             x: (parent.width - self.width) / 2;
             y: parent.height - (root.shortcuts-visible ? footer.height : 0px) - self.height - 24px;
-            message: HostDownBridge.toast;
+            shown: HostDownBridge.copied;
         }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";

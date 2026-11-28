@@ -1,32 +1,44 @@
 // A Host that does not answer (the shared "Host not answering" spec): a
-// calm panel with which Host, since when, the likely reason, what to do and
-// a quiet reconnect line. In a chat of that Host it sits under the header;
-// opened from the list (or with nothing cached) it is a centred page. The
-// words are core host_down.rs's; nothing here is red.
+// calm panel with which Host, when it last answered, the likely reason,
+// what to do and a quiet reconnect line. In a chat of that Host it sits
+// under the header; opened from the list (or with nothing cached) it is a
+// centred page. Rust gives codes, the Host's label and times; the words are
+// here, the spec's `host_down.*` keys as @tr contexts. Info grey for most
+// reasons, warning yellow where the user must act; never red.
 import { Palette, Look } from "theme.slint";
 import { TextButton } from "agent_controls.slint";
 
 export struct HostDownPanel {
     url: string,
-    title: string,
+    // The Host's label, as the list names it.
+    host: string,
+    // device_offline, auth_expired, wrong_address, server_stopped,
+    // tailscale_off, host_asleep or unknown.
     reason: string,
-    // "Since 09:14".
-    since: string,
-    // "Reconnecting automatically…", "Trying again in 5 s", "Back online".
+    // When it last answered, relative ("2 hours ago"); "" when never known.
+    last-seen: string,
+    // reconnecting, retry or back.
     status: string,
+    // For retry: when ("in 30 seconds").
+    retry-in: string,
     // moon, plug, key, signpost, network or cloud-off.
     icon: string,
     // The reason's own button ("pair", "address", "tailscale" or "").
     action: string,
-    action-label: string,
     switch: bool,
     back: bool,
+    // Warning (yellow) rather than info (grey): the user must act.
+    warning: bool,
+    // How the last attempt ended, behind the closed Details.
+    detail: string,
 }
 
-// The list's row for a Host out of reach: "{Host} isn't answering · since 09:14".
+// The list's row for a Host out of reach.
 export struct HostDownRow {
     url: string,
-    text: string,
+    host: string,
+    // Relative ("2 hours ago").
+    when: string,
 }
 
 export global HostDownBridge {
@@ -38,24 +50,64 @@ export global HostDownBridge {
     // The only Host's (or the selected one's) page, with nothing cached to
     // show: it takes the chat area.
     in property <bool> full-page;
-    in property <string> toast;
+    // "Diagnostics copied" shows for a moment.
+    in property <bool> copied;
     callback try-again(string);
     callback act(string, string);
     callback switch-host();
     callback copy-diagnostics(string);
     callback open(string);
     callback close();
+
+    public pure function title(panel: HostDownPanel) -> string {
+        if (panel.back) { return @tr("host_down.status.back_online" => "Back online"); }
+        if (panel.reason == "device_offline") { return @tr("host_down.device_offline.title" => "This device is offline"); }
+        if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.title" => "{0} needs pairing again", panel.host); }
+        if (panel.reason == "wrong_address") { return @tr("host_down.wrong_address.title" => "{0} isn't at this address", panel.host); }
+        if (panel.reason == "server_stopped") { return @tr("host_down.server_stopped.title" => "{0} isn't answering", panel.host); }
+        if (panel.reason == "tailscale_off") { return @tr("host_down.tailscale_off.title" => "{0} isn't answering", panel.host); }
+        if (panel.reason == "host_asleep") { return @tr("host_down.host_asleep.title" => "{0} isn't answering", panel.host); }
+        return @tr("host_down.unknown.title" => "{0} isn't answering", panel.host);
+    }
+    public pure function body(panel: HostDownPanel) -> string {
+        if (panel.reason == "device_offline") { return @tr("host_down.device_offline.body" => "Clarp will reconnect when the network is back."); }
+        if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.body" => "This device is no longer signed in to {0}.", panel.host); }
+        if (panel.reason == "wrong_address") { return @tr("host_down.wrong_address.body" => "The address may have changed."); }
+        if (panel.reason == "server_stopped") { return @tr("host_down.server_stopped.body" => "The computer is on, but Clarp isn't running on it."); }
+        if (panel.reason == "tailscale_off") { return @tr("host_down.tailscale_off.body" => "Tailscale doesn't seem to be connected on this device."); }
+        if (panel.reason == "host_asleep") { return @tr("host_down.host_asleep.body" => "The computer seems to be off or asleep."); }
+        return @tr("host_down.unknown.body" => "{0} isn't responding right now.", panel.host);
+    }
+    public pure function status-line(panel: HostDownPanel) -> string {
+        if (panel.back || panel.status == "back") { return @tr("host_down.status.back_online" => "Back online"); }
+        if (panel.status == "retry") { return @tr("host_down.status.retry_in" => "Trying again {0}", panel.retry-in); }
+        return @tr("host_down.status.reconnecting" => "Reconnecting automatically…");
+    }
+    public pure function last-seen(panel: HostDownPanel) -> string {
+        if (panel.last-seen == "") { return ""; }
+        return @tr("host_down.last_seen" => "Last answered {0}", panel.last-seen);
+    }
+    public pure function action-label(action: string) -> string {
+        if (action == "pair") { return @tr("host_down.action.pair_again" => "Pair again"); }
+        if (action == "address") { return @tr("host_down.action.edit_address" => "Edit address"); }
+        if (action == "tailscale") { return @tr("host_down.action.check_tailscale" => "Check Tailscale"); }
+        return "";
+    }
+    public pure function list-row(row: HostDownRow) -> string {
+        return @tr("host_down.list_row" => "{0} isn't answering · {1}", row.host, row.when);
+    }
 }
 
 component DownIcon inherits Image {
     in property <string> kind;
+    in property <bool> warning;
     source: root.kind == "moon" ? @image-url("icons/down-moon.svg")
         : root.kind == "plug" ? @image-url("icons/down-plug.svg")
         : root.kind == "key" ? @image-url("icons/down-key.svg")
         : root.kind == "signpost" ? @image-url("icons/down-signpost.svg")
         : root.kind == "network" ? @image-url("icons/down-network.svg")
         : @image-url("icons/down-cloud-off.svg");
-    colorize: Palette.muted;
+    colorize: root.warning ? Palette.warning : Palette.muted;
 }
 
 // The quiet status line, with its small dot (never a larger spinner).
@@ -80,6 +132,7 @@ component StatusLine inherits HorizontalLayout {
         font-size: root.size * Look.unit;
         vertical-alignment: center;
         accessible-role: text;
+        accessible-id: "host-down-status";
         accessible-label: root.line;
     }
 }
@@ -88,25 +141,52 @@ component Actions inherits HorizontalLayout {
     in property <HostDownPanel> panel;
     spacing: 6px;
     alignment: start;
-    if !root.panel.back: TextButton {
-        text: "Try again";
+    TextButton {
+        text: @tr("host_down.action.retry" => "Try again");
         accessible-id: "host-down-try:" + root.panel.url;
         clicked => { HostDownBridge.try-again(root.panel.url); }
     }
-    if !root.panel.back && root.panel.action != "": TextButton {
-        text: root.panel.action-label;
+    if root.panel.action != "": TextButton {
+        text: HostDownBridge.action-label(root.panel.action);
         accessible-id: "host-down-action:" + root.panel.action;
         clicked => { HostDownBridge.act(root.panel.url, root.panel.action); }
     }
-    if !root.panel.back && root.panel.switch: TextButton {
-        text: "Switch Host";
+    if root.panel.switch: TextButton {
+        text: @tr("host_down.action.switch_host" => "Switch Host");
         accessible-id: "host-down-switch";
         clicked => { HostDownBridge.switch-host(); }
     }
-    if !root.panel.back: TextButton {
-        text: "Copy diagnostics";
+    TextButton {
+        text: @tr("host_down.copy_diagnostics" => "Copy diagnostics");
         accessible-id: "host-down-copy:" + root.panel.url;
         clicked => { HostDownBridge.copy-diagnostics(root.panel.url); }
+    }
+}
+
+// How the last attempt ended: closed until asked, small selectable monospace.
+component Details inherits VerticalLayout {
+    in property <string> detail;
+    property <bool> open;
+    spacing: 2px;
+    Text {
+        text: (root.open ? "▾ " : "▸ ") + @tr("host_down.details" => "Details");
+        color: Palette.faint;
+        font-size: 11 * Look.unit;
+        accessible-role: button;
+        accessible-id: "host-down-details";
+        accessible-label: @tr("host_down.details" => "Details");
+        accessible-action-default => { root.open = !root.open; }
+        TouchArea { mouse-cursor: pointer; clicked => { root.open = !root.open; } }
+    }
+    if root.open: TextInput {
+        text: root.detail;
+        read-only: true;
+        single-line: false;
+        wrap: word-wrap;
+        font-family: "JetBrains Mono";
+        font-size: 11 * Look.unit;
+        color: Palette.muted;
+        accessible-id: "host-down-detail";
     }
 }
 
@@ -115,20 +195,20 @@ export component HostDownCard inherits Rectangle {
     in property <HostDownPanel> panel;
     border-radius: 4px;
     border-width: 1px;
-    border-color: Palette.border;
+    border-color: root.panel.warning && !root.panel.back ? Palette.warning : Palette.border;
     background: Palette.raised;
     accessible-role: groupbox;
     accessible-id: "host-down-panel";
-    accessible-label: root.panel.title;
+    accessible-label: HostDownBridge.title(root.panel);
     height: column.preferred-height;
     column := VerticalLayout {
         padding: 10px;
         spacing: 4px;
         HorizontalLayout {
             spacing: 8px;
-            DownIcon { kind: root.panel.back ? "" : root.panel.icon; width: 16px; height: 16px; }
+            DownIcon { kind: root.panel.back ? "" : root.panel.icon; warning: root.panel.warning && !root.panel.back; width: 16px; height: 16px; }
             Text {
-                text: root.panel.back ? "Back online" : root.panel.title;
+                text: HostDownBridge.title(root.panel);
                 color: Palette.chrome-text;
                 font-size: 12 * Look.unit;
                 font-weight: 600;
@@ -139,26 +219,27 @@ export component HostDownCard inherits Rectangle {
                 accessible-label: self.text;
             }
             if !root.panel.back: Text {
-                text: root.panel.since;
+                text: HostDownBridge.last-seen(root.panel);
                 color: Palette.faint;
                 font-size: 11 * Look.unit;
                 horizontal-stretch: 0;
                 accessible-role: text;
-                accessible-id: "host-down-since";
+                accessible-id: "host-down-last-seen";
                 accessible-label: self.text;
             }
         }
         if !root.panel.back: Text {
-            text: root.panel.reason;
+            text: HostDownBridge.body(root.panel);
             color: Palette.muted;
             font-size: 12 * Look.unit;
             wrap: word-wrap;
             accessible-role: text;
-            accessible-id: "host-down-reason";
+            accessible-id: "host-down-body";
             accessible-label: self.text;
         }
-        if !root.panel.back: StatusLine { line: root.panel.status; back: root.panel.back; }
+        if !root.panel.back: StatusLine { line: HostDownBridge.status-line(root.panel); back: root.panel.back; }
         if !root.panel.back: Actions { panel: root.panel; }
+        if !root.panel.back && root.panel.detail != "": Details { detail: root.panel.detail; }
     }
 }
 
@@ -169,12 +250,12 @@ export component HostDownPage inherits Rectangle {
     background: Palette.window;
     accessible-role: groupbox;
     accessible-id: "host-down-page";
-    accessible-label: root.panel.title;
+    accessible-label: HostDownBridge.title(root.panel);
     TouchArea { }
     if root.closable: TextButton {
         x: parent.width - self.width - 16px;
         y: 16px;
-        text: "Close";
+        text: @tr("Close");
         clicked => { HostDownBridge.close(); }
     }
     VerticalLayout {
@@ -184,9 +265,9 @@ export component HostDownPage inherits Rectangle {
             VerticalLayout {
                 width: Math.min(520px, root.width - 48px);
                 spacing: 10px;
-                DownIcon { kind: root.panel.back ? "" : root.panel.icon; width: 40px; height: 40px; }
+                DownIcon { kind: root.panel.back ? "" : root.panel.icon; warning: root.panel.warning && !root.panel.back; width: 40px; height: 40px; }
                 Text {
-                    text: root.panel.back ? "Back online" : root.panel.title;
+                    text: HostDownBridge.title(root.panel);
                     color: Palette.chrome-text;
                     font-size: 18 * Look.unit;
                     font-weight: 600;
@@ -195,23 +276,24 @@ export component HostDownPage inherits Rectangle {
                     accessible-id: "host-down-page-title";
                     accessible-label: self.text;
                 }
-                if !root.panel.back: Text {
-                    text: root.panel.since;
+                if !root.panel.back && root.panel.last-seen != "": Text {
+                    text: HostDownBridge.last-seen(root.panel);
                     color: Palette.faint;
                     font-size: 12 * Look.unit;
                 }
                 if !root.panel.back: Text {
-                    text: root.panel.reason;
+                    text: HostDownBridge.body(root.panel);
                     color: Palette.muted;
                     font-size: 14 * Look.unit;
                     wrap: word-wrap;
                     accessible-role: text;
-                    accessible-id: "host-down-page-reason";
+                    accessible-id: "host-down-page-body";
                     accessible-label: self.text;
                 }
-                if !root.panel.back: StatusLine { line: root.panel.status; back: root.panel.back; size: 12; }
+                if !root.panel.back: StatusLine { line: HostDownBridge.status-line(root.panel); back: root.panel.back; size: 12; }
                 Rectangle { height: 6px; }
                 if !root.panel.back: Actions { panel: root.panel; }
+                if !root.panel.back && root.panel.detail != "": Details { detail: root.panel.detail; }
             }
         }
     }
@@ -225,7 +307,7 @@ export component HostDownListRow inherits Rectangle {
     border-radius: 3px;
     accessible-role: button;
     accessible-id: "host-down-row:" + root.item.url;
-    accessible-label: root.item.text;
+    accessible-label: HostDownBridge.list-row(root.item);
     accessible-action-default => { HostDownBridge.open(root.item.url); }
     HorizontalLayout {
         padding-left: 10px;
@@ -241,7 +323,7 @@ export component HostDownListRow inherits Rectangle {
             }
         }
         Text {
-            text: root.item.text;
+            text: HostDownBridge.list-row(root.item);
             color: Palette.muted;
             font-size: 11 * Look.unit;
             overflow: elide;
@@ -259,19 +341,19 @@ export component DeviceOfflineBanner inherits Rectangle {
     border-color: Palette.border;
     accessible-role: text;
     accessible-id: "device-offline";
-    accessible-label: "This device is offline";
+    accessible-label: @tr("host_down.banner" => "This device is offline");
     HorizontalLayout {
         alignment: center;
         spacing: 6px;
         VerticalLayout { alignment: center; DownIcon { kind: "cloud-off"; width: 14px; height: 14px; } }
-        Text { text: "This device is offline"; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
+        Text { text: @tr("host_down.banner" => "This device is offline"); color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
 }
 
 // "Diagnostics copied", for a moment.
 export component HostDownToast inherits Rectangle {
-    in property <string> message;
-    visible: root.message != "";
+    in property <bool> shown;
+    visible: root.shown;
     height: 28px;
     width: toast-text.preferred-width + 24px;
     border-radius: 4px;
@@ -280,6 +362,6 @@ export component HostDownToast inherits Rectangle {
     border-color: Palette.border;
     accessible-role: text;
     accessible-id: "host-down-toast";
-    accessible-label: root.message;
-    toast-text := Text { text: root.message; color: Palette.chrome-text; font-size: 12 * Look.unit; }
+    accessible-label: toast-text.text;
+    toast-text := Text { text: @tr("host_down.copied" => "Diagnostics copied"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
 }

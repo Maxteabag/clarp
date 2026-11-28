@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use clarp_core::host_down;
 use clarp_engine::Change;
-use clarp_engine::host_down::HostDownView;
+use clarp_engine::host_down::{HostDownStatus, HostDownView};
 use slint::{ComponentHandle, ModelRc, VecModel};
 
 use crate::{App, AppWindow, HostDownBridge, HostDownPanel, HostDownRow};
@@ -23,24 +23,49 @@ thread_local! {
 /// this device and the Host are connected.
 const TAILSCALE_PAGE: &str = "https://login.tailscale.com/admin/machines";
 
-fn since(view: &HostDownView) -> String {
-    host_down::since_time(view.since_ms, &chrono::Local::now())
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
-/// The panel's fields for the window.
+/// When it last answered, relative ("2 hours ago"); "" when never known.
+fn last_seen(view: &HostDownView) -> String {
+    view.last_ok_ms.map(|at| host_down::ago(now_ms() - at)).unwrap_or_default()
+}
+
+/// The panel's fields for the window: codes and times; the words are
+/// host_down.slint's.
 pub fn panel(view: &HostDownView) -> HostDownPanel {
+    let (status, retry_in) = match view.status {
+        HostDownStatus::Reconnecting => ("reconnecting", String::new()),
+        HostDownStatus::RetryIn(left) => ("retry", host_down::within(left)),
+        HostDownStatus::BackOnline => ("back", String::new()),
+    };
     HostDownPanel {
         url: view.url.clone().into(),
-        title: view.title().into(),
-        reason: view.sentence().into(),
-        since: host_down::since_line(&since(view)).into(),
-        status: view.status.clone().into(),
+        host: view.label.clone().into(),
+        reason: view.reason.id().into(),
+        last_seen: last_seen(view).into(),
+        status: status.into(),
+        retry_in: retry_in.into(),
         icon: view.reason.icon().into(),
         action: view.action.map_or("", |a| a.id()).into(),
-        action_label: view.action.map_or("", |a| a.label()).into(),
         switch: view.switch,
         back: view.back_online,
+        warning: view.reason.warning(),
+        detail: view.detail.clone().into(),
     }
+}
+
+/// A chat's pane (mounted from `panes.rs`): the panel under the header
+/// while its Host does not answer, its saved messages readable, sending
+/// off with the read-only note.
+pub fn pane(engine: &clarp_engine::Engine, view: &mut crate::PaneView, session: &str) {
+    let down = if session.is_empty() || view.pair { None } else { engine.host_down_for_session(session) };
+    let read_only = down.as_ref().is_some_and(|d| !d.back_online);
+    view.down_shown = down.is_some();
+    view.read_only_host = down.as_ref().filter(|_| read_only).map(|d| d.label.clone()).unwrap_or_default().into();
+    view.can_send = !read_only && engine.can_send(session);
+    view.down = down.as_ref().map(panel).unwrap_or_default();
 }
 
 /// The platform and build the diagnostics name.
@@ -59,7 +84,11 @@ pub fn apply(app: &App, window: &AppWindow, changes: &[Change]) {
     let rows: Vec<HostDownRow> = down
         .iter()
         .filter(|view| !view.back_online)
-        .map(|view| HostDownRow { url: view.url.clone().into(), text: host_down::list_row(&view.label, &since(view)).into() })
+        .map(|view| HostDownRow {
+            url: view.url.clone().into(),
+            host: view.label.clone().into(),
+            when: host_down::ago(now_ms() - view.last_ok_ms.unwrap_or(view.since_ms)).into(),
+        })
         .collect();
     bridge.set_rows(ModelRc::new(VecModel::from(rows)));
     bridge.set_device_offline(engine.device_offline());
@@ -116,12 +145,13 @@ pub fn window_focused(app: &App) {
     }
 }
 
-fn show_toast(window: &AppWindow, text: &str) {
-    window.global::<HostDownBridge>().set_toast(text.into());
+/// "Diagnostics copied", for two seconds.
+fn show_copied(window: &AppWindow) {
+    window.global::<HostDownBridge>().set_copied(true);
     let weak = window.as_weak();
     slint::Timer::single_shot(Duration::from_secs(2), move || {
         if let Some(window) = weak.upgrade() {
-            window.global::<HostDownBridge>().set_toast("".into());
+            window.global::<HostDownBridge>().set_copied(false);
         }
     });
 }
@@ -156,7 +186,7 @@ pub fn wire(window: &AppWindow) {
         let (Some(app), Some(window)) = (crate::app(), crate::window()) else { return };
         let text = app.engine.borrow().host_diagnostics(&url, platform(), env!("CARGO_PKG_VERSION"), option_env!("CLARP_BUILD").unwrap_or("dev"));
         match crate::platform::clipboard::copy(&text) {
-            Ok(()) => show_toast(&window, host_down::DIAGNOSTICS_COPIED),
+            Ok(()) => show_copied(&window),
             Err(error) => eprintln!("clarp-slint: could not copy the diagnostics: {error}"),
         }
     });

@@ -56,28 +56,35 @@ pub(crate) struct HostDown {
     fingerprint: Option<String>,
 }
 
-/// What a Host-down panel shows.
+/// The panel's quiet line (`host_down.status.*`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostDownStatus {
+    /// A probe is out, or the Host answered and is connecting again.
+    Reconnecting,
+    /// The next probe is this far off.
+    RetryIn(Duration),
+    BackOnline,
+}
+
+/// What a Host-down panel shows: codes, times and the Host's label; the
+/// words are the app's (`host_down.*`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HostDownView {
     pub url: String,
     pub label: String,
     pub reason: Reason,
+    /// First failure after the last answer (ms since the epoch).
     pub since_ms: i64,
-    /// `Reconnecting automatically…`, `Trying again in 5 s` or `Back online`.
-    pub status: String,
+    /// When it last answered, if ever known (kept across restarts).
+    pub last_ok_ms: Option<i64>,
+    pub status: HostDownStatus,
     pub back_online: bool,
     pub action: Option<Action>,
     /// Another Host is configured: Switch Host is offered.
     pub switch: bool,
-}
-
-impl HostDownView {
-    pub fn title(&self) -> String {
-        host_down::title(&self.label)
-    }
-    pub fn sentence(&self) -> String {
-        self.reason.sentence(&self.label)
-    }
+    /// How the last attempt ended ("connection refused"), for the closed
+    /// Details disclosure; never the message itself.
+    pub detail: String,
 }
 
 fn now_ms() -> i64 {
@@ -302,15 +309,15 @@ impl Engine {
         let watch = self.host_down.watches.iter().find(|w| w.url == url)?;
         let now = Instant::now();
         let back = watch.back_until.is_some_and(|until| until > now);
-        let (reason, since_ms, status) = match (&watch.down, back) {
-            (_, true) => (Reason::Unknown, watch.last_ok_ms.unwrap_or_default(), host_down::BACK_ONLINE.to_owned()),
+        let (reason, since_ms, status, detail) = match (&watch.down, back) {
+            (_, true) => (Reason::Unknown, watch.last_ok_ms.unwrap_or_default(), HostDownStatus::BackOnline, String::new()),
             (Some(down), false) => {
                 let status = match down.next_at {
-                    _ if down.in_flight || down.answered || down.attempts == 0 => host_down::RECONNECTING.to_owned(),
-                    Some(at) => host_down::trying_again_in(at.saturating_duration_since(now)),
-                    None => host_down::RECONNECTING.to_owned(),
+                    _ if down.in_flight || down.answered || down.attempts == 0 => HostDownStatus::Reconnecting,
+                    Some(at) => HostDownStatus::RetryIn(at.saturating_duration_since(now)),
+                    None => HostDownStatus::Reconnecting,
                 };
-                (down.reason, down.since_ms, status)
+                (down.reason, down.since_ms, status, down.last.as_ref().map(Attempt::describe).unwrap_or_default())
             }
             (None, false) => return None,
         };
@@ -319,10 +326,12 @@ impl Engine {
             label: self.watched_label(url),
             reason,
             since_ms,
+            last_ok_ms: watch.last_ok_ms,
             status,
             back_online: back,
             action: reason.action(),
             switch: self.saved_host_count() > 1,
+            detail,
         })
     }
 

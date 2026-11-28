@@ -11,6 +11,8 @@ use serde_json::json;
 use slint::{ComponentHandle, Model};
 
 use super::{Stage, app_now, check, control, run_stages, shot, view};
+use clarp_engine::host_down::HostDownStatus;
+
 use crate::HostDownBridge;
 
 fn bridge(window: &crate::AppWindow) -> HostDownBridge<'_> {
@@ -35,17 +37,19 @@ pub fn host_down_check(out: String) {
         })),
         ("chat panel", Box::new(move |app, window, _| {
             let down = app.engine.borrow().host_down_for_session("rachel");
-            let Some(down) = down.filter(|d| !d.back_online && d.status != "Reconnecting automatically…") else { return false };
+            let Some(down) = down.filter(|d| !d.back_online && matches!(d.status, HostDownStatus::RetryIn(_))) else { return false };
             let pane = view();
-            check(pane.down_shown && pane.down.title == down.title().as_str(), &format!("the chat shows the panel: {:?}", pane.down.title));
-            check(pane.down.since.starts_with("Since "), &format!("since when: {:?}", pane.down.since));
-            check(pane.down.status.starts_with("Trying again in "), &format!("the quiet line: {:?}", pane.down.status));
+            check(pane.down_shown && pane.down.host == "Fake Host" && pane.down.reason == down.reason.id(), &format!("the chat shows the panel: {:?} {:?}", pane.down.host, pane.down.reason));
+            check(!pane.down.warning, "info grey, not a warning");
+            check(pane.down.last_seen == "just now", &format!("when it last answered: {:?}", pane.down.last_seen));
+            check(pane.down.status == "retry" && pane.down.retry_in.starts_with("in "), &format!("the quiet line: {:?} {:?}", pane.down.status, pane.down.retry_in));
+            check(!pane.down.detail.is_empty(), "the last attempt sits behind Details");
             check(!pane.can_send, "sending waits for the Host");
-            check(pane.read_only_note.ends_with("You can send again when Fake Host is back."), &format!("the read-only note: {:?}", pane.read_only_note));
+            check(pane.read_only_host == "Fake Host", &format!("the read-only note names it: {:?}", pane.read_only_host));
             check(app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty()), "the saved messages stay");
             let rows = bridge(window).get_rows();
-            check(rows.row_count() == 1 && rows.row_data(0).is_some_and(|r| r.text.starts_with("Fake Host isn't answering · since ")),
-                &format!("one quiet list row: {:?}", rows.iter().map(|r| r.text.to_string()).collect::<Vec<_>>()));
+            check(rows.row_count() == 1 && rows.row_data(0).is_some_and(|r| r.host == "Fake Host" && r.when == "just now"),
+                &format!("one quiet list row: {:?}", rows.iter().map(|r| format!("{} · {}", r.host, r.when)).collect::<Vec<_>>()));
             check(window.get_error().is_empty(), &format!("no raw error over the chats: {:?}", window.get_error()));
             shot(&o1, "host-down-01-chat-panel");
             bridge(window).invoke_copy_diagnostics(down.url.clone().into());
@@ -54,7 +58,7 @@ pub fn host_down_check(out: String) {
             for private in ["127.0.0.1", "Fake Host", "fake-host", "probe-token", "rachel", "http"] {
                 check(!clipboard.contains(private), &format!("the diagnostics leave out {private}: {clipboard}"));
             }
-            check(bridge(window).get_toast() == "Diagnostics copied", "and say so");
+            check(bridge(window).get_copied(), "and say so");
             true
         })),
         ("copied", Box::new(move |_app, _window, elapsed| {
@@ -75,7 +79,7 @@ pub fn host_down_check(out: String) {
             if !back.is_some_and(|b| b.back_online) {
                 return false;
             }
-            check(view().down.status == "Back online", &format!("the panel says so: {:?}", view().down.status));
+            check(view().down.back && view().down.status == "back", &format!("the panel says so: {:?}", view().down.status));
             check(view().can_send, "sending again");
             shot(&o3, "host-down-03-back-online");
             true
@@ -91,7 +95,7 @@ pub fn host_down_check(out: String) {
         })),
         ("full page", Box::new(move |app, window, _| {
             let page = bridge(window).get_page();
-            if !bridge(window).get_full_page() || page.reason != "The computer is on, but Clarp isn't running on it." {
+            if !bridge(window).get_full_page() || page.reason != "server_stopped" {
                 return false;
             }
             check(page.icon == "plug", &format!("its icon: {:?}", page.icon));

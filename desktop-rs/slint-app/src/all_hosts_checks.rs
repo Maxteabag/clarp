@@ -295,15 +295,15 @@ pub fn all_hosts_check(out: String) {
         ("unreachable", Box::new(move |app, window, elapsed| {
             use slint::{ComponentHandle, Model};
             let rows = window.global::<crate::HostDownBridge>().get_rows();
-            let row = rows.iter().find(|row| row.text.starts_with("Peer Host isn't answering · since "));
+            let row = rows.iter().find(|row| row.host == "Peer Host" && !row.when.is_empty());
             if row.is_none() || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            check(rows.row_count() == 1, &format!("one row, for the peer alone: {:?}", rows.iter().map(|r| r.text.to_string()).collect::<Vec<_>>()));
+            check(rows.row_count() == 1, &format!("one row, for the peer alone: {:?}", rows.iter().map(|r| r.host.to_string()).collect::<Vec<_>>()));
             check(!window.get_roster_note().contains("unreachable"), "the row replaces the bare note");
             let engine = app.engine.borrow();
             let panel = engine.host_down_for_session(NOVA);
-            check(panel.as_ref().is_some_and(|p| p.title() == "Peer Host isn't answering"), &format!("the peer's chat has its panel: {panel:?}"));
+            check(panel.as_ref().is_some_and(|p| p.label == "Peer Host" && !p.back_online), &format!("the peer's chat has its panel: {panel:?}"));
             check(engine.host_down_for_session("rachel").is_none(), "the primary's chats have none");
             check(!engine.host_answers_for_session(NOVA), "the peer's chat is read-only");
             check(engine.host_answers_for_session("rachel"), "the primary's chats still send");
@@ -330,7 +330,7 @@ pub fn all_hosts_check(out: String) {
                 return false;
             }
             let back = app.engine.borrow().host_down_for_session(NOVA);
-            if !back.as_ref().is_some_and(|view| view.back_online && view.status == "Back online") {
+            if !back.as_ref().is_some_and(|view| view.back_online && view.status == clarp_engine::host_down::HostDownStatus::BackOnline) {
                 return false;
             }
             check(app.engine.borrow().host_answers_for_session(NOVA), "the peer's chat sends again");
