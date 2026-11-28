@@ -280,7 +280,7 @@ impl Forking {
         std::fs::create_dir_all(xdg.join("clarp-host")).unwrap();
         std::fs::write(
             xdg.join("clarp-host/config.toml"),
-            "[conversation_forks]\nagents = [\"oak\"]\n",
+            "[conversation_forks]\nagents = [\"oak\", \"legacy\"]\nclean_agents = [\"oak\"]\n",
         )
         .unwrap();
         let world = [
@@ -375,6 +375,14 @@ fn muse_conversation_uses_fresh_exec_with_work_tools_disabled() {
 fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     let forking = Forking::new_on(name, backend, program_env, FRESH);
     let host = &forking.host;
+    host.post(
+        "/agents",
+        json!({"name":"Legacy","session":"legacy","backend":backend}),
+    );
+    assert_eq!(row(host, "oak")["clean_conversation"], true);
+    let legacy = row(host, "legacy");
+    assert_eq!(legacy["conversation_fork"], true);
+    assert_ne!(legacy["clean_conversation"], true);
     host.send("oak", "Owner work marker", "work");
     waited(host, "the separate work turn", || {
         forking.at("main-running").exists()
@@ -384,6 +392,7 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     assert!(prompt.contains("clarp-admin tell-user --from oak"));
     let main = live(host, "oak");
     assert_ne!(main["conversation_turn"], true);
+    assert_ne!(main["turn"]["conversation_turn"], true);
     let main_id = main["turn"]["turn_id"].clone();
     assert!(main_id.is_string());
     let heard = follow(host, "/events?live=oak");
@@ -403,11 +412,29 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     let shown = live(host, "oak");
     assert_eq!(shown["conversation_turn"], true, "{shown}");
     assert_eq!(shown["main_turn"]["turn_id"], main_id, "{shown}");
-    waited(host, "a conversation-marked live event", || {
+    assert_ne!(shown["main_turn"]["conversation_turn"], true, "{shown}");
+    assert_eq!(shown["turn"]["conversation_turn"], true, "{shown}");
+    let side_id = shown["turn"]["turn_id"].clone();
+    assert!(side_id.is_string());
+    assert_ne!(side_id, main_id);
+    let items = shown["items"].as_array().unwrap();
+    assert!(!items.is_empty(), "{shown}");
+    assert!(
+        items.iter().all(|item| item["turn_id"] == side_id),
+        "{shown}"
+    );
+    waited(host, "a side upsert with a matched item identity", || {
         heard.lock().unwrap().iter().any(|event| {
             event["type"] == "live"
                 && event["session"] == "oak"
                 && event["conversation_turn"] == true
+                && event["ops"].as_array().is_some_and(|ops| {
+                    ops.iter().any(|op| {
+                        op["op"] == "upsert"
+                            && op["turn_id"] == side_id
+                            && op["item"]["turn_id"] == side_id
+                    })
+                })
         })
     });
     assert!(!forking.at("main-stopped").exists());
@@ -434,8 +461,33 @@ fn fresh_conversation(name: &str, backend: &str, program_env: &str) {
     );
     std::fs::write(forking.at("finish-side"), "").unwrap();
     waited(host, "the work live again", || {
-        live(host, "oak")["turn"]["turn_id"] == main_id
+        let own = live(host, "oak");
+        own["turn"]["turn_id"] == main_id && own["turn"]["conversation_turn"] != true
     });
+    waited(host, "the marked side turn ending", || {
+        live_ops(&heard, "oak").iter().any(|op| {
+            op["op"] == "turn"
+                && op["turn"]["turn_id"] == side_id
+                && op["turn"]["conversation_turn"] == true
+                && op["turn"]["status"] == "completed"
+        })
+    });
+    assert!(
+        heard
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|event| {
+                event["type"] == "live"
+                    && event["session"] == "oak"
+                    && event["conversation_turn"] == true
+            })
+            .flat_map(|event| event["ops"].as_array().into_iter().flatten())
+            .all(|op| {
+                !matches!(op["op"].as_str(), Some("upsert" | "append" | "done"))
+                    || op["turn_id"] == side_id
+            })
+    );
     std::fs::write(forking.at("finish-main"), "").unwrap();
     waited(host, "work finishes without stop", || {
         forking.at("main-finished").exists() && row(host, "oak")["busy"] == false

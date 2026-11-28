@@ -1854,7 +1854,7 @@ pub fn log_response(
     let conversation = conversation_id(record, status);
     let file = (record.backend == "claude" && !conversation.is_empty())
         .then(|| format!("{conversation}.jsonl"));
-    let clean = crate::conversation_forks::Named::read().allows(
+    let clean = crate::conversation_forks::Named::read().projects(
         &record.backend,
         &record.agent_id,
         &record.session,

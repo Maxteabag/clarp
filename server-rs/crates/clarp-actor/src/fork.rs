@@ -222,9 +222,25 @@ struct Shown {
 }
 
 impl Shown {
+    fn mark_turn(turn: &mut serde_json::Value, turn_id: &str) {
+        if turn["turn_id"].as_str() == Some(turn_id) {
+            turn["conversation_turn"] = json!(true);
+        }
+    }
+
     fn give_events(&mut self, into: &mut Vec<serde_json::Value>) {
+        let turn_id = self.name.as_str();
         for event in &mut self.events {
             event["conversation_turn"] = json!(true);
+            for op in event["ops"].as_array_mut().into_iter().flatten() {
+                match op["op"].as_str() {
+                    Some("turn") => Self::mark_turn(&mut op["turn"], turn_id),
+                    // These operations come from this fork's own hub. The patch also
+                    // names the turn, so a client can check it before changing a row.
+                    Some("upsert" | "append" | "done") => op["turn_id"] = json!(turn_id),
+                    _ => {}
+                }
+            }
         }
         into.append(&mut self.events);
     }
@@ -1314,6 +1330,7 @@ impl Actor {
         let shown = self.fork.shown.as_mut()?;
         let (mut snapshot, events) = shown.hub.snapshot(now_ms)?;
         shown.events.extend(events);
+        Shown::mark_turn(&mut snapshot["turn"], &shown.name);
         snapshot[MAIN_TURN_OP] = main.unwrap_or(serde_json::Value::Null);
         snapshot["conversation_turn"] = json!(true);
         Some(snapshot)

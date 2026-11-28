@@ -709,6 +709,21 @@ Rules:
     If the agent's own turn ends in the moment between the fork's first action and that read
     (or while the Host is away), the message is given back and answered once by the agent's
     own session; the fork's first action (a relay, a note) may then have gone out as well.
+- **Clean Conversation (feature `clean_conversation`, Rust Host contract 217).** The owner
+  names an agent in both `agents` and `clean_agents` under `[conversation_forks]`. Key its
+  `clean_conversation: true` roster flag to `server_id` and `agent_id` on the active Host.
+  The optional feature in `/server-info` advertises support. The roster flag opts the
+  specific agent in.
+  - Each `/log` row, including delta and page reads, has `conversation_text` with the
+    text for Conversation view or `null` if the row has no chat text. The row keeps its
+    existing `id` and `revision`. An explicit `tell-user` note has its own row. Work
+    speech appears on the committed row's projection. Session view uses the full row.
+    On activation, refresh the current log snapshot to classify older cached rows.
+    A missing field in a stale cache is unclassified and has no Conversation text.
+  - `/live` and SSE `turn` ops carry `conversation_turn: true` inside the `turn` object
+    for a side conversation turn. Render a live item in Conversation view only if its
+    `turn_id` matches that marked turn. Side `upsert`, `append` and `done` ops also
+    carry `turn_id` on the op. `main_turn` and the envelope flag supply no item authority.
 - **`missing: true`** with an empty `turns` means the agent has no
   conversation yet. Render it as empty, not as an error.
 - **Where a turn's working line goes (feature `live_read_rows`, Rust Host contract 185).** After

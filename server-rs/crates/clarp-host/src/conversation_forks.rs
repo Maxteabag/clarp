@@ -4,7 +4,8 @@
 //!
 //! ```toml
 //! [conversation_forks]
-//! agents = ["hazel-74f6"]
+//! agents = ["clean-conversation-pilot"]
+//! clean_agents = ["clean-conversation-pilot"]
 //! ```
 
 use clarp_kernel::chat_view::View;
@@ -22,18 +23,25 @@ impl Named {
     /// Whether this agent may answer beside its work: named by its session or its id. What
     /// the apps are told per agent (`conversation_fork` in the snapshot).
     pub(crate) fn allows(&self, backend: &str, agent_id: &str, session: &str) -> bool {
-        clarp_backend::has_conversation(backend) && names(self.0.as_ref(), agent_id, session)
+        clarp_backend::has_conversation(backend)
+            && names(self.0.as_ref(), "agents", agent_id, session)
+    }
+
+    /// Whether the owner enabled the clean display policy for this conversation agent.
+    pub(crate) fn projects(&self, backend: &str, agent_id: &str, session: &str) -> bool {
+        self.allows(backend, agent_id, session)
+            && names(self.0.as_ref(), "clean_agents", agent_id, session)
     }
 }
 
 /// Whether the setting names this agent, by its session or its id.
 pub(crate) fn named(agent_id: &str, session: &str) -> bool {
-    names(Named::read().0.as_ref(), agent_id, session)
+    names(Named::read().0.as_ref(), "agents", agent_id, session)
 }
 
-fn names(section: Option<&toml::Value>, agent_id: &str, session: &str) -> bool {
+fn names(section: Option<&toml::Value>, list: &str, agent_id: &str, session: &str) -> bool {
     section
-        .and_then(|section| section.get("agents"))
+        .and_then(|section| section.get(list))
         .and_then(toml::Value::as_array)
         .into_iter()
         .flatten()
@@ -95,15 +103,18 @@ mod tests {
     #[test]
     fn only_the_agents_the_setting_names_may_fork() {
         let set = section("[conversation_forks]\nagents = [\"hazel-74f6\", \" a-2 \"]\n");
-        assert!(names(Some(&set), "a-1", "hazel-74f6"));
-        assert!(names(Some(&set), "a-2", "other"));
-        assert!(!names(Some(&set), "a-3", "nori-5aac"));
-        assert!(!names(None, "a-1", "hazel-74f6"), "no setting: off");
+        assert!(names(Some(&set), "agents", "a-1", "hazel-74f6"));
+        assert!(names(Some(&set), "agents", "a-2", "other"));
+        assert!(!names(Some(&set), "agents", "a-3", "nori-5aac"));
+        assert!(
+            !names(None, "agents", "a-1", "hazel-74f6"),
+            "no setting: off"
+        );
         let empty = section("[conversation_forks]\nagents = [\"\"]\n");
-        assert!(!names(Some(&empty), "", ""));
+        assert!(!names(Some(&empty), "agents", "", ""));
         let wrong = section("[conversation_forks]\nagents = \"hazel-74f6\"\n");
         assert!(
-            !names(Some(&wrong), "a-1", "hazel-74f6"),
+            !names(Some(&wrong), "agents", "a-1", "hazel-74f6"),
             "a list or nothing"
         );
     }

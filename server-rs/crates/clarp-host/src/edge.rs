@@ -1992,6 +1992,13 @@ pub(crate) fn agent_row(member: &Member, context: &AgentRowContext<'_>) -> Value
         &member.record.agent_id,
         &member.record.session
     ));
+    if forks.projects(
+        &member.record.backend,
+        &member.record.agent_id,
+        &member.record.session,
+    ) {
+        row["clean_conversation"] = json!(true);
+    }
     row["chat_view"] = json!(crate::chat_view::preference(
         directory,
         &member.record.agent_id

@@ -216,21 +216,23 @@ running turn. Decision cards and artifacts are shown as always.
 
 The user can read an agent's chat in Conversation view (Host feature `chat_view`,
 Rust Host contract 145; the Host adds one line to each turn's prompt when your chat is
-in it). There they see their own messages, your notes, cards, forms and
-artifacts, and the final reply of each turn once the turn has ended. Your text in
+in it). In the original Conversation view they see their own messages, your notes, cards,
+forms and artifacts, and the final reply of each turn once the turn has ended. Your text in
 between and your tool work are folded into "Show work" and are not read. To be
 heard mid-turn, post: `clarp-admin tell-user --from "$ME" --text "..."` (a note,
 shown at once and notified). Your final reply always reaches them, so end every
 turn with one that stands on its own. In Session view, the default, everything
 is shown as before.
 
-On a Rust Host with `clean_conversation` (contract 217) and an agent named for
-`conversation_fork`, supporting clients show the owner's messages, deliberate
-notes and `<speak>` blocks, and the conversation session's answers. A work turn
-can address the owner with a note or a `<speak>` block. Its ordinary text is in
-Session view. While work runs, plain text in Conversation can go to a separate
-session on the same backend. The work session receives what was said as a note
-before its next turn.
+On a Rust Host with `clean_conversation` (contract 217), supporting clients use
+the agent's `clean_conversation` flag in `/agents/snapshot`. It is enabled for
+agents the owner names in both `agents` and `clean_agents` under
+`[conversation_forks]`. Conversation view shows the owner's messages, deliberate
+notes and committed `<speak>` blocks, and the conversation session's answers.
+A work turn can address the owner with a note or a `<speak>` block. Its ordinary
+text is in Session view. While work runs, plain text in Conversation can go to a
+separate session on the same backend. The work session receives what was said
+as a note before its next turn.
 
 On a Rust Host advertising `text_turn_ack` (contract 214), the owner can
 set the optional text-turn acknowledgment in a supporting client. It starts
