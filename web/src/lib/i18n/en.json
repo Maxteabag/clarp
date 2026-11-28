@@ -69,6 +69,8 @@
   "live.thinking_titled": "Thinking: {title}",
   "live.thought_for": "Thought for {time}",
   "live.thought_for_titled": "Thought for {time}: {title}",
+  "live.thought": "Thought",
+  "live.thought_titled": "Thought: {title}",
   "live.exploring": "Exploring",
   "live.explored": "Explored",
   "live.explored_parts": "Explored {parts}",

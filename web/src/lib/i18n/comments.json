@@ -69,6 +69,8 @@
   "live.thinking_titled": "Chat, live turn: one-line row while the model reasons, with the model's own short title of what it is thinking about. {title} is the model's words, never translated.",
   "live.thought_for": "Chat, live turn: one-line row after the model finished reasoning, how long it took. {time} is a duration from the formatter, like \"4s\" or \"1m 5s\".",
   "live.thought_for_titled": "Chat, live turn: as live.thought_for, followed by the model's own short title of what it thought about. {time} a duration like \"4s\"; {title} is the model's words, never translated.",
+  "live.thought": "Chat, live turn: label of a finished reasoning row that lasted under a second (or has no known length). Past tense of 'think' (the model thought), not a noun; no duration shown.",
+  "live.thought_titled": "Chat, live turn: the same finished reasoning row with its headline. {title} is the model's own headline for the thought, in its own words; keep it after the label.",
   "live.exploring": "Chat, live turn: one row grouping several reads, searches and listings while they run (present participle: the agent is looking around the code).",
   "live.explored": "Chat, live turn: one row grouping finished reads, searches and listings, when there is nothing to count (past tense).",
   "live.explored_parts": "Chat, live turn: one row grouping finished reads, searches and listings. {parts} is a list like \"3 files, 2 searches\" made of live.explored.* joined by live.list_separator.",

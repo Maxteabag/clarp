@@ -780,6 +780,9 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
                 _ if !is_terminal(&status) => "Thinking".to_owned(),
                 // No length, or under a second: no made-up "0s" (CL-071).
                 Some(ms) if ms >= 1000 => format!("Thought for {}", worked(ms)),
+                // i18n: chat, live turn: label of a finished reasoning row under a second
+                // (or of unknown length); past tense of "think", not a noun. With a headline
+                // the row reads "Thought: <headline>" (joined below).
                 _ => "Thought".to_owned(),
             };
             entry.title = if title.is_empty() { head } else { format!("{head}: {title}") };
