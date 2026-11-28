@@ -1,12 +1,12 @@
 {
   "settings.language.title": "Settings: label of the Language picker.",
   "settings.language.system": "Settings > Language: the first option, follow the device's language.",
-  "chat.code.copy": "Chat: icon button above a code block that copies the code.",
-  "chat.table.copy": "Full screen table: icon button that copies the table as Markdown text.",
-  "chat.copied": "Chat: label the copy icon takes for a moment after copying (shown as a checkmark).",
-  "chat.table.expand": "Chat: icon button above a wide table that opens it full screen.",
-  "viewer.close": "Full screen code or table view: icon button that closes it.",
-  "viewer.wrap": "Full screen code view: toggle icon, long lines wrap or scroll sideways.",
-  "viewer.code": "Full screen code view: its name for screen readers when the code names no language.",
-  "viewer.table": "Full screen table view: its name for screen readers."
+  "chat.code.copy": "Chat, code block head line: accessibility label and tooltip of the copy icon button (verb, command: copy the code).",
+  "chat.table.copy": "Full screen table view, top bar: accessibility label and tooltip of the copy icon button (verb, command: copy the table as Markdown text).",
+  "chat.copied": "Chat and full screen views: accessibility label the copy icon takes for 1.5 s after copying, shown as a checkmark (status, past participle: the text was copied).",
+  "chat.table.expand": "Chat, above a wide table: accessibility label and tooltip of the expand icon button that opens the table full screen (action; noun phrase is fine).",
+  "viewer.close": "Full screen code or table view, top bar: accessibility label and tooltip of the close icon button (verb, command).",
+  "viewer.wrap": "Full screen code view, top bar: accessibility label and tooltip of a toggle icon; on, long lines wrap; off, they scroll sideways (verb phrase, command).",
+  "viewer.code": "Full screen code view: its name for screen readers when the code block names no language (noun: program code).",
+  "viewer.table": "Full screen table view: its name for screen readers (noun: a data table)."
 }
