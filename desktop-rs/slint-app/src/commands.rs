@@ -232,22 +232,28 @@ pub fn show_hints(app: &App, window: &AppWindow) {
     }
     if state == "keymap" {
         hints = crate::keymap_view::hints(app, window).into_iter().map(|(keys, label)| Hint { keys: keys.into(), label: label.into() }).collect();
+        actions.clear();
     }
     if state == "processes" {
         hints = crate::processes_view::hints();
+        actions.clear();
     }
     if state == "publications" {
         hints = crate::publications_view::hints(window);
+        actions.clear();
     }
     if state == "fonts" {
         hints = crate::font_view::hints();
+        actions.clear();
     }
     if state == "profile" {
         hints = crate::profile_view::hints(app, window);
+        actions.clear();
     }
     if state == "hints" && crate::link_hints::count() == 0 {
         // i18n: shortcut bar while link numbers show, when there is no link on screen to number
         hints = vec![Hint { keys: "".into(), label: tr!("No links on screen").into() }];
+        actions.clear();
     }
     // Vim mode's own keys lead; Space is its leader, the switcher two of them.
     if vim_on(app) {
