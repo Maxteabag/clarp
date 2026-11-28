@@ -114,7 +114,7 @@ weekday within a week, else with the date. Backend and model names are never tra
 | `error.action.copy_details` | Copy diagnostics | |
 | `error.details` | Details | |
 | `error.repeat_count` | {count}× (plural) | count |
-| `error.copied` | Copied | |
+| `error.copied` | Diagnostics copied | |
 | `error.retry_scheduled` | Will try again at {time} | time |
 | `error.retry_sent` | Sent again | |
 | `error.action_failed` | That didn't work. Try again. | |
