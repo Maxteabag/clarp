@@ -109,4 +109,26 @@ describe('turn errors', () => {
     expect(errorPlanFor('tt-codex').actionable).toBeNull();
     delete conversations.bySession['tt-codex'];
   });
+
+  it('a language without its own entries says the Host\'s words', () => {
+    const error = row('marker-u3').error;
+    expect(errorSentence(error, Date.now(), 'nb')).toBe(error.text.nb);
+    expect(errorSentence(error, Date.now(), 'fr')).toBe(error.text.en);
+    expect(actionLabel(error.actions[0], Date.now(), 'nb')).toBe(error.actions[0].label.nb);
+  });
+
+  it('skips automated rows as failures and as replies', () => {
+    const extra = [{ ...row('marker-u3'), id: 'auto-1', automated: true }, { id: 'auto-2', role: 'assistant', text: 'ok', is_automated: true }];
+    const plan = planTurnErrors([...rows, ...extra]);
+    expect(plan.counts.get('marker-u3')).toBe(3);
+    expect(plan.hidden.has('auto-1')).toBe(false);
+    expect(plan.actionable).toBe('marker-u6');
+  });
+
+  it('a retry_at without its own time takes the reset', () => {
+    const error = { message_id: 'u1', resets_at_ms: 5000, actions: [{ id: 'retry_at', label: { en: 'Later' } }] };
+    const [action] = errorActions(error, 1000);
+    expect(action.at_ms).toBe(5000);
+    expect(actionLabel(action, 1000).startsWith('Try again at ')).toBe(true);
+  });
 });

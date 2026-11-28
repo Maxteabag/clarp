@@ -7,7 +7,7 @@
   // provider's own words.
   import { errorActions, isRetry, retryBody } from '@core/live-present.js';
   import { t } from '../../stores/i18n.svelte.js';
-  import { actionLabel, errorSentence, hostWords, sayError } from './turn-error-text.js';
+  import { actionLabel, errorSentence, errorTime, hostWords } from './turn-error-text.js';
 
   let { message, detail = '', explained = null, count = 1, actionable = false, session = '' } = $props();
 
@@ -52,7 +52,8 @@
       if (!r.ok || d.ok !== true) throw new Error(d.error || `HTTP ${r.status}`);
       states = { ...states, [action.id]: 'done' };
       noteFailed = false;
-      note = (d.status === 'scheduled' && sayError('error.retry_scheduled', { time_ms: body.at_ms })) || t('error.retry_sent');
+      // The Host sends no words for these notes: the catalog's, English where it has none.
+      note = d.status === 'scheduled' && body.at_ms ? t('error.retry_scheduled', { time: errorTime(body.at_ms) }) : t('error.retry_sent');
     } catch (e) {
       console.warn('turn-retry refused:', e.message);
       states = { ...states, [action.id]: undefined };

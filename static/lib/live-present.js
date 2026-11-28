@@ -245,8 +245,10 @@ export function errorActions(error, now = Date.now()) {
   for (const a of Array.isArray(error && error.actions) ? error.actions : []) {
     if (!a || !KNOWN_ACTIONS.has(a.id)) continue;
     const at = a.at_ms || error.resets_at_ms;
-    const action = a.id === 'retry_at' && at && at <= now
-      ? { id: 'retry' } : a; // its words come from the catalog (error.action.retry)
+    // A passed retry_at is a plain retry (its words from the catalog: error.action.retry); one
+    // without its own time takes the reset's.
+    const action = a.id === 'retry_at' && at && at <= now ? { id: 'retry' }
+      : a.id === 'retry_at' && at && !a.at_ms ? { ...a, at_ms: at } : a;
     if (!out.some(o => o.id === action.id)) out.push(action);
   }
   return out;
@@ -273,12 +275,18 @@ export function retryBody(error, session, action) {
  * after it offers a retry (`actionable`). `live` is the live failed turn's
  * explanation and key, drawn last.
  */
+/** A row the Host marks automated (or the note it leaves an agent after cutting its turn): never
+ * drawn, so it is neither a failure card nor a reply. */
+const automatedRow = row => !!(row && (row.automated || row.is_automated || row.origin === 'made-way'
+  || String(row.id || '').startsWith('u-made-way-')));
+
 export function planTurnErrors(turns, live = null) {
   const hidden = new Set();
   const counts = new Map();
   const open = new Map();
   let actionable = null;
-  const items = (turns || []).map(t => ({ id: t.id, row: t, error: t.role !== 'user' ? explainedError(t.error) : null }));
+  const items = (turns || []).filter(t => !automatedRow(t))
+    .map(t => ({ id: t.id, row: t, error: t.role !== 'user' ? explainedError(t.error) : null }));
   if (live && live.error) items.push({ id: live.key, row: null, error: live.error });
   for (const { id, row, error } of items) {
     const reply = row && row.role === 'assistant' && row.origin !== 'system' && row.kind !== 'notice' && !error

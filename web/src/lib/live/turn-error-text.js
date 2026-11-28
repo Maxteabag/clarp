@@ -21,11 +21,17 @@ export function errorTime(ms, now = Date.now(), locale = i18n.locale) {
   return formatTime(at, opts, locale);
 }
 
+/** Whether the shown language's own catalog has `key`: t() falls back to English, which for a
+ * sentence the Host also sends is worse than the Host's own words in that language. */
+function ownEntry(key, locale) {
+  return locale === 'en' || t(key) !== en[key];
+}
+
 /** The catalog's text for `key` filled from `params` (`{time}` from `time_ms`); null when the
- * catalog lacks the key or a placeholder its English uses is empty. */
+ * language's own catalog lacks the key or a placeholder its English uses is empty. */
 export function sayError(key, params = {}, now = Date.now(), locale = i18n.locale) {
   const english = en[key];
-  if (typeof english !== 'string') return null;
+  if (typeof english !== 'string' || !ownEntry(key, locale)) return null;
   const values = {};
   for (const [, name] of english.matchAll(/\{(\w+)\}/g)) {
     const value = name === 'time'
