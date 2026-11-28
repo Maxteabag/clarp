@@ -10,6 +10,9 @@ use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use crate::vim::{self, Ex, Font, LineOutcome, Outcome, Region};
 use crate::{App, AppWindow, Hint, commands, pump_now};
+use clarp_core::tr;
+
+// i18n-screen: vim mode
 
 /// The setting that turns vim mode on and off.
 pub const SETTING: &str = "keymap/vim";
@@ -127,7 +130,8 @@ fn ex(app: &Rc<App>, window: &AppWindow, text: &str) {
     match vim::parse(text) {
         Ok(Ex::Run(action)) => {
             if !commands::run(app, window, action) {
-                say(format!("{action} is not available here"));
+                // i18n: vim mode, message line: an ex command cannot run in this place; {} is the command's name
+                say(tr!("{} is not available here", action));
             }
         }
         Ok(Ex::TabNew(name)) => commands::new_workspace(app, window, &name),
@@ -137,7 +141,8 @@ fn ex(app: &Rc<App>, window: &AppWindow, text: &str) {
                 app.engine.borrow_mut().set_reading_theme(&id);
                 pump_now(app);
             } else {
-                say(format!("No theme {id} (Tab lists them)"));
+                // i18n: vim mode, message line after :colorscheme; {} is the theme name typed (Tab is the key)
+                say(tr!("No theme {} (Tab lists them)", id));
             }
         }
         Ok(Ex::Font(font)) => {
@@ -164,7 +169,8 @@ fn set(app: &Rc<App>, window: &AppWindow, line: &str) {
         STATE.with(|s| s.borrow_mut().normal.reset());
         say(format!(":set {line}"));
     } else {
-        say(crate::look::notices().last().cloned().unwrap_or_else(|| format!("Cannot set {line}")));
+        // i18n: vim mode, message line after :set failed; {} is what was typed
+        say(crate::look::notices().last().cloned().unwrap_or_else(|| tr!("Cannot set {}", line)));
     }
 }
 
@@ -172,7 +178,8 @@ fn open_by_name(app: &Rc<App>, window: &AppWindow, name: &str) {
     let wanted = name.to_lowercase();
     let chats: Vec<(String, String)> = window.get_chats().iter().map(|c| (c.session.to_string(), c.name.to_lowercase())).collect();
     let found = chats.iter().find(|(_, n)| n.starts_with(&wanted)).or_else(|| chats.iter().find(|(_, n)| n.contains(&wanted)));
-    let Some((session, _)) = found else { return say(format!("No agent {name}")) };
+    // i18n: vim mode, message line: no agent has the typed name; {} is that name
+    let Some((session, _)) = found else { return say(tr!("No agent {}", name)) };
     app.engine.borrow_mut().select(session);
     pump_now(app);
     app.focus_transcript();
@@ -222,7 +229,8 @@ fn go(app: &App, rows: &[(String, String, String)], index: usize) {
 fn search(app: &App, forward: bool) {
     let pattern = STATE.with(|s| s.borrow().search.clone());
     if pattern.is_empty() {
-        return say("No search yet: / searches the chat");
+        // i18n: vim mode, message line: n pressed before any search (/ is the key)
+        return say(tr!("No search yet: / searches the chat"));
     }
     let rows = rows(app);
     let texts: Vec<String> = rows.iter().map(|(_, _, t)| t.clone()).collect();
@@ -234,9 +242,11 @@ fn search(app: &App, forward: bool) {
             go(app, &rows, index);
             let count = texts.iter().filter(|t| vim::find(std::slice::from_ref(t), &pattern, None, true).is_some()).count();
             let nth = texts[..=index].iter().filter(|t| vim::find(std::slice::from_ref(t), &pattern, None, true).is_some()).count();
-            say(format!("/{pattern}  {nth} of {count}"));
+            // i18n: vim mode, message line after a search: which match of how many; {0} this match's number, {1} all matches
+            say(format!("/{pattern}  {}", tr!("{0} of {1}", nth, count)));
         }
-        None => say(format!("Not found: {pattern}")),
+        // i18n: vim mode, message line: the search found nothing; {} is the searched text
+        None => say(tr!("Not found: {}", pattern)),
     }
 }
 
@@ -246,14 +256,16 @@ fn copy(app: &App, rows: &[(String, String, String)]) {
         let report = app.active_report();
         if report.at_end { rows.iter().rposition(|(_, author, _)| author != "activity" && author != "live") } else { anchor(app, rows) }
     });
-    let Some(index) = index else { return say("Nothing to copy") };
+    // i18n: vim mode, message line after y with nothing selected
+    let Some(index) = index else { return say(tr!("Nothing to copy")) };
     let pane = app.active_id();
     STATE.with(|s| s.borrow_mut().cursor = rows[index].0.clone());
     if let Some(window) = crate::window() {
         window.invoke_copy_message(pane, rows[index].0.clone().into());
     }
     let preview: String = rows[index].2.chars().take(40).collect::<String>().replace('\n', " ");
-    say(format!("Copied: {preview}"));
+    // i18n: vim mode, message line after copying; {} is the start of what was copied
+    say(tr!("Copied: {}", preview));
 }
 
 /// v: the cursor's message (as y picks it) on the select-text page.
@@ -263,7 +275,8 @@ fn select(app: &App, rows: &[(String, String, String)]) {
         let report = app.active_report();
         if report.at_end { rows.iter().rposition(|(_, author, _)| author != "activity" && author != "live") } else { anchor(app, rows) }
     });
-    let Some(index) = index else { return say("Nothing to select") };
+    // i18n: vim mode, message line: v pressed with nothing to select
+    let Some(index) = index else { return say(tr!("Nothing to select")) };
     STATE.with(|s| s.borrow_mut().cursor = rows[index].0.clone());
     if let Some(window) = crate::window() {
         crate::select_text::open_message(app, &window, &app.active_id(), &rows[index].0);
@@ -281,7 +294,8 @@ fn fold(app: &App, window: &AppWindow, open: Option<bool>) {
     // (Conversation view, #702).
     let foldable = |r: &crate::MessageRow| !r.activity_label.is_empty() || !r.work_key.is_empty();
     let Some(index) = (at..rows.len()).find(|i| foldable(&rows[*i])).or_else(|| (0..at).rev().find(|i| foldable(&rows[*i]))) else {
-        return say("No tool activity to fold");
+        // i18n: vim mode, message line: the fold key found no tool calls
+        return say(tr!("No tool activity to fold"));
     };
     let row = &rows[index];
     STATE.with(|s| s.borrow_mut().cursor = row.id.to_string());
@@ -348,14 +362,16 @@ fn run(app: &Rc<App>, window: &AppWindow, region: Region, action: &'static str, 
             }
             match moved {
                 Some(index) => go(app, &rows, index),
-                None => say(if action == "vim-turn-next" { "No later turn" } else { "No earlier turn" }),
+                // i18n: vim mode, message line: ] or [ found no further turn of the chat
+                None => say(if action == "vim-turn-next" { tr!("No later turn") } else { tr!("No earlier turn") }),
             }
         }
         ("vim-match-next" | "vim-match-previous", _) => {
             // With no search yet, n is still the next agent needing attention.
             if STATE.with(|s| s.borrow().search.is_empty()) && action == "vim-match-next" {
                 if !commands::run(app, window, "next-attention") {
-                    say("No search yet: / searches the chat");
+                    // i18n: vim mode, message line: n pressed before any search (/ is the key)
+                    say(tr!("No search yet: / searches the chat"));
                 }
             } else {
                 for _ in 0..times {
@@ -402,7 +418,8 @@ fn run(app: &Rc<App>, window: &AppWindow, region: Region, action: &'static str, 
         }
         _ => {
             if !commands::run(app, window, action) {
-                say(format!("{action} is not available here"));
+                // i18n: vim mode, message line: an ex command cannot run in this place; {} is the command's name
+                say(tr!("{} is not available here", action));
             }
         }
     }
@@ -463,11 +480,37 @@ pub fn show(app: &App, window: &AppWindow, state: &str) {
 
 /// The shortcut bar's vim hints for `state`, before the map's own.
 pub fn hints(state: &str) -> Vec<Hint> {
-    let hint = |keys: &str, label: &str| Hint { keys: keys.into(), label: label.into() };
+    let hint = |keys: &str, label: String| Hint { keys: keys.into(), label: label.into() };
+    // Vim mode's shortcut bar labels; the keys stay as they are.
     match state {
-        "pane" => vec![hint("i", "Insert"), hint("Space", "Leader"), hint(":", "Command"), hint("/", "Search"), hint("j/k d/u", "Scroll"), hint("[ ]", "Turns"), hint("y", "Copy")],
-        "sidebar" => vec![hint("l", "Open"), hint("h", "Chat"), hint("Space", "Leader"), hint(":", "Command")],
-        "composer" => vec![hint("Esc", "Normal")],
+        "pane" => vec![
+            // i18n: vim mode, shortcut bar label: i enters vim's Insert mode (vim's mode name)
+            hint("i", tr!("vim" => "Insert")),
+            // i18n: vim mode, shortcut bar label: Space starts a leader-key sequence (vim's term "leader")
+            hint("Space", tr!("vim" => "Leader")),
+            // i18n: vim mode, shortcut bar label: : opens the command line (noun)
+            hint(":", tr!("vim" => "Command")),
+            // i18n: vim mode, shortcut bar label: / searches the chat (imperative verb)
+            hint("/", tr!("verb" => "Search")),
+            // i18n: shortcut bar label: scrolls the chat (imperative verb)
+            hint("j/k d/u", tr!("verb" => "Scroll")),
+            // i18n: vim mode, shortcut bar label: [ and ] jump between the chat's turns (plural noun)
+            hint("[ ]", tr!("Turns")),
+            // i18n: vim mode, shortcut bar label: y copies (imperative verb)
+            hint("y", tr!("verb" => "Copy")),
+        ],
+        "sidebar" => vec![
+            // i18n: shortcut bar label: opens the selected item (imperative verb)
+            hint("l", tr!("verb" => "Open")),
+            // i18n: shortcut bar label: opens the job's chat (noun)
+            hint("h", tr!("Chat")),
+            // i18n: vim mode, shortcut bar label: Space starts a leader-key sequence (vim's term "leader")
+            hint("Space", tr!("vim" => "Leader")),
+            // i18n: vim mode, shortcut bar label: : opens the command line (noun)
+            hint(":", tr!("vim" => "Command")),
+        ],
+        // i18n: vim mode, shortcut bar label: Esc returns to vim's Normal mode (vim's mode name)
+        "composer" => vec![hint("Esc", tr!("vim" => "Normal"))],
         _ => Vec::new(),
     }
 }
