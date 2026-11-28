@@ -4,6 +4,10 @@
 //! after a Stop, sends them. Every word the desktop shows for it lives here
 //! (the iOS and Android apps use the same words).
 
+use crate::tr;
+
+// i18n-screen: chat
+
 /// How often the open chat's queue is read again from the Host while
 /// something waits, so an entry the Host no longer has never lingers.
 pub const REREAD_SECS: u64 = 30;
@@ -21,25 +25,41 @@ pub fn waiting_owner_id(item: &serde_json::Value) -> Option<&str> {
 
 /// The line's count: "1 waiting", "3 waiting".
 pub fn waiting(count: i32) -> String {
-    format!("{} waiting", count.max(0))
+    // i18n: chat, line above the composer: how many of the user's messages wait behind the running turn; {n} is the count
+    tr!("{n} waiting" | "{n} waiting" % count.max(0))
 }
 
 /// The line's action, by what it does now.
-pub const STEER_NOW: &str = "Steer now";
-pub const STOP_AND_SEND: &str = "Stop and send";
-pub const SEND_NOW: &str = "Send now";
+pub fn steer_now() -> String {
+    // i18n: chat, button on the waiting-messages line: read the waiting message into the running turn now (imperative)
+    tr!("Steer now")
+}
+
+pub fn stop_and_send() -> String {
+    // i18n: chat, button on the waiting-messages line: stop the running turn, then send (imperative)
+    tr!("Stop and send")
+}
+
+pub fn send_now() -> String {
+    // i18n: chat, button on the waiting-messages line and its tooltip: send the waiting message now (imperative)
+    tr!("Send now")
+}
 
 /// Its tip.
-pub fn action_tip(kind: &str) -> &'static str {
+pub fn action_tip(kind: &str) -> String {
     match kind {
-        "steer" => "Read into this turn",
-        "take-over" => "Stop this turn and send",
-        _ => "Send now",
+        // i18n: chat, tooltip of Steer now on the waiting-messages line
+        "steer" => tr!("Read into this turn"),
+        // i18n: chat, tooltip of Stop and send on the waiting-messages line
+        "take-over" => tr!("Stop this turn and send"),
+        _ => send_now(),
     }
 }
 
 /// What a Send now could not do: neither steer, stop the turn nor be sent.
 /// The message waits on. Calm, and only as a last resort.
+/// Kept as this English sentence in the engine's state; `refusal_line`
+/// draws it in the app's language.
 pub const STILL_WAITING: &str = "Still waiting: this turn can't take it or be stopped now";
 
 /// The line under it for a refused Send now: this app's own words as they
@@ -47,8 +67,10 @@ pub const STILL_WAITING: &str = "Still waiting: this turn can't take it or be st
 pub fn refusal_line(words: &str) -> String {
     match words.trim() {
         "" => String::new(),
-        STILL_WAITING => STILL_WAITING.to_owned(),
-        words => format!("Not sent now: {words}"),
+        // i18n: chat, line under the waiting messages after Send now could neither steer, stop the turn nor send
+        STILL_WAITING => tr!("Still waiting: this turn can't take it or be stopped now"),
+        // i18n: chat, line under the waiting messages after the Host refused Send now; {} is the Host's own reason
+        words => tr!("Not sent now: {}", words),
     }
 }
 

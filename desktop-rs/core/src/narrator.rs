@@ -14,6 +14,9 @@ use fancy_regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::json::{self, Object};
+use crate::tr;
+
+// i18n-screen: settings
 
 const MAX_CACHE_ENTRIES: usize = 512;
 const MAX_QUEUED_ENTRIES: usize = 64;
@@ -27,6 +30,22 @@ pub const POLL_MS: u64 = 600;
 pub const TIMEOUT_MS: u64 = 65_000;
 
 pub const DETAIL_LEVELS: [&str; 5] = ["Developer", "Technical", "Balanced", "Plain English", "Grandma"];
+
+/// `DETAIL_LEVELS` in the app's language.
+pub fn detail_level_names() -> [String; 5] {
+    [
+        // i18n: Settings > Experiments, tool explanation level (noun): written for developers, shows the original calls
+        tr!("detail level" => "Developer"),
+        // i18n: Settings > Experiments, tool explanation level (adjective): commands and paths
+        tr!("detail level" => "Technical"),
+        // i18n: Settings > Experiments, tool explanation level (adjective): between technical and plain
+        tr!("detail level" => "Balanced"),
+        // i18n: Settings > Experiments, tool explanation level: everyday language (the name of the level, translate as "plain language")
+        tr!("detail level" => "Plain English"),
+        // i18n: Settings > Experiments, tool explanation level (playful noun): the simplest words, for someone with no technical knowledge
+        tr!("detail level" => "Grandma"),
+    ]
+}
 const LEVEL_DESCRIPTIONS: [&str; 5] = [
     "Original tool calls.",
     "Actions with commands and paths.",
@@ -193,20 +212,40 @@ impl Narrator {
         LEVEL_DESCRIPTIONS[self.detail_level.clamp(0, 4) as usize]
     }
 
+    /// `level_description` in the app's language.
+    pub fn level_description_words(&self) -> String {
+        match self.detail_level.clamp(0, 4) {
+            // i18n: Settings > Experiments, tool explanations at the Developer level: what it shows
+            0 => tr!("Original tool calls."),
+            // i18n: Settings > Experiments, tool explanations at the Technical level: what it shows
+            1 => tr!("Actions with commands and paths."),
+            // i18n: Settings > Experiments, tool explanations at the Balanced level: what it shows
+            2 => tr!("Actions with key technical details."),
+            // i18n: Settings > Experiments, tool explanations at the Plain English level: what it shows
+            3 => tr!("Everyday language, no code or paths."),
+            // i18n: Settings > Experiments, tool explanations at the Grandma level: what it shows
+            _ => tr!("Simple explanations, no technical terms."),
+        }
+    }
+
     pub fn status(&self) -> String {
         if !self.enabled {
-            return "Off".into();
+            // i18n: Settings > Experiments, tool explanations status: switched off (adjective)
+            return tr!("explanations" => "Off");
         }
         if !self.error.is_empty() {
             return self.error.clone();
         }
         if !self.remote_items.is_empty() {
-            return format!("Translating · {}", self.remote_items.len());
+            // i18n: Settings > Experiments, tool explanations status: explanations being written; {} is how many
+            return tr!("Translating · {}", self.remote_items.len());
         }
         if !self.queue.is_empty() {
-            return format!("Translating · {} queued", self.queue.len());
+            // i18n: Settings > Experiments, tool explanations status: explanations waiting their turn; {} is how many
+            return tr!("Translating · {} queued", self.queue.len());
         }
-        "Shared Host · Codex Spark · low".into()
+        // i18n: Settings > Experiments, tool explanations status: they come from the Host, shared by every client, written by the Codex Spark model at low effort (keep Codex Spark)
+        tr!("Shared Host · Codex Spark · low")
     }
 
     fn notify(&mut self, effects: &mut Vec<Effect>) {
@@ -345,7 +384,8 @@ impl Narrator {
         }
         let session = json::string(&self.queue[0].activity, "_session");
         if session.is_empty() {
-            return self.fail("Select an agent for explanations.");
+            // i18n: tool explanations, error: no agent chosen to explain tool calls for
+            return self.fail(&tr!("Select an agent for explanations."));
         }
         self.remote_session = session.clone();
         let remaining = self.queue.len();
@@ -391,7 +431,8 @@ impl Narrator {
         if generation != self.remote_generation || self.remote_items.is_empty() {
             return Vec::new();
         }
-        self.fail("Timed out. Original tool details are still available; toggle off/on to retry.")
+        // i18n: tool explanations, error: the Host took too long; the user can switch explanations off and on to try again
+        self.fail(&tr!("Timed out. Original tool details are still available; toggle off/on to retry."))
     }
 
     pub fn is_own_tag(&self, tag: &str) -> bool {
@@ -415,7 +456,8 @@ impl Narrator {
         }
         let rows = json::array(result, "items");
         if rows.len() != self.remote_items.len() {
-            return self.fail("Invalid Host explanation response.");
+            // i18n: tool explanations, error: the Host's answer could not be read
+            return self.fail(&tr!("Invalid Host explanation response."));
         }
         let mut pending = Vec::new();
         for item in self.remote_items.clone() {
@@ -425,13 +467,15 @@ impl Narrator {
                 continue;
             }
             let Some(row) = rows.iter().filter_map(Value::as_object).find(|row| json::string(row, "id") == id) else {
-                return self.fail("Invalid Host explanation response.");
+                // i18n: tool explanations, error: the Host's answer could not be read
+                return self.fail(&tr!("Invalid Host explanation response."));
             };
             match json::string(row, "status").as_str() {
                 "ready" => {
                     let text = json::string(row, "text").trim().to_owned();
                     if text.is_empty() || text.chars().count() > 240 {
-                        return self.fail("Invalid Host explanation text.");
+                        // i18n: tool explanations, error: the Host's explanation text was empty or too long
+                        return self.fail(&tr!("Invalid Host explanation text."));
                     }
                     self.cache_insert(id, text);
                 }
@@ -463,9 +507,11 @@ impl Narrator {
             return Vec::new();
         }
         if status == 404 {
-            self.fail("Update this Host to enable shared explanations.")
+            // i18n: tool explanations, error: the Host is too old to explain tool calls
+            self.fail(&tr!("Update this Host to enable shared explanations."))
         } else {
-            self.fail("Host explanation request failed. Toggle off/on to retry.")
+            // i18n: tool explanations, error: the Host could not explain; switch explanations off and on to try again
+            self.fail(&tr!("Host explanation request failed. Toggle off/on to retry."))
         }
     }
 

@@ -9,6 +9,9 @@
 use serde_json::Value;
 
 use crate::json::Object;
+use crate::tr;
+
+// i18n-screen: chat
 
 pub const FEATURE: &str = "hidden_coordination";
 pub const SHOW: &str = "show";
@@ -94,16 +97,18 @@ impl Count {
 /// The quiet line: "3 messages between agents, with Arnold".
 pub fn line(count: &Count) -> String {
     let head = if count.capped {
-        "100+ messages between agents".to_owned()
+        // i18n: chat, quiet line where hidden messages between agents were: more than 100 of them
+        tr!("100+ messages between agents")
     } else if count.messages == 0 {
-        "Work between agents".to_owned()
-    } else if count.messages == 1 {
-        "1 message between agents".to_owned()
+        // i18n: chat, quiet line where hidden work between agents was, when the Host gives no count
+        tr!("Work between agents")
     } else {
-        format!("{} messages between agents", count.messages)
+        // i18n: chat, quiet line where hidden messages between agents were; {n} is how many
+        tr!("{n} message between agents" | "{n} messages between agents" % count.messages)
     };
     match names(&count.agents) {
-        Some(names) => format!("{head}, with {names}"),
+        // i18n: chat, quiet line about messages between agents, then who they were with; {0} "3 messages between agents", {1} the names ("Arnold and Bella")
+        Some(names) => tr!("{0}, with {1}", head, names),
         None => head,
     }
 }
@@ -116,12 +121,19 @@ pub fn names(agents: &[String]) -> Option<String> {
     let named: Vec<&str> = agents.iter().map(|a| a.trim()).filter(|a| !a.is_empty()).collect();
     let shown: Vec<&str> = named.into_iter().take(2).collect();
     let others = agents.len() - shown.len();
-    let rest = if others == 1 { "1 other".to_owned() } else { format!("{others} others") };
+    // i18n: chat, quiet line about messages between agents: how many more agents beyond the named ones; {n} is the count
+    let rest = tr!("{n} other" | "{n} others" % others);
     Some(match (shown.len(), others) {
         (0, _) => rest,
         (1, 0) => shown[0].to_owned(),
-        (_, 0) => format!("{} and {}", shown[0], shown[1]),
-        _ => format!("{} and {rest}", shown.join(", ")),
+        // i18n: chat, quiet line about messages between agents: two names joined; {0} and {1} are agent names
+        (_, 0) => tr!("{0} and {1}", shown[0], shown[1]),
+        _ => {
+            // i18n: separator between items of a short inline list ("2 files, 1 search"); keep the trailing space where the language uses one
+            let separator = tr!("list separator" => ", ");
+            // i18n: chat, quiet line about messages between agents: two names joined; {0} and {1} are agent names
+            tr!("{0} and {1}", shown.join(&separator), rest)
+        }
     })
 }
 
@@ -131,3 +143,21 @@ pub const HINT: &str = "Shows the messages between agents in this chat";
 pub const SETTING: &str = "Show messages between agents";
 /// The device's line setting, listed whenever the Host offers the feature.
 pub const LINE_SETTING: &str = "Show a line where agent messages were";
+
+/// `SETTING` in the app's language.
+pub fn setting() -> String {
+    // i18n: Settings > Chats and a chat's menu, switch title: show the messages agents send each other
+    tr!("Show messages between agents")
+}
+
+/// `LINE_SETTING` in the app's language.
+pub fn line_setting() -> String {
+    // i18n: Settings > Chats, switch title: put a quiet line in the chat where hidden messages between agents were
+    tr!("Show a line where agent messages were")
+}
+
+/// `HINT` in the app's language.
+pub fn hint() -> String {
+    // i18n: chat, tooltip of the quiet line about messages between agents: clicking shows them
+    tr!("Shows the messages between agents in this chat")
+}

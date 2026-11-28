@@ -79,7 +79,7 @@ pub fn waiting(engine: &Engine, session: &str) -> Vec<WaitingTurn> {
 pub struct Chip {
     pub kind: &'static str,
     pub target: String,
-    pub label: &'static str,
+    pub label: String,
     pub count: i32,
     pub reason: String,
     pub acting: bool,
@@ -104,10 +104,10 @@ fn legacy_chip(engine: &Engine, session: &str) -> Chip {
         ..Chip::default()
     };
     let choice = if let Some(item) = waiting.iter().rev().find(|item| !item.reading && item.steer) {
-        Some((item, "steer", words::STEER_NOW))
+        Some((item, "steer", words::steer_now()))
     } else {
         waiting.iter().find(|item| !item.reading).map(|item| {
-            if item.take_over { (item, "take-over", words::STOP_AND_SEND) } else { (item, "send", words::SEND_NOW) }
+            if item.take_over { (item, "take-over", words::stop_and_send()) } else { (item, "send", words::send_now()) }
         })
     };
     if let Some((item, kind, label)) = choice {
@@ -144,10 +144,10 @@ pub fn chip(engine: &Engine, session: &str) -> Chip {
         item.get("kind").and_then(Value::as_str).is_none_or(|k| k == "waiting") && item.get("steerable").and_then(Value::as_bool) == Some(true)
     };
     if let Some(item) = own.iter().rev().find(steerable) {
-        return Chip { kind: "steer", target: item_id(item), label: words::STEER_NOW, count, reason, acting };
+        return Chip { kind: "steer", target: item_id(item), label: words::steer_now(), count, reason, acting };
     }
-    let reason = if reason.is_empty() { sww::CANT_STEER.to_owned() } else { reason };
-    Chip { kind: "stop", target: String::new(), label: words::STOP_AND_SEND, count, reason, acting }
+    let reason = if reason.is_empty() { sww::cant_steer() } else { reason };
+    Chip { kind: "stop", target: String::new(), label: words::stop_and_send(), count, reason, acting }
 }
 
 /// Sends a one-off choice's words for `session`'s Host into Send's menu:

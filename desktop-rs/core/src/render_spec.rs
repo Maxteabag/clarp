@@ -22,6 +22,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
+use crate::tr;
+
+// i18n-screen: form card
 
 /// The name this client gives the Host in `X-Clarp-Client`, matched exactly
 /// by the Host's per-client tables (`server_identity.CLIENT_NAME`).
@@ -230,8 +233,10 @@ pub fn device_decimal_separator() -> char {
 /// label>" once the pressed button is known, "Answered" until then.
 pub fn answered_word(label: Option<&str>) -> String {
     match label.filter(|l| !l.is_empty()) {
-        Some(label) => format!("Answered · {label}"),
-        None => "Answered".into(),
+        // i18n: chat, compact form card once answered; {} is the label of the button the user pressed
+        Some(label) => tr!("Answered · {}", label),
+        // i18n: chat, compact form card once answered (past participle)
+        None => tr!("Answered"),
     }
 }
 
@@ -267,7 +272,8 @@ impl Answer {
     pub fn words(&self) -> String {
         match self {
             Answer::Str(text) => text.clone(),
-            Answer::Bool(flag) => if *flag { "Yes" } else { "No" }.to_owned(),
+            // i18n: form card, a yes/no answer as the read-only form shows it
+            Answer::Bool(flag) => if *flag { tr!("answer" => "Yes") } else { tr!("answer" => "No") },
             Answer::Int(number) => number.to_string(),
         }
     }
@@ -370,28 +376,35 @@ impl Chart {
             parts.push(title.to_owned());
         }
         parts.push(match self.kind {
-            ChartKind::Bar => "Bar chart",
-            ChartKind::Line => "Line chart",
-            ChartKind::Pie => "Pie chart",
-        }.to_owned());
+            // i18n: form card, chart's spoken summary (accessibility): the kind of chart (noun)
+            ChartKind::Bar => tr!("Bar chart"),
+            // i18n: form card, chart's spoken summary (accessibility): the kind of chart (noun)
+            ChartKind::Line => tr!("Line chart"),
+            // i18n: form card, chart's spoken summary (accessibility): the kind of chart (noun)
+            ChartKind::Pie => tr!("Pie chart"),
+        });
         if self.kind != ChartKind::Pie {
             if let Some(label) = self.x_label.as_deref().filter(|t| !t.is_empty()) {
-                parts.push(format!("Across: {label}"));
+                // i18n: form card, chart's spoken summary (accessibility): what the horizontal axis shows; {} is its label
+                parts.push(tr!("Across: {}", label));
             }
             if let Some(label) = self.y_label.as_deref().filter(|t| !t.is_empty()) {
-                parts.push(format!("Up: {label}"));
+                // i18n: form card, chart's spoken summary (accessibility): what the vertical axis shows; {} is its label
+                parts.push(tr!("Up: {}", label));
             }
         }
         for series in &self.series {
-            let name = if self.kind == ChartKind::Pie { String::new() } else { format!("{}: ", series.name) };
+            // i18n: form card, chart's spoken summary (accessibility): a data series' name before its points; {} is the name
+            let name = if self.kind == ChartKind::Pie { String::new() } else { tr!("{}: ", series.name) };
             let points = &series.points;
             if points.len() <= 12 {
                 parts.push(name + &points.iter().map(|p| format!("{} {}", p.x.words(), self.value_text(p.y, separator))).collect::<Vec<_>>().join(", "));
             } else if let (Some(low), Some(high), Some(first), Some(last)) =
                 (points.iter().min_by_key(|p| p.y), points.iter().max_by_key(|p| p.y), points.first(), points.last())
             {
-                parts.push(format!(
-                    "{name}{} points from {} to {}, lowest {} at {}, highest {} at {}",
+                // i18n: form card, chart's spoken summary (accessibility) of a long series: {0} how many points, {1} first x, {2} last x, {3} lowest value, {4} its x, {5} highest value, {6} its x
+                parts.push(name + &tr!(
+                    "{0} points from {1} to {2}, lowest {3} at {4}, highest {5} at {6}",
                     points.len(),
                     first.x.words(),
                     last.x.words(),
@@ -439,7 +452,8 @@ impl Table {
             Cell::Empty => String::new(),
             Cell::Text(text) => text.clone(),
             Cell::Number(number) => number_text(*number, column.decimals, separator),
-            Cell::Flag(flag) => if *flag { "Yes" } else { "No" }.to_owned(),
+            // i18n: form card, a yes/no cell in a table
+            Cell::Flag(flag) => if *flag { tr!("answer" => "Yes") } else { tr!("answer" => "No") },
         }
     }
 }
@@ -1343,26 +1357,41 @@ impl Refusal {
 /// `captions` names a text field's key by its label.
 pub fn footnote(form: &Form, values: &Values, accepted: Option<&Accepted>, note: &str, closed: bool, captions: &BTreeMap<String, String>, when: &str) -> String {
     if let Some(accepted) = accepted {
-        let delivered = if accepted.delivery_status == "delivered" { "The agent has it." } else { "The agent gets it when it is next awake." };
-        return if when.is_empty() { format!("Answered. {delivered}") } else { format!("Answered {when}. {delivered}") };
+        let delivered = accepted.delivery_status == "delivered";
+        return match (when.is_empty(), delivered) {
+            // i18n: form card footnote after the answer was sent and the agent received it
+            (true, true) => tr!("Answered. The agent has it."),
+            // i18n: form card footnote after the answer was sent; the agent receives it when its session next runs
+            (true, false) => tr!("Answered. The agent gets it when it is next awake."),
+            // i18n: form card footnote after the answer was sent and the agent received it; {} is when it was answered (a time)
+            (false, true) => tr!("Answered {}. The agent has it.", when),
+            // i18n: form card footnote after the answer was sent; the agent receives it when it next runs; {} is when it was answered (a time)
+            (false, false) => tr!("Answered {}. The agent gets it when it is next awake.", when),
+        };
     }
     if !note.is_empty() || closed {
         return note.to_owned();
     }
     let gaps = form.gaps(values);
     if gaps.contains(&Gap::AnswersTooLarge) {
-        return "The answers are too long to send. Shorten the text.".into();
+        // i18n: form card footnote: why Send is held back
+        return tr!("The answers are too long to send. Shorten the text.");
     }
     let missing = gaps.iter().filter(|g| matches!(g, Gap::Missing(_))).count();
     if missing == 1 {
-        return "One required answer is missing.".into();
+        // i18n: form card footnote: why Send is held back
+        return tr!("One required answer is missing.");
     }
     if missing > 1 {
-        return format!("{missing} required answers are missing.");
+        // i18n: form card footnote: why Send is held back; {n} is how many answers are missing (always 2 or more)
+        return tr!("{n} required answer is missing." | "{n} required answers are missing." % missing);
     }
     let short = gaps.iter().filter_map(|g| if let Gap::TooShort(key, min) = g { Some((key, *min)) } else { None }).min_by(|a, b| a.0.cmp(b.0));
     if let Some((key, min)) = short {
-        return format!("{} needs at least {min} characters.", captions.get(key).map_or("A text", String::as_str));
+        // i18n: form card footnote, in place of a text field's label when it has none
+        let caption = captions.get(key).cloned().unwrap_or_else(|| tr!("A text"));
+        // i18n: form card footnote: a text field's answer is too short; {0} is the field's label, {1} the least number of characters
+        return tr!("{0} needs at least {1} characters.", caption, min);
     }
     String::new()
 }

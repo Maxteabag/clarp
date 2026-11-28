@@ -222,6 +222,8 @@ pub enum Span {
     HoursMinutes,
     /// "3d"
     Days,
+    /// "5d 5h"
+    DaysHours,
 }
 
 /// A short duration from already-formatted parts (`b` only for the two-part
@@ -234,6 +236,7 @@ pub fn span(tag: &str, span: Span, a: &str, b: &str) -> String {
         Span::MinutesSeconds => "{0}m {1}s",
         Span::HoursMinutes => "{0}h {1}m",
         Span::Days => "{0}d",
+        Span::DaysHours => "{0}d {1}h",
     };
     translate_in(tag, "duration", template, "", None, &[&a as &dyn std::fmt::Display, &b])
 }
@@ -287,5 +290,7 @@ fn catalog_strings() -> Vec<String> {
         tr!("duration" => "{0}h {1}m", 1, 2),
         // i18n: short duration in days, e.g. "3d" (how long a process has run); {0} is the number; use the language's usual short unit
         tr!("duration" => "{0}d", 1),
+        // i18n: short duration in days and hours, e.g. "5d 5h" (time until a usage limit resets); {0} days, {1} hours
+        tr!("duration" => "{0}d {1}h", 1, 2),
     ]
 }

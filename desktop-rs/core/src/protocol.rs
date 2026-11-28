@@ -6,6 +6,9 @@ use serde_json::{Map, Value, json};
 
 use crate::json::{self, Object};
 use crate::text::cleaned_display_text;
+use crate::tr;
+
+// i18n-screen: composer
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Agent {
@@ -405,20 +408,30 @@ impl Agent {
         let name = provider_name(&provider);
         let credits = json::string(quota, "reason") == "credits_depleted";
         let mut text = if credits {
-            format!("{name} workspace is out of credits")
+            // i18n: warning above the composer: the backend's workspace has no credits left; {} is the backend's name (Codex, Claude)
+            tr!("{} workspace is out of credits", name)
         } else {
-            format!("{name} is out of quota")
+            // i18n: warning above the composer: the backend's account used its quota; {} is the backend's name (Codex, Claude)
+            tr!("{} is out of quota", name)
         };
         if let Some(wait) = reset_wait(quota, now) {
-            text += if credits { "  ·  included usage resets in " } else { "  ·  resets in " };
-            text += &wait;
+            text += "  ·  ";
+            text += &if credits {
+                // i18n: warning above the composer, after "out of credits": when the included usage comes back; {} is a duration ("2h 5m")
+                tr!("included usage resets in {}", wait)
+            } else {
+                // i18n: warning above the composer, after "out of quota": when the quota comes back; {} is a duration ("2h 5m")
+                tr!("resets in {}", wait)
+            };
         }
         let fallback = json::string(quota, "fallback_model");
+        text += "  ·  ";
         if fallback.is_empty() {
-            text += "  ·  a message will likely fail";
+            // i18n: warning above the composer: a message sent now will probably not get an answer
+            text += &tr!("a message will likely fail");
         } else {
-            text += "  ·  runs on ";
-            text += &fallback;
+            // i18n: warning above the composer: the message will use another model instead; {} is that model's name
+            text += &tr!("runs on {}", fallback);
         }
         text
     }
@@ -441,29 +454,39 @@ impl Agent {
         let name = provider_name(&provider);
         let used = quota.get("used_percentage").and_then(Value::as_f64);
         let mut text = if exhausted {
-            if json::string(quota, "reason") == "credits_depleted" { format!("{name} out of credits") } else { format!("{name} limit reached") }
+            if json::string(quota, "reason") == "credits_depleted" {
+                // i18n: composer meter: the backend has no credits left; {} is the backend's name (Codex, Claude)
+                tr!("{} out of credits", name)
+            } else {
+                // i18n: composer meter: the backend's usage limit is used up; {} is the backend's name (Codex, Claude)
+                tr!("{} limit reached", name)
+            }
         } else {
             match used {
-                Some(used) => format!("{name} {}% used", used.floor().clamp(0.0, 99.0) as i64),
-                None => format!("{name} near its limit"),
+                // i18n: composer meter: how much of the usage limit is used; {0} is the backend's name, {1} the percentage number (without %)
+                Some(used) => tr!("{0} {1}% used", name, used.floor().clamp(0.0, 99.0) as i64),
+                // i18n: composer meter: the backend is close to its usage limit; {} is the backend's name
+                None => tr!("{} near its limit", name),
             }
         };
         if let Some(wait) = reset_wait(quota, now) {
-            text += " · resets in ";
-            text += &wait;
+            text += " · ";
+            // i18n: composer meter, after the limit: when the quota comes back; {} is a duration ("2h 5m")
+            text += &tr!("resets in {}", wait);
         }
         Some((text, exhausted))
     }
 }
 
 /// A provider id as the user knows it.
-fn provider_name(provider: &str) -> &str {
+fn provider_name(provider: &str) -> String {
     match provider {
-        "codex" => "Codex",
-        "claude" => "Claude",
-        crate::catalog::LEGACY_ANTIGRAVITY | crate::catalog::ANTIGRAVITY_ACP => crate::catalog::ANTIGRAVITY_LABEL,
-        "" => "This backend",
-        other => other,
+        "codex" => "Codex".to_owned(),
+        "claude" => "Claude".to_owned(),
+        crate::catalog::LEGACY_ANTIGRAVITY | crate::catalog::ANTIGRAVITY_ACP => crate::catalog::ANTIGRAVITY_LABEL.to_owned(),
+        // i18n: composer warning and meter, in place of a backend's name when the Host names none
+        "" => tr!("This backend"),
+        other => other.to_owned(),
     }
 }
 
@@ -472,10 +495,13 @@ fn provider_name(provider: &str) -> &str {
 fn reset_wait(quota: &Object, now: DateTime<Utc>) -> Option<String> {
     let reset = parse_iso_date(&json::string(quota, "resets_at")).filter(|r| *r > now)?;
     let seconds = (reset - now).num_seconds();
+    use crate::i18n::{self, format};
+    let tag = i18n::current();
+    let n = |v: i64| format::number(tag, v);
     Some(if seconds >= 86_400 {
-        format!("{}d {}h", seconds / 86_400, (seconds % 86_400) / 3_600)
+        format::span(tag, format::Span::DaysHours, &n(seconds / 86_400), &n((seconds % 86_400) / 3_600))
     } else {
-        format!("{}h {}m", seconds / 3_600, (seconds % 3_600) / 60)
+        format::span(tag, format::Span::HoursMinutes, &n(seconds / 3_600), &n((seconds % 3_600) / 60))
     })
 }
 
