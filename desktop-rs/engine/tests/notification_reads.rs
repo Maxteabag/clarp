@@ -68,9 +68,14 @@ fn bounded_notification_reads() {
     let unread = |d: &Driver, chat: &str| d.engine.roster().find(chat).unwrap().unread;
     let mut b = alert("b", 2);
     b["decision_id"] = "question".into();
+    let mut conflict = read("chat-read", 100);
+    conflict["server_instance_id"] = "fake-host-2".into();
+    deliver(&mut d, &primary, &[alert("a", 1), b, conflict]);
+    assert!(unread(&d, "mike"));
+    assert_eq!(deliver(&mut d, &primary, &[alert("still-new", 1)]).len(), 1);
     let mut receipt = read("chat-read", 1);
-    receipt["server_instance_id"] = "non-authoritative push field".into();
-    deliver(&mut d, &primary, &[alert("a", 1), b, receipt]);
+    receipt["server_instance_id"] = "fake-host-1".into();
+    deliver(&mut d, &primary, &[receipt]);
     assert!(unread(&d, "mike"));
     d.engine.mark_popup_read("mike", "fake-host-1");
     assert!(unread(&d, "mike"));
@@ -110,6 +115,12 @@ fn bounded_notification_reads() {
     deliver(&mut d, &primary, &[read("agent-focus", 3)]);
     assert!(!unread(&d, "mike"));
 
+    let mut unscoped = alert("conflicting-alert", 1);
+    unscoped["server_instance_id"] = "fake-host-2".into();
+    unscoped["decision_id"] = "unscoped".into();
+    let decision = json!({"type":"chat-read","session":"mike","decision_id":"unscoped"});
+    assert_eq!(deliver(&mut d, &primary, &[unscoped, read("chat-read", 4), decision]).len(), 1);
+    assert!(unread(&d, "mike"));
     let mut missing = alert("missing", 1);
     missing.as_object_mut().unwrap().remove("event_seq");
     let mut invalid = alert("fraction", 1);

@@ -501,9 +501,16 @@ impl Engine {
         }
     }
 
+    /// SSE and HTTP belong to the authenticated connection. An optional
+    /// identity claim can confirm that scope, but cannot choose another one.
+    fn notification_host_matches(&self, event: &Object) -> bool {
+        !self.server_id.is_empty()
+            && event.get("server_instance_id").is_none_or(|id| id.as_str() == Some(self.server_id.as_str()))
+    }
+
     pub(crate) fn chat_read_event(&mut self, session: &str, event: &Object) {
         let host = self.server_id.clone();
-        if !self.notifications.offered || session.is_empty() || host.is_empty() {
+        if !self.notifications.offered || session.is_empty() || !self.notification_host_matches(event) {
             return;
         }
         let decision = json::string(event, "decision_id");
@@ -517,6 +524,9 @@ impl Engine {
     }
 
     fn apply_read(&mut self, session: &str, host: String, target: ReadTarget) {
+        if host.is_empty() {
+            return;
+        }
         if let ReadTarget::Through(order) = &target {
             let scope = (host.clone(), session.into(), order.epoch.clone());
             if self.notifications.boundaries.get(&scope).is_some_and(|saved| *saved >= order.position) {
@@ -542,7 +552,9 @@ impl Engine {
 
     pub(crate) fn notification_event(&mut self, event: &Object) {
         let mut incoming = Incoming::parse(event);
-        incoming.host = self.server_id.clone();
+        if self.notification_host_matches(event) {
+            incoming.host = self.server_id.clone();
+        }
         if !self.notifications.offered || incoming.host.is_empty() {
             incoming.order = None;
         }

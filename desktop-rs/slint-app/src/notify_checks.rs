@@ -502,6 +502,15 @@ pub fn restart_check() {
             if !journal().iter().any(|r| r["pressed"] == "stale") || elapsed < Duration::from_millis(500) { return false; }
             check(!super::posts("/chat-read").iter().any(|r| r["body"]["session"] == "mike") && app.engine.borrow().roster().find("mike").unwrap().unread,
                   "the old action cannot act on the reused ID");
+            check(control("/__control/chat-read-receipt", &json!({"server_instance_id":"other-host",
+                  "order_epoch":"one","read_through_ms":51,"read_through_seq":99})).is_ok(), "return an explicitly conflicting HTTP receipt");
+            press_fixture("current");
+            true
+        })));
+        stages.push(("conflicting POST", Box::new(|app, _, _| {
+            if !super::posts("/chat-read").iter().any(|r| r["body"]["session"] == "mike") { return false; }
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "a conflicting receipt preserves unread");
+            check(!journal().iter().any(|r| r["close"] == "after restart"), "a conflicting receipt preserves the popup");
             check(control("/__control/chat-read-receipt", &json!({"order_epoch":"one","read_through_ms":51,"read_through_seq":4})).is_ok(),
                   "the Host will return its boundary before the SSE echo");
             press_fixture("current");
@@ -510,7 +519,14 @@ pub fn restart_check() {
         stages.push(("current popup read", Box::new(|app, _, _| {
             if !journal().iter().any(|r| r["close"] == "after restart") { return false; }
             check(!app.engine.borrow().roster().find("mike").unwrap().unread, "the covering read clears the current evidence");
-            check(super::posts("/chat-read").last().is_some_and(|r| r["body"] == json!({"session":"mike"})), "Mark read posts only the session");
+            check(super::posts("/chat-read").iter().filter(|r| r["body"] == json!({"session":"mike"})).count() == 2, "both native actions posted only the session");
+            let root = std::path::PathBuf::from(std::env::var_os("CLARP_TRANSCRIPT_CACHE").unwrap());
+            let cache = clarp_core::transcript_cache::TranscriptCache::new(root.join("notification-reads"));
+            let saved = cache.load("host-1", "reads");
+            let boundaries = saved.get("boundaries").and_then(Value::as_array).unwrap();
+            check(boundaries.contains(&json!(["host-1","mike","one",[51,4]])) &&
+                  !boundaries.iter().any(|b| b[0] == "other-host"),
+                  "only the valid POST advances a watermark, on the authenticated Host");
             send(read(4));
             send(json!({"type":"chat-unread","session":"mike","unread":true,"preview":"quiet failure"}));
             send(read(99));
