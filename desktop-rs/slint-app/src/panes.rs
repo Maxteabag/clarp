@@ -736,7 +736,7 @@ impl App {
         view.queued = crate::view::queued_shown(session, engine.queue_count(session));
         view.quota_notice = engine.quota_notice(session).into();
         view.queue_paused = engine.queue_paused(session);
-        view.stop_notice = engine.stop_notice(session).into();
+        view.stop_notice = engine.composer_stop_notice(session).into();
         // The queue strip: the loaded queue's waiting messages, while the
         // Host still counts some (a stale list never outlives its count).
         // Hidden by the reader's setting (Show the queue off): no line at all.
@@ -1402,7 +1402,12 @@ impl App {
             if conversation {
                 self.messages(pane);
             }
-            let composer = fresh || everything || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) | Change::Queue(s) if *s == session));
+            // A Stop's line also follows the rows: the stopped turn's own
+            // end line, arriving after the Stop's answer, takes its place.
+            let composer = fresh
+                || everything
+                || changes.iter().any(|c| matches!(c, Change::Composer(s) | Change::Live(s) | Change::Stopped(s) | Change::Queue(s) if *s == session))
+                || (!pane.view.stop_notice.is_empty() && changes.iter().any(|c| matches!(c, Change::Conversation(s) if *s == session)));
             // A portrait made since: the header's avatar takes it.
             if !(composer || everything) && changes.iter().any(|c| matches!(c, Change::Avatars)) {
                 pane.view.portrait = self.header_portrait(&session);

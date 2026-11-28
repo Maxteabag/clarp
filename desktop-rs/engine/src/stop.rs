@@ -40,6 +40,20 @@ impl Engine {
         }
     }
 
+    /// The line under the chat's own composer: `stop_notice`, but nothing
+    /// when it is only the word "Stopped" and the stopped turn already ends
+    /// with its own line (`turn_end_reason`), so the chat says it once, on
+    /// the turn. A sentence that says more (who, why, what waits) stays.
+    pub fn composer_stop_notice(&self, session: &str) -> String {
+        on_peer!(self.peer_ref(session), |engine, local| engine.composer_stop_notice(local));
+        let notice = self.stop_notice(session);
+        let bare = notice.trim().trim_end_matches('.').eq_ignore_ascii_case("stopped");
+        let on_the_turn = bare
+            && self.turn_end_reason(session)
+            && self.conversation(session).is_some_and(|c| clarp_core::turn_reason::last_says_why(c.rows()));
+        if on_the_turn { String::new() } else { notice }
+    }
+
     /// Whether messages wait in the chat's queue.
     fn queue_waiting(&self, session: &str) -> bool {
         self.roster.find(session).is_some_and(|a| a.queued_turn_count > 0)

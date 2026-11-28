@@ -67,6 +67,19 @@ pub fn ended(rows: &[Message]) -> Vec<Line> {
     lines
 }
 
+/// Whether the chat's newest turn has ended with a line of its own: the
+/// last turn end the rows carry is the newest prompt's turn, did not
+/// complete and gives its reason. An earlier turn's line never stands in for
+/// a newer turn whose end has not arrived yet.
+pub fn last_says_why(rows: &[Message]) -> bool {
+    let Some(newest) = rows.iter().rev().find(|row| row.role == "user").map(|row| row.trace_id.as_str()) else { return false };
+    rows.iter()
+        .rev()
+        .filter_map(|row| row.turn.as_ref())
+        .find(|turn| !text(turn, "turn_id").is_empty())
+        .is_some_and(|turn| !newest.is_empty() && text(turn, "turn_id") == newest && text(turn, "status") != "completed" && !text(turn, "reason").trim().is_empty())
+}
+
 /// Where each line goes among the shown rows (an index to insert at, in
 /// the rows as they are): at the end of its turn, after its prompt and its
 /// own rows and before the next prompt or an unsent message. A turn none of
@@ -162,6 +175,29 @@ mod tests {
         let rows = vec![row("a1", "assistant", "t1", "", Some(stopped))];
         let lines = ended(&rows);
         assert!(place(&lines, &[]).is_empty());
+    }
+
+    #[test]
+    fn the_latest_end_says_whether_the_chat_already_tells_its_stop() {
+        let stopped = json!({"turn_id": "t2", "status": "interrupted", "reason": "Stopped."});
+        let done = json!({"turn_id": "t1", "status": "completed"});
+        let rows = vec![
+            row("u1", "user", "t1", "go", None),
+            row("a1", "assistant", "t1", "ok", Some(done.clone())),
+            row("u2", "user", "t2", "compare", None),
+            row("a2", "assistant", "t2", "half an answer", Some(stopped.clone())),
+        ];
+        assert!(last_says_why(&rows));
+        let rows = vec![
+            row("u2", "user", "t2", "compare", None),
+            row("a2", "assistant", "t2", "half", Some(stopped.clone())),
+            row("u3", "user", "t3", "again", None),
+            row("a3", "assistant", "t3", "ok", Some(json!({"turn_id": "t3", "status": "completed"}))),
+        ];
+        assert!(!last_says_why(&rows), "a later turn that completed has no line");
+        let rows = vec![row("u2", "user", "t2", "compare", None), row("a2", "assistant", "t2", "half", Some(stopped)), row("u3", "user", "t3", "again", None)];
+        assert!(!last_says_why(&rows), "the newer turn's end has not come: the older line does not stand in for it");
+        assert!(!last_says_why(&[row("u1", "user", "t1", "go", None), row("a1", "assistant", "t1", "ok", Some(done))]));
     }
 
     #[test]

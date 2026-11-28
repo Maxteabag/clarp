@@ -7,7 +7,11 @@
 //! the interrupted state's `user_stop` detail, shows the same line. The line
 //! is plain: your own Stop leaves "Stopped" to the transcript and names the
 //! queue only when messages wait. A queue the Stop paused says so in the
-//! composer and the explorer.
+//! composer and the explorer. On a Host that ends a stopped turn with its
+//! own line (`turn_end_reason`) and tells the Stop as the word "Stopped."
+//! (`stop_receipt_text`), the turn says it once: its partial answer stays,
+//! one quiet "Stopped." closes it, and the composer repeats nothing and
+//! sends at once.
 
 use std::time::Duration;
 
@@ -82,7 +86,7 @@ fn says(name: &'static str, stops: usize, expected: &'static str, out: String, s
 }
 
 pub fn stop_receipt_check(out: String) {
-    let (out_detail, out_refused, out_queue) = (out.clone(), out.clone(), out.clone());
+    let (out_detail, out_refused, out_queue, out_turn) = (out.clone(), out.clone(), out.clone(), out.clone());
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, _| {
             let loaded = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.rows().is_empty());
@@ -181,6 +185,60 @@ pub fn stop_receipt_check(out: String) {
                 return false;
             }
             shot(&out_queue, "stop-07-queue-paused");
+            true
+        })),
+        // ---- the turn says it once: a partial answer, then "Stopped."
+        ("turn tells it", Box::new(|app, _, _| {
+            let set = control("/__control/agent", &json!({"session": "rachel", "set": {"queued_turn_count": 0, "queue_paused": false}}))
+                .and_then(|()| control("/__control/turn-reason", &json!({"on": true})))
+                .and_then(|()| control("/__control/stop-text", &json!({"on": true})));
+            check(set.is_ok(), &format!("the Host ends turns with a reason and tells a Stop in a word: {set:?}"));
+            let turns = json!({"session": "rachel", "turns": [
+                {"id": "s-u", "role": "user", "text": "Compare the three build hosts", "origin": "user", "trace_id": "s-t"},
+                {"id": "s-a", "role": "assistant", "text": "The first host builds fastest, about 4 minutes for a clean build. The second", "phase": "final", "trace_id": "s-t"},
+            ]});
+            check(control("/__control/upsert", &turns).is_ok(), "Rachel has answered half way");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        working("partial working", json!({"ok": true, "terminated": 1, "stop_actor": "user", "stop_actor_verified": true,
+            "queue_paused": false, "goals_paused": 0, "text": "Stopped."})),
+        ("partial answer", Box::new(|app, window, _| {
+            let drawn = super::rows(window).iter().any(|r| r.id == "s-a");
+            app.engine.borrow().turn_end_reason("rachel") && drawn
+        })),
+        stop_by_command("partial stop"),
+        ("turn ends", Box::new(|_, _, elapsed| {
+            // Until the turn's end row comes, the composer says it.
+            if posts("/stop").len() < 6 || notice() != "Stopped." || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(8), &format!("before the turn's end row, the composer says Stopped.: {:?}", notice()));
+                return elapsed >= Duration::from_secs(8);
+            }
+            let end = json!({"session": "rachel", "turns": [
+                {"id": "s-a", "role": "assistant", "text": "The first host builds fastest, about 4 minutes for a clean build. The second", "phase": "final", "trace_id": "s-t",
+                 "turn": {"turn_id": "s-t", "status": "interrupted", "started_at_ms": 1_000, "ended_at_ms": 5_000, "worked_ms": 4_000, "tool_count": 0, "reason": "Stopped."}},
+            ]});
+            check(control("/__control/upsert", &end).is_ok(), "the Host closes the stopped turn with its reason");
+            check(state("interrupted", Some(json!({"source": "user_stop", "stop_actor": "user", "stop_text": "Stopped."}))).is_ok(), "and says the agent stopped");
+            true
+        })),
+        ("said once", Box::new(move |app, window, elapsed| {
+            let ids: Vec<String> = super::rows(window).iter().map(|r| r.id.to_string()).collect();
+            let line = clarp_core::turn_reason::key("s-t");
+            let drawn = ids.iter().any(|i| i == "s-a") && ids.iter().any(|i| *i == line);
+            if !drawn || !notice().is_empty() || elapsed < Duration::from_millis(600) {
+                check(elapsed < Duration::from_secs(8), &format!("the stopped turn keeps its answer and closes with its line: {ids:?}, composer {:?}", notice()));
+                return elapsed >= Duration::from_secs(8);
+            }
+            let at = |id: &str| ids.iter().position(|i| i == id);
+            check(at("s-a") < at(line.as_str()), &format!("the partial answer stays, the line under it: {ids:?}"));
+            check(super::rows(window).iter().any(|r| r.id == line.as_str() && r.author == "system"), "the line is one quiet system line");
+            check(notice().is_empty(), &format!("the composer does not say it again: {:?}", notice()));
+            let receipt = app.engine.borrow().stop_notice("rachel");
+            check(receipt == "Stopped.", &format!("the Stop's own line is still the Host's word, only not repeated: {receipt:?}"));
+            check(!app.engine.borrow().roster().find("rachel").is_some_and(|a| a.busy), "the turn is finished");
+            check(view().can_send, "and the next message sends at once");
+            shot(&out_turn, "stop-08-said-on-the-turn");
             true
         })),
     ];
