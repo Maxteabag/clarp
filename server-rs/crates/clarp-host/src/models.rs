@@ -38,6 +38,9 @@ const TOOLS: [&str; 7] = [
 const WITHIN: Duration = Duration::from_millis(2_500);
 /// How long what was found is told again without asking.
 const KEPT_FOR: Duration = Duration::from_secs(300);
+/// The efforts Antigravity ends a model's name in, which it offers over ACP as a thinking
+/// level apart from the model.
+const ACP_EFFORTS: [&str; 5] = ["minimal", "low", "medium", "high", "xhigh"];
 
 /// What is declared of a tool and this Host does not offer from an app, or cannot do with it
 /// yet. Claude Code: steering is not advertised, as the Python Host does not advertise it
@@ -263,27 +266,45 @@ impl Shelf {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
     }
 
+    /// Why a tool has no model of this name, checked against what the tool listed when it
+    /// was last asked, or for Antigravity, where it has not been, against the models it is
+    /// known to have. Codex is not held to a list it never gave. Antigravity over ACP is held
+    /// to what `agy models` listed, the models its ACP agent offers, and takes a model of it
+    /// also named without its effort (`gemini-4-neon`), as ACP offers the model and its
+    /// thinking level apart; where nothing was listed it is not held to the known models,
+    /// and its turn checks the name against what Antigravity offers over ACP. Only what was
+    /// found already is read: [`Shelf::model_error`] asks the tools first.
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
-        // ACP validates the selected model and its thinking level against the
-        // session's options. The picker need not have been opened first.
-        if tool != "codex" {
+        if !matches!(tool, "codex" | "agy" | "agy-acp") {
             return None;
         }
         let kept = self
             .kept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let row = kept
+        let observed = kept
             .as_ref()
             .map(|k| &k.told["providers"][tool])
-            .filter(|r| r["source"]["kind"] == "cli_probe")?;
+            .filter(|r| r["source"]["kind"] == "cli_probe");
+        let bundled = catalogue::declared(tool);
+        let row = observed.or_else(|| (tool == "agy").then_some(&bundled))?;
         let mut ids: Vec<_> = row["models"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|item| item["id"].as_str())
             .collect();
-        if ids.contains(&model.trim()) || ids.is_empty() {
+        let model = model.trim();
+        // A model of the list without the effort its name ends in.
+        let without_effort = |id: &&str| {
+            id.strip_prefix(model)
+                .and_then(|rest| rest.strip_prefix('-'))
+                .is_some_and(|effort| ACP_EFFORTS.contains(&effort))
+        };
+        if ids.contains(&model)
+            || (ids.is_empty() && tool == "codex")
+            || (tool == "agy-acp" && ids.iter().any(without_effort))
+        {
             return None;
         }
         let reason = "Invalid provider model identifier";
@@ -292,6 +313,30 @@ impl Shelf {
             "{reason}: {tool} has no model '{model}'; it offers {}",
             ids.join(", ")
         ))
+    }
+
+    /// The same, after asking the tools where what was found does not have the model: since
+    /// this Host started nobody may have asked them (an app asks when it opens its picker),
+    /// or a tool may list a model it did not have when it was asked more than five minutes
+    /// ago. A model that is there is let through without asking anything.
+    pub async fn model_error(&self, tool: &str, model: &str, now_ms: i64) -> Option<String> {
+        self.policy_model_error(tool, model)?;
+        self.told(now_ms).await;
+        self.policy_model_error(tool, model)
+    }
+
+    /// Has the tools asked, where nothing has been found of them since this Host started, so
+    /// that a check that cannot wait for them ([`Shelf::policy_model_error`]) reads what they
+    /// list and not only what is known of them.
+    pub async fn found_once(&self, now_ms: i64) {
+        let found = self
+            .kept
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some();
+        if !found {
+            self.told(now_ms).await;
+        }
     }
 
     /// The catalogue: what was found within the last five minutes under the logins that
@@ -441,6 +486,59 @@ mod tests {
         let to_the_second = crate::wire::to_the_second;
         assert_eq!(to_the_second(1_800_000_000_999), "2027-01-15T08:00:00Z");
         assert_eq!(to_the_second(0), "1970-01-01T00:00:00Z");
+    }
+
+    /// A shelf that holds what the tools were found to have, as `told` keeps it.
+    fn shelf_with(rows: Vec<(String, Value)>) -> Shelf {
+        let shelf = Shelf::default();
+        *shelf.kept.lock().unwrap() = Some(Kept {
+            at: Instant::now(),
+            logins: [0; 32],
+            told: catalogue::whole(rows, "2027-01-15T08:00:00Z"),
+        });
+        shelf
+    }
+
+    #[test]
+    fn antigravity_is_held_to_what_it_lists_and_its_refusal_names_them() {
+        let said = "gemini-5-x-low\tX (Low)\ngemini-5-x-high\tX\n";
+        let found = Found {
+            program: Some("/synthetic/bin/agy"),
+            version: None,
+            models: Some(said),
+        };
+        let at = "2027-01-15T08:00:00Z";
+        let shelf = shelf_with(vec![
+            ("agy".to_string(), catalogue::row("agy", &found, at)),
+            ("agy-acp".to_string(), catalogue::row("agy-acp", &found, at)),
+        ]);
+        for tool in ["agy", "agy-acp"] {
+            assert_eq!(shelf.policy_model_error(tool, "gemini-5-x-low"), None);
+            let refused = shelf
+                .policy_model_error(tool, "gemini-4-neon-medium")
+                .unwrap();
+            assert!(
+                refused.ends_with("it offers gemini-5-x-high, gemini-5-x-low"),
+                "{refused}"
+            );
+        }
+        // Over ACP a model of the list is also named without its effort, and nothing else.
+        assert_eq!(shelf.policy_model_error("agy-acp", "gemini-5-x"), None);
+        assert!(shelf.policy_model_error("agy", "gemini-5-x").is_some());
+        assert!(shelf.policy_model_error("agy-acp", "gemini-5").is_some());
+    }
+
+    #[test]
+    fn antigravity_not_yet_asked_is_held_to_the_models_it_is_known_to_have() {
+        let shelf = Shelf::default();
+        assert_eq!(
+            shelf.policy_model_error("agy", "gemini-4-neon-medium"),
+            None
+        );
+        let refused = shelf.policy_model_error("agy", "gemini-nothing").unwrap();
+        assert!(refused.contains("gemini-4-neon-medium"), "{refused}");
+        // Over ACP, with nothing listed, the turn checks the model against what is offered.
+        assert_eq!(shelf.policy_model_error("agy-acp", "gemini-nothing"), None);
     }
 
     #[test]
