@@ -399,13 +399,21 @@ fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
         ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
     ];
     let host = place.start_in("", &[], &world);
+    let ask = json!({
+        "name": "Thinker", "backend": "agy-acp", "model": "gemini-4-neon-medium"
+    });
+    let (status, made) = host.ask("POST", "/agents", Some(&ask));
+    assert_eq!(status, 200, "{made}");
     let options = host.get("/agent-model-options");
     assert!(options["providers"].get("agy").is_none());
     assert_eq!(options["providers"]["agy-acp"]["runs_through"], "agy");
-    let ask =
-        json!({"name": "Thinker", "backend": "agy-acp", "model": "claude-b", "effort": "high"});
-    let (status, made) = host.ask("POST", "/agents", Some(&ask));
-    assert_eq!(status, 200, "{made}");
+    assert!(
+        options["providers"]["agy-acp"]["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|model| model["id"] == "gemini-4-neon-medium")
+    );
     let session = made["session"].as_str().unwrap().to_string();
     host.send(&session, "think hard", "m-1");
     wait_for("the turn to finish", || host.state(&session) == "done");
@@ -419,8 +427,8 @@ fn an_agent_on_antigravity_over_acp_is_made_with_a_model_and_an_effort() {
     assert_eq!(
         set,
         [
-            json!(["model", "claude-b"]),
-            json!(["thought_level", "high"])
+            json!(["model", "gemini-4-neon"]),
+            json!(["thought_level", "medium"])
         ]
     );
 
