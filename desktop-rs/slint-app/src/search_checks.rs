@@ -791,12 +791,16 @@ pub fn find_in_chat_check(out: String) {
             let app = app_now();
             let mut engine = app.engine.borrow_mut();
             let original = clarp_core::i18n::current();
-            for (tag, month) in [("en", "Mar"), ("fr", "mars")] {
+            let date = chrono::NaiveDate::from_ymd_opt(2020, 3, 20).unwrap();
+            let english = clarp_core::i18n::format::date_short("en", date);
+            let french = clarp_core::i18n::format::date_short("fr", date);
+            check(english != french, "the fixture distinguishes English and French date formats");
+            for (tag, stamp) in [("en", english), ("fr", french)] {
                 clarp_core::i18n::set_current(tag);
                 let local = crate::search_view::items(&mut engine, "heron", 50).0;
                 let host = crate::search_view::found(&mut engine, "heron").items;
                 for hits in [local, host] {
-                    check(hits.iter().any(|r| r.label.contains(month) && r.label.contains("2020")), &format!("search timestamps use the {tag} month and year"));
+                    check(hits.iter().any(|r| r.label.contains(stamp.as_str())), &format!("search timestamps use the {tag} date format"));
                 }
             }
             clarp_core::i18n::set_current(original);

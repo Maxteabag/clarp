@@ -128,27 +128,17 @@ fn escape(text: &str) -> String {
     escaped
 }
 
-fn hit_stamp(epoch_ms: i64, today: chrono::NaiveDate) -> String {
-    use clarp_core::i18n::{self, format};
-    if epoch_ms <= 0 {
-        return String::new();
-    }
-    chrono::DateTime::from_timestamp_millis(epoch_ms).map_or_else(String::new, |instant| {
-        format::moment(i18n::current(), instant.with_timezone(&chrono::Local).naive_local(), today, format::Clock::Locale)
-    })
-}
-
 /// The results of `query` as switcher rows (their detail is the snippet,
 /// as Markdown with the matches in bold).
 pub fn items(engine: &mut Engine, query: &str, limit: usize) -> (Vec<Item>, SearchResults) {
     let results = engine.search_messages(query, limit);
-    let today = chrono::Local::now().date_naive();
+    let now = chrono::Local::now();
     let items = results
         .hits
         .iter()
         .map(|hit| {
             let snippet: String = hit.snippet.iter().map(|s| if s.mark { format!("**{}**", escape(&s.text)) } else { escape(&s.text) }).collect();
-            let when = hit_stamp(hit.epoch_ms, today);
+            let when = clarp_core::time_format::chat_stamp(hit.epoch_ms, &now);
             let who = who(&hit.role);
             // i18n: search page, a found message's line: marks a message found only in this computer's saved copy of the chat (adjective)
             let cached = if hit.source == Source::Cache { format!(" · {}", clarp_core::tr!("search.hit_cached" => "cached")) } else { String::new() };
@@ -279,13 +269,13 @@ pub fn found(engine: &mut Engine, query: &str) -> Found {
         // Until the Hosts answer the words: what this computer holds.
         return Found { items: local(engine), note: String::new(), empty: searching() };
     }
-    let today = chrono::Local::now().date_naive();
+    let now = chrono::Local::now();
     let mut items: Vec<Item> = results
         .hits
         .iter()
         .map(|hit| {
             let snippet: String = hit.snippet.iter().map(|s| if s.mark { format!("**{}**", escape(&s.text)) } else { escape(&s.text) }).collect();
-            let when = hit_stamp(hit.epoch_ms, today);
+            let when = clarp_core::time_format::chat_stamp(hit.epoch_ms, &now);
             let who = who(&hit.role);
             let known = engine.chat_name(&hit.session);
             let name = if (known == hit.session || known.is_empty()) && !hit.name.is_empty() { hit.name.clone() } else { known };
