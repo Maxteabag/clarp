@@ -558,6 +558,10 @@ pub struct Message {
     /// Rust Host contract 191): `ended_from_outside`, `usage_limit`, `auth`,
     /// `connection`, …; empty where the Host keeps none.
     pub failure_kind: String,
+    /// The Host's explanation of a failed turn on its failure or
+    /// interrupted notice (`error`, feature `turn_error_explained`, Rust Host
+    /// contract 217): drawn as one card. `None` from an older Host.
+    pub turn_error: Option<crate::turn_error::TurnError>,
 }
 
 /// A failure that was no fault of the tool: its process was killed by a
@@ -614,6 +618,7 @@ impl Message {
             automated: automated_row(object),
             tool_details_available: json::boolean(object, "tool_details_available"),
             failure_kind: s("failure_kind"),
+            turn_error: object.get("error").filter(|_| json::string(object, "role") != "user").and_then(crate::turn_error::TurnError::from_json),
             delivery_failed: json::boolean(object, "delivery_failed"),
             send_state: send_state(object),
             tools: json::array(object, "tools"),
