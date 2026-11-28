@@ -68,7 +68,8 @@ export component PrefEditorDialog inherits Modal {
                 border-width: 1px;
                 border-color: Palette.border;
                 accessible-role: image;
-                accessible-label: "Colour preview";
+                // i18n: settings value editor, accessibility label of the swatch that shows the colour being typed (noun)
+                accessible-label: @tr("Colour preview");
             }
             Field {
                 text <=> PrefEditor.text;
@@ -82,7 +83,8 @@ export component PrefEditorDialog inherits Modal {
                 }
             }
         }
-        if PrefEditor.colour: Text { text: "The theme's colours"; color: Palette.muted; font-size: 11 * Look.unit; }
+        // i18n: settings value editor, caption above the row of the reading theme's colour swatches (click one to take it)
+        if PrefEditor.colour: Text { text: @tr("The theme's colours"); color: Palette.muted; font-size: 11 * Look.unit; }
         // Twelve to a line; a click takes the colour.
         if PrefEditor.colour: Rectangle {
             height: 2 * 34px;
@@ -111,9 +113,12 @@ export component PrefEditorDialog inherits Modal {
         HorizontalLayout {
             spacing: 8px;
             alignment: end;
-            IconButton { icon: @image-url("icons/restore.svg"); label: "Reset to default"; clicked => { PrefEditor.reset(); } }
-            IconButton { icon: @image-url("icons/rail-close.svg"); label: "Cancel"; clicked => { PrefEditor.cancel(); } }
-            Button { text: "Keep · Enter"; primary: true; enabled: PrefEditor.error == ""; clicked => { PrefEditor.accept(); } }
+            // i18n: settings value editor, button (verb phrase): put the setting back to its default value
+            IconButton { icon: @image-url("icons/restore.svg"); label: @tr("Reset to default"); clicked => { PrefEditor.reset(); } }
+            // i18n: settings value editor, button (verb): close the editor without changing the setting
+            IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("Cancel"); clicked => { PrefEditor.cancel(); } }
+            // i18n: settings value editor, main button (verb): keep the typed value; "Enter" is the key that does the same, a key name left as is
+            Button { text: @tr("Keep · Enter"); primary: true; enabled: PrefEditor.error == ""; clicked => { PrefEditor.accept(); } }
         }
     }
 }
@@ -143,8 +148,10 @@ export component PrefConfirmDialog inherits Modal {
             HorizontalLayout {
                 spacing: 8px;
                 alignment: end;
-                IconButton { icon: @image-url("icons/rail-close.svg"); label: "No · Esc"; clicked => { PrefEditor.cancel(); } }
-                Button { text: "Yes · Enter"; primary: true; clicked => { PrefEditor.confirmed(); } }
+                // i18n: settings confirmation dialog (before an action that cannot be undone), button: answer no; "Esc" is the key that does the same, a key name left as is
+                IconButton { icon: @image-url("icons/rail-close.svg"); label: @tr("No · Esc"); clicked => { PrefEditor.cancel(); } }
+                // i18n: settings confirmation dialog (before an action that cannot be undone), main button: answer yes; "Enter" is the key that does the same, a key name left as is
+                Button { text: @tr("Yes · Enter"); primary: true; clicked => { PrefEditor.confirmed(); } }
             }
         }
     }

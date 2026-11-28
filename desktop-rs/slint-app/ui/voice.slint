@@ -44,14 +44,19 @@ export component VoiceDialog inherits Modal {
         spacing: 14px;
         HorizontalLayout {
             Text {
-                text: (VoiceBridge.agent-name != "" ? VoiceBridge.agent-name : "Agent") + "’s voice";
+                text: VoiceBridge.agent-name != ""
+                    // i18n: voice picker dialog, title; {} is the agent's name (the dialog picks the voice the agent speaks with)
+                    ? @tr("{}’s voice", VoiceBridge.agent-name)
+                    // i18n: voice picker dialog, title when the agent has no name
+                    : @tr("Agent’s voice");
                 color: Palette.text;
                 font-size: 17 * Look.unit;
                 font-weight: 600;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { VoiceBridge.close(); } }
+            // i18n: voice picker dialog, tooltip of the close button (verb)
+            IconButton { icon: @image-url("icons/close.svg"); tip: @tr("Close"); clicked => { VoiceBridge.close(); } }
         }
         if VoiceBridge.bio != "": Text { text: VoiceBridge.bio; color: Palette.muted; font-size: 12 * Look.unit; wrap: word-wrap; }
         if VoiceBridge.loading: Busy { height: 18px; reduced-motion: VoiceBridge.reduced-motion; }
@@ -81,13 +86,15 @@ export component VoiceDialog inherits Modal {
                         IconButton {
                             y: (parent.height - self.height) / 2;
                             icon: @image-url("icons/play.svg");
-                            tip: "Preview";
+                            // i18n: voice picker dialog, tooltip of the play button on a voice row (verb): play a sample of this voice
+                            tip: @tr("Preview");
                             clicked => { VoiceBridge.preview(voice.id); }
                         }
                         if !voice.current && !voice.taken: IconButton {
                             y: (parent.height - self.height) / 2;
                             icon: @image-url("icons/check.svg");
-                            tip: "Use";
+                            // i18n: voice picker dialog, tooltip of the check button on a voice row (verb): use this voice for the agent
+                            tip: @tr("Use");
                             clicked => { VoiceBridge.choose(voice.id); }
                         }
                     }

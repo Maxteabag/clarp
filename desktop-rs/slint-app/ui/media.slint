@@ -31,7 +31,8 @@ export component MediaGallery inherits Rectangle {
         HorizontalLayout {
             height: 18px;
             Text {
-                text: "MEDIA  " + root.items.length;
+                // i18n: chat side panel, header of the media gallery (noun, written in capitals where the script has them); {} is how many images the chat holds
+                text: @tr("MEDIA  {}", root.items.length);
                 color: Palette.muted;
                 font-family: "JetBrains Mono";
                 font-size: 9 * Look.unit;
@@ -43,7 +44,11 @@ export component MediaGallery inherits Rectangle {
             if root.compact: Rectangle {
                 width: 20px;
                 accessible-role: button;
-                accessible-label: root.expanded ? "Collapse media" : "Show recent media";
+                accessible-label: root.expanded
+                    // i18n: chat side panel, accessibility label of the +/− button that folds the media gallery away (action)
+                    ? @tr("Collapse media")
+                    // i18n: chat side panel, accessibility label of the +/− button that unfolds the media gallery (action)
+                    : @tr("Show recent media");
                 Text { font-size: ChromeText.body; text: root.expanded ? "−" : "+"; color: Palette.chrome-text; }
                 TouchArea { clicked => { root.expanded = !root.expanded; } }
             }

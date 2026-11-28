@@ -347,7 +347,8 @@ export component PaneFrame inherits Rectangle {
         vertical-alignment: center;
         overflow: elide;
         accessible-role: button;
-        accessible-label: "Agent profile";
+        // i18n: chat pane border, accessibility label of the agent's name in the top right corner (a button that opens the agent's profile)
+        accessible-label: @tr("Agent profile");
         name-touch := TouchArea { mouse-cursor: pointer; clicked => { root.info-clicked(); } }
     }
     info-text := Text {

@@ -60,7 +60,8 @@ export component FontPicker inherits Rectangle {
             search := Field {
                 height: 38px;
                 font-size: 14 * Look.unit;
-                placeholder-text: "Type to find a font";
+                // i18n: font picker, placeholder of the search field at the top
+                placeholder-text: @tr("Type to find a font");
                 edited(text) => { FontBridge.edited(text); }
             }
             HorizontalLayout {
@@ -80,10 +81,12 @@ export component FontPicker inherits Rectangle {
                             background: FontBridge.monospace-only ? Palette.accent : transparent;
                             accessible-role: checkbox;
                             accessible-checked: FontBridge.monospace-only;
-                            accessible-label: "Monospace only";
+                            // i18n: font picker, accessibility label of the checkbox that lists only fixed-width (monospace) fonts
+                            accessible-label: @tr("Monospace only");
                             if FontBridge.monospace-only: Text { text: "✓"; color: Palette.accent-text; font-size: 11 * Look.unit; horizontal-alignment: center; vertical-alignment: center; }
                         }
-                        Text { text: "Monospace only"; color: mono.has-hover ? Palette.text : Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; }
+                        // i18n: font picker, label beside the checkbox that lists only fixed-width (monospace) fonts
+                        Text { text: @tr("Monospace only"); color: mono.has-hover ? Palette.text : Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; }
                     }
                 }
                 Rectangle { horizontal-stretch: 1; }
@@ -91,7 +94,8 @@ export component FontPicker inherits Rectangle {
             }
             if FontBridge.note != "": Text { text: FontBridge.note; color: Palette.warning; font-size: 12 * Look.unit; wrap: word-wrap; }
             if FontBridge.fonts.length == 0: Text {
-                text: "No installed font matches";
+                // i18n: font picker, empty state when no installed font matches the search
+                text: @tr("No installed font matches");
                 color: Palette.faint;
                 font-size: 12 * Look.unit;
                 horizontal-alignment: center;
@@ -121,7 +125,8 @@ export component FontPicker inherits Rectangle {
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
-                        if font.monospace: Text { text: "mono"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+                        // i18n: font picker, small tag after a font's name: the font is fixed-width (short for monospace)
+                        if font.monospace: Text { text: @tr("mono"); color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
                         if font.saved: Text { text: "✓"; color: Palette.accent; font-size: 13 * Look.unit; vertical-alignment: center; }
                     }
                 }

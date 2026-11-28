@@ -38,7 +38,11 @@ export component ImageView inherits Rectangle {
                 font-size: ChromeText.body;
                 width: parent.width;
                 height: parent.height;
-                text: root.shown.failed ? "Image unavailable" : "Loading…";
+                text: root.shown.failed
+                    // i18n: full-size image viewer, shown in place of an image that could not be fetched
+                    ? @tr("Image unavailable")
+                    // i18n: full-size image viewer, shown while the image is being fetched
+                    : @tr("Loading…");
                 color: root.shown.failed ? Palette.warning : Palette.faint;
                 horizontal-alignment: center;
                 vertical-alignment: center;
@@ -54,8 +58,10 @@ export component ImageView inherits Rectangle {
                 font-size: 12 * Look.unit;
                 vertical-alignment: center;
             }
-            if root.images.length > 1: KeyHint { key: "←/→"; label: "Move"; emphasised: true; clicked => { root.moved(1); } }
-            KeyHint { key: "Esc"; label: "Close"; emphasised: true; clicked => { root.done(); } }
+            // i18n: full-size image viewer, key hint at the bottom beside ←/→ (verb): go to the previous or next image
+            if root.images.length > 1: KeyHint { key: "←/→"; label: @tr("Move"); emphasised: true; clicked => { root.moved(1); } }
+            // i18n: full-size image viewer, key hint at the bottom beside Esc (verb): close the viewer
+            KeyHint { key: "Esc"; label: @tr("Close"); emphasised: true; clicked => { root.done(); } }
         }
     }
 }

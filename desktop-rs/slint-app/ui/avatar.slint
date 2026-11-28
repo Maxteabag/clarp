@@ -111,7 +111,24 @@ export component ActivitySweep inherits Rectangle {
 // StatusPill.qml: a state worth showing (working, waiting, offline).
 export component StatusPill inherits HorizontalLayout {
     in property <string> status;
-    property <string> label: root.status != "" ? root.status : "offline";
+    // The Host's state code, shown in the reader's language; a code this app
+    // does not know yet is shown as the Host sent it.
+    property <string> label:
+        // i18n: agent status pill (on an agent card and its profile), shown in capitals where the script has them: the agent is not connected (adjective)
+        root.status == "" || root.status == "offline" ? @tr("offline")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent is thinking (present participle, a state)
+        : root.status == "thinking" ? @tr("thinking")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent is running a tool (noun, short for "using a tool")
+        : root.status == "tool" ? @tr("tool")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent is compacting (summarising) its conversation (a state)
+        : root.status == "compacting" ? @tr("compacting")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent waits for the user (a state)
+        : root.status == "waiting" ? @tr("waiting")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent's turn was stopped before it finished (a state)
+        : root.status == "interrupted" ? @tr("interrupted")
+        // i18n: agent status pill, shown in capitals where the script has them: the agent's last turn failed (noun)
+        : root.status == "error" ? @tr("error")
+        : root.status;
     property <bool> quiet: root.status == "live" || root.status == "done" || root.status == "idle" || root.status == "spawned";
     property <color> tone: root.status == "thinking" || root.status == "tool" || root.status == "compacting" ? Palette.success
         : root.status == "waiting" || root.status == "interrupted" ? Palette.danger

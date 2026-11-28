@@ -37,7 +37,8 @@ export component LinkHintLayer inherits Rectangle {
         border-width: 1px;
         border-color: Palette.window;
         accessible-role: text;
-        accessible-label: "Link " + badge.label + ": " + badge.url;
+        // i18n: link hints over a message (keyboard link picking), accessibility label of a numbered badge; {0} is the badge's key, {1} the link's address
+        accessible-label: @tr("Link {0}: {1}", badge.label, badge.url);
         label := Text {
             text: badge.label;
             color: Palette.accent-text;
