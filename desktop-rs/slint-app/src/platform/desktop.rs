@@ -503,11 +503,12 @@ pub fn close_decision(decision_id: &str) {
 }
 
 /// Closes the popups `which` picks (`logged` is what a check records). A
-/// popup is known by what owns its id now: one a newer popup is replacing
-/// is no longer it. A popup still on its way is closed as soon as the
-/// desktop names it, unless a newer popup of the chat waits to replace it;
-/// a popup waiting that `which` picks is not sent. `whole_chat` (the chat
-/// read or opened) also drops whatever else of the chat waits.
+/// shown popup's buttons stop at once (its entry goes); its id is closed
+/// unless another popup's Notify is replacing it, which then owns the id. A
+/// popup still on its way is closed as soon as the desktop names it, unless
+/// a newer popup of the chat waits to replace it; a popup waiting that
+/// `which` picks is not sent. `whole_chat` (the chat read or opened) also
+/// drops whatever else of the chat waits.
 fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_json::Value) {
     let gone: Vec<Shown> = SHOWN.with(|shown| {
         let mut shown = shown.borrow_mut();
@@ -542,8 +543,33 @@ fn close_where(which: impl Fn(&Shown) -> bool, whole_chat: bool, logged: serde_j
     }
     #[cfg(not(target_os = "macos"))]
     for popup in gone {
-        close_notification(popup.id);
+        if !taken_over(popup.id) {
+            close_notification(popup.id);
+        }
     }
+}
+
+/// Another popup's Notify is replacing `id` and keeps it (not one that is
+/// itself closed and goes with it).
+#[cfg(not(target_os = "macos"))]
+fn taken_over(id: u32) -> bool {
+    IN_FLIGHT.with(|flights| flights.borrow().iter().any(|f| f.replacing == Some(id) && !(f.close && f.next.is_none())))
+}
+
+/// Closes the popup a button was pressed on, and only it.
+fn close_id(id: u32) {
+    let gone = SHOWN.with(|shown| {
+        let mut shown = shown.borrow_mut();
+        let before = shown.len();
+        shown.retain(|s| s.id != id);
+        before != shown.len()
+    });
+    #[cfg(not(target_os = "macos"))]
+    if gone && !taken_over(id) {
+        close_notification(id);
+    }
+    #[cfg(target_os = "macos")]
+    let _ = gone;
 }
 
 /// What a popup is for, as kept once the desktop has named it `id`.
@@ -599,9 +625,13 @@ fn remember(popup: Shown) {
 }
 
 /// A button of a popup was pressed (`default` is a click on it).
+/// It acts on what the popup with that id offers now (the committed map):
+/// while a newer popup's Notify is replacing it, still the older card, and
+/// nothing once that card was closed (answered, withdrawn, read).
 pub fn action_invoked(id: u32, key: &str) {
     let Some(popup) = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.id == id).cloned()) else { return };
-    act_on(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
+    close_id(id);
+    act(&popup.session, &popup.message_id, &popup.decision_id, &popup.response_type, key);
 }
 
 /// What a popup's button does: open the chat at the message, mark it
@@ -609,8 +639,12 @@ pub fn action_invoked(id: u32, key: &str) {
 /// question, or send a failed turn's message again (opening the chat when
 /// the answer or the retry cannot go, and for Switch model and Sign in).
 pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
-    let Some(app) = crate::app() else { return };
     close_chat(session);
+    act(session, message_id, decision_id, response_type, key);
+}
+
+fn act(session: &str, message_id: &str, decision_id: &str, response_type: &str, key: &str) {
+    let Some(app) = crate::app() else { return };
     match key {
         "mark-read" => {
             app.engine.borrow_mut().mark_chat_read(session);
@@ -671,6 +705,9 @@ struct InFlight {
     popup: Shown,
     next: Option<Note>,
     close: bool,
+    /// The id this Notify replaces: it becomes this popup's (and its
+    /// buttons this popup's) only once the Notify returns.
+    replacing: Option<u32>,
     /// The id of a closed popup this one replaces: closed if this Notify
     /// fails, so the closed popup does not stay.
     replaces_closed: Option<u32>,
@@ -701,6 +738,13 @@ fn notify_macos(title: String, body: String, sound: bool) {
 /// category, the chat's earlier popup replaced, and buttons.
 #[cfg(not(target_os = "macos"))]
 fn notify_freedesktop(note: Note) {
+    send(note, None);
+}
+
+/// Sends a popup, or queues it behind the chat's Notify on its way.
+/// `closed`: the id of a closed popup of the chat it replaces.
+#[cfg(not(target_os = "macos"))]
+fn send(note: Note, closed: Option<u32>) {
     let has_tray = SERVICES.with(|slot| slot.borrow().as_ref().is_some_and(|s| s.tray.is_some()));
     if !has_tray && !test_daemon() {
         return;
@@ -718,18 +762,15 @@ fn notify_freedesktop(note: Note) {
                 None
             }
             None => {
-                flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false, replaces_closed: None });
+                let replaces = closed.or_else(|| SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map(|s| s.id)));
+                flights.push(InFlight { popup: shown_of(&note, 0), next: None, close: false, replacing: replaces, replaces_closed: closed });
                 Some(note)
             }
         }
     });
     let Some(note) = note else { return };
-    let replaces = SHOWN.with(|shown| shown.borrow().iter().find(|s| s.session == note.session).map_or(0, |s| s.id));
-    // From now the id is this popup's: a close of the one it replaces must
-    // not take it down.
-    if replaces != 0 {
-        remember(shown_of(&note, replaces));
-    }
+    // The shown popup's buttons stay its own until this Notify returns.
+    let replaces = IN_FLIGHT.with(|flights| flights.borrow().iter().find(|f| f.popup.session == note.session).and_then(|f| f.replacing)).unwrap_or(0);
     let actions = actions(&note);
     runtime::handle().spawn(async move {
         let sent = async {
@@ -785,17 +826,13 @@ fn delivered(popup: Shown, id: Option<u32>) {
             }
         }
         // Closed meanwhile, and a newer popup waits: it takes the id, so the
-        // closed one goes and the newer stays.
-        (Some(id), true, Some(next)) => {
-            remember(popup);
-            notify_freedesktop(next);
-            IN_FLIGHT.with(|flights| {
-                if let Some(flight) = flights.borrow_mut().iter_mut().find(|f| f.popup.session == session) {
-                    flight.replaces_closed = Some(id);
-                }
-            });
+        // closed one goes and the newer stays. The closed one's buttons are
+        // never committed.
+        (Some(id), true, Some(next)) => send(next, Some(id)),
+        (Some(id), true, None) => {
+            SHOWN.with(|shown| shown.borrow_mut().retain(|s| s.id != id));
+            close_notification(id);
         }
-        (Some(id), true, None) => close_notification(id),
         // Not shown: a closed popup it was to replace still goes.
         (None, _, next) => {
             if let Some(closed) = replaces_closed {
