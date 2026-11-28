@@ -98,7 +98,11 @@ export component Settings inherits Rectangle {
                 // i18n: Settings page, title at the top (noun), written in capitals where the script has them
                 Text { text: @tr("SETTINGS"); color: Palette.chrome-text; font-size: 16 * Look.unit; font-weight: 700; }
                 Text {
-                    text: search.has-focus ? "↓ / Enter results · Esc clear" : "↑↓ move · Enter change · ←→ / −+ adjust · ⌫ reset · ⇧⌫ section · / search · Esc back";
+                    text: search.has-focus
+                        // i18n: Settings page, key help beside the title while the search field has focus; ↓, Enter and Esc are key names left as is; "results" means go to the results, "clear" empties the search (verb)
+                        ? @tr("↓ / Enter results · Esc clear")
+                        // i18n: Settings page, key help beside the title; the arrows, Enter, −+, ⌫, ⇧⌫, / and Esc are keys left as is; each word says what its key does (move, change, adjust, reset, reset the section, search, go back: verbs, "section" short for reset the section)
+                        : @tr("↑↓ move · Enter change · ←→ / −+ adjust · ⌫ reset · ⇧⌫ section · / search · Esc back");
                     color: Palette.muted;
                     font-size: 11 * Look.unit;
                     vertical-alignment: center;
@@ -107,12 +111,15 @@ export component Settings inherits Rectangle {
             search := Field {
                 height: 34px;
                 font-size: 13 * Look.unit;
-                placeholder-text: "Search settings (/): hide, theme, voice…";
-                accessible-label: "Search settings";
+                // i18n: Settings page, placeholder of the search field; / is the key that focuses it; "hide, theme, voice" are example words to search for, translate them as the setting names are translated
+                placeholder-text: @tr("Search settings (/): hide, theme, voice…");
+                // i18n: Settings page, accessibility label of the search field (verb phrase: search the settings)
+                accessible-label: @tr("Search settings");
                 edited(text) => { root.searched(text); }
             }
             if root.query != "" && root.rows.length == 0: Text {
-                text: "No setting matches";
+                // i18n: Settings page, empty state when no setting matches the search
+                text: @tr("No setting matches");
                 color: Palette.faint;
                 font-size: 12 * Look.unit;
             }
@@ -180,7 +187,8 @@ export component Settings inherits Rectangle {
                             border-radius: 3px;
                             background: Palette.accent;
                             accessible-role: text;
-                            accessible-label: "Changed";
+                            // i18n: Settings page, accessibility label of the dot beside a setting that differs from its default (adjective)
+                            accessible-label: @tr("Changed");
                         }
                         if row.kind == "color": Rectangle {
                             width: 22px;

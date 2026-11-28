@@ -107,13 +107,17 @@ component ArtifactCard inherits Rectangle {
             spacing: 8px;
             alignment: start;
             if root.artifact.readable: Button {
-                text: "Read";
-                accessible-label: "Read " + root.artifact.title;
+                // i18n: Updates page, artifact card, button (verb, imperative): open the artifact to read it
+                text: @tr("Read");
+                // i18n: Updates page, artifact card, accessibility label of the Read button (verb); {} is the artifact's title
+                accessible-label: @tr("Read {}", root.artifact.title);
                 clicked => { root.open(root.artifact.id); }
             }
-            if root.artifact.session != "": Button { text: "Open chat"; clicked => { root.chat(root.artifact.session); } }
+            // i18n: Updates page, artifact card, button (verb phrase): open the chat the artifact came from
+            if root.artifact.session != "": Button { text: @tr("Open chat"); clicked => { root.chat(root.artifact.session); } }
             if root.artifact.form: Text {
-                text: "Interactive form unavailable";
+                // i18n: Updates page, artifact card, note on a form artifact: this app cannot show interactive forms
+                text: @tr("Interactive form unavailable");
                 color: Palette.warning;
                 font-size: 12 * Look.unit;
                 vertical-alignment: center;
@@ -150,7 +154,8 @@ export component Updates inherits Rectangle {
             spacing: 10px;
             vertical-stretch: 0;
             Text {
-                text: "UPDATES";
+                // i18n: Updates page, title at the top (noun, plural; written in capitals where the script has them)
+                text: @tr("UPDATES");
                 color: Palette.text;
                 font-size: 17 * Look.unit;
                 font-weight: 600;
@@ -158,7 +163,8 @@ export component Updates inherits Rectangle {
                 vertical-alignment: center;
             }
             if root.attention.length > 0: Text {
-                text: root.attention.length + " need attention";
+                // i18n: Updates page, line beside the title; {n} is how many items wait for the user to answer or act
+                text: @tr("{n} need attention" | "{n} need attention" % root.attention.length);
                 color: Palette.danger;
                 font-size: 11 * Look.unit;
                 vertical-alignment: center;
@@ -167,7 +173,8 @@ export component Updates inherits Rectangle {
             if root.loading: Spinner { width: 18px; height: 18px; indeterminate: true; y: 5px; }
             IconButton {
                 icon: @image-url("icons/refresh.svg");
-                label: "Refresh updates (Ctrl+R)";
+                // i18n: Updates page, refresh button (verb phrase); Ctrl+R is its shortcut, key names left as is
+                label: @tr("Refresh updates (Ctrl+R)");
                 clicked => { root.refresh(); }
             }
         }
@@ -186,7 +193,8 @@ export component Updates inherits Rectangle {
             VerticalLayout {
                 spacing: 14px;
                 padding-right: 12px;
-                if root.attention.length > 0: SectionTitle { text: "NEEDS ATTENTION"; }
+                // i18n: Updates page, section heading over the items waiting for the user (written in capitals where the script has them)
+                if root.attention.length > 0: SectionTitle { text: @tr("NEEDS ATTENTION"); }
                 for item in root.attention: Rectangle {
                     background: Palette.control;
                     border-radius: 3px;
@@ -219,7 +227,8 @@ export component Updates inherits Rectangle {
                                 clicked => { root.resolve(item.id, "no", item.revision); }
                             }
                             Button {
-                                text: item.pending ? "Resolving…" : item.yes-label;
+                                // i18n: Updates page, decision item, the yes button while the answer is being sent (a state: the decision is being resolved)
+                                text: item.pending ? @tr("Resolving…") : item.yes-label;
                                 primary: true;
                                 enabled: !item.pending;
                                 clicked => { root.resolve(item.id, "yes", item.revision); }
@@ -227,7 +236,8 @@ export component Updates inherits Rectangle {
                         }
                     }
                 }
-                if root.jobs.length > 0: SectionTitle { text: "BACKGROUND JOBS"; }
+                // i18n: Updates page, section heading over long-running jobs agents started (noun, written in capitals where the script has them)
+                if root.jobs.length > 0: SectionTitle { text: @tr("BACKGROUND JOBS"); }
                 for job in root.jobs: HorizontalLayout {
                     padding: 8px;
                     spacing: 9px;
@@ -261,19 +271,22 @@ export component Updates inherits Rectangle {
                     }
                     IconButton {
                         icon: @image-url("icons/terminal.svg");
-                        label: "Job output";
+                        // i18n: Updates page, background job row, button that shows the job's output (noun phrase)
+                        label: @tr("Job output");
                         size: 26px;
                         clicked => { root.job-output(job.id); }
                     }
                     if job.active && job.can-cancel: IconButton {
                         icon: @image-url("icons/rail-close.svg");
-                        label: "Cancel background job";
+                        // i18n: Updates page, background job row, button (verb phrase): stop the job
+                        label: @tr("Cancel background job");
                         size: 26px;
                         enabled: !job.pending;
                         clicked => { root.cancel-job(job.id); }
                     }
                 }
-                if root.artifacts.length > 0: SectionTitle { text: "RECENT ARTIFACTS"; }
+                // i18n: Updates page, section heading over things agents published lately (reports, files, media; noun, written in capitals where the script has them)
+                if root.artifacts.length > 0: SectionTitle { text: @tr("RECENT ARTIFACTS"); }
                 for artifact in root.artifacts: ArtifactCard {
                     artifact: artifact;
                     open(id) => { root.open-report(id); }
@@ -283,7 +296,8 @@ export component Updates inherits Rectangle {
                     padding-top: 80px;
                     spacing: 7px;
                     Text { text: "✓"; color: Palette.chrome-text; font-size: 17 * Look.unit; horizontal-alignment: center; }
-                    Text { text: "No updates"; color: Palette.text; font-size: 14 * Look.unit; horizontal-alignment: center; }
+                    // i18n: Updates page, empty state when nothing needs the user and nothing new was published
+                    Text { text: @tr("No updates"); color: Palette.text; font-size: 14 * Look.unit; horizontal-alignment: center; }
                 }
             }
         }

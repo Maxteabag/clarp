@@ -134,9 +134,15 @@ component Card inherits Rectangle {
         HorizontalLayout {
             spacing: 8px;
             Text { text: root.card.backend; color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
-            Text { text: root.card.model != "" ? root.card.model : "default"; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
+            // i18n: All agents overview, agent card, shown in place of the model name when the agent uses its backend's default model (adjective/noun)
+            Text { text: root.card.model != "" ? root.card.model : @tr("default"); color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
             Text { text: root.card.folder; color: Palette.faint; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; overflow: elide; horizontal-stretch: 1; }
-            if root.card.queued > 0: RevealText { text: root.card.queued + (root.card.queue-paused ? " queued · paused" : " queued"); color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
+            if root.card.queued > 0: RevealText {
+                text: root.card.queue-paused
+                    // i18n: All agents overview, agent card, tag: {n} messages wait in the agent's queue, and the queue is paused
+                    ? @tr("{n} queued · paused" | "{n} queued · paused" % root.card.queued)
+                    // i18n: All agents overview, agent card, tag: {n} messages wait in the agent's queue
+                    : @tr("{n} queued" | "{n} queued" % root.card.queued); color: Palette.chrome-text; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
         }
         if root.card.context >= 0: Rectangle {
             height: 3px;
@@ -146,7 +152,8 @@ component Card inherits Rectangle {
         }
         if root.card.schedules.length > 0: VerticalLayout {
             spacing: 5px;
-            Text { text: "SCHEDULED TASKS"; color: Palette.muted; font-size: 11 * Look.unit; font-weight: 600; letter-spacing: 1 * Look.unit; }
+            // i18n: All agents overview, agent card, heading over the agent's scheduled tasks (noun, written in capitals where the script has them)
+            Text { text: @tr("SCHEDULED TASKS"); color: Palette.muted; font-size: 11 * Look.unit; font-weight: 600; letter-spacing: 1 * Look.unit; }
             for schedule in root.card.schedules: Rectangle {
                 height: 48px;
                 border-radius: 2px;
@@ -166,7 +173,11 @@ component Card inherits Rectangle {
                     }
                     TextButton {
                         y: (parent.height - self.height) / 2;
-                        text: schedule.on ? "On" : "Off";
+                        text: schedule.on
+                            // i18n: All agents overview, scheduled task row, toggle button while the task is on (a state; clicking turns it off)
+                            ? @tr("On")
+                            // i18n: All agents overview, scheduled task row, toggle button while the task is off (a state; clicking turns it on)
+                            : @tr("Off");
                         primary: schedule.on;
                         clicked => { OverviewBridge.schedule(schedule.id, !schedule.on); }
                     }
@@ -175,11 +186,13 @@ component Card inherits Rectangle {
         }
         HorizontalLayout {
             spacing: 5px;
-            TextButton { text: "Open"; clicked => { OverviewBridge.open(root.card.session); } }
+            // i18n: All agents overview, agent card, button (verb): open the agent's chat
+            TextButton { text: @tr("Open"); clicked => { OverviewBridge.open(root.card.session); } }
             Rectangle { horizontal-stretch: 1; }
             IconButton {
                 icon: @image-url("icons/more.svg");
-                tip: "Agent actions";
+                // i18n: All agents overview, agent card, tooltip of the ··· menu button (noun phrase: actions for this agent)
+                tip: @tr("Agent actions");
                 clicked => {
                     OverviewBridge.menu = OverviewBridge.menu == root.card.session ? "" : root.card.session;
                 }
@@ -193,16 +206,38 @@ component Card inherits Rectangle {
             background: Palette.window;
             VerticalLayout {
                 padding: 3px;
-                MenuItem { text: "Relaunch"; clicked => { OverviewBridge.relaunch(root.card.session); } }
-                MenuItem { text: "Voice"; clicked => { OverviewBridge.voice(root.card.session); } }
+                // i18n: All agents overview, agent card menu item (verb): restart the agent
+                MenuItem { text: @tr("Relaunch"); clicked => { OverviewBridge.relaunch(root.card.session); } }
+                // i18n: All agents overview, agent card menu item (noun): pick the voice the agent speaks with
+                MenuItem { text: @tr("Voice"); clicked => { OverviewBridge.voice(root.card.session); } }
                 Rectangle { height: 1px; background: Palette.rule; }
-                MenuItem { text: root.card.heartbeat ? "Disable heartbeat" : "Enable heartbeat"; clicked => { OverviewBridge.heartbeat(root.card.session); } }
-                MenuItem { text: root.card.dreaming ? "Disable dreaming" : "Enable dreaming"; clicked => { OverviewBridge.dreaming(root.card.session); } }
-                MenuItem { text: root.card.muted ? "Enable push alerts" : "Mute push alerts"; clicked => { OverviewBridge.push-alerts(root.card.session); } }
-                Rectangle { height: 1px; background: Palette.rule; }
-                MenuItem { text: "Archive"; clicked => { OverviewBridge.archive(root.card.session); } }
                 MenuItem {
-                    text: OverviewBridge.confirm-release == root.card.session ? "Confirm release" : "Release…";
+                    text: root.card.heartbeat
+                        // i18n: All agents overview, agent card menu item (verb phrase): turn off the agent's heartbeat (a regular check-in prompt)
+                        ? @tr("Disable heartbeat")
+                        // i18n: All agents overview, agent card menu item (verb phrase): turn on the agent's heartbeat (a regular check-in prompt)
+                        : @tr("Enable heartbeat"); clicked => { OverviewBridge.heartbeat(root.card.session); } }
+                MenuItem {
+                    text: root.card.dreaming
+                        // i18n: All agents overview, agent card menu item (verb phrase): turn off dreaming (the agent reflects on its work while idle)
+                        ? @tr("Disable dreaming")
+                        // i18n: All agents overview, agent card menu item (verb phrase): turn on dreaming (the agent reflects on its work while idle)
+                        : @tr("Enable dreaming"); clicked => { OverviewBridge.dreaming(root.card.session); } }
+                MenuItem {
+                    text: root.card.muted
+                        // i18n: All agents overview, agent card menu item (verb phrase): turn the agent's phone push notifications back on
+                        ? @tr("Enable push alerts")
+                        // i18n: All agents overview, agent card menu item (verb phrase): silence the agent's phone push notifications
+                        : @tr("Mute push alerts"); clicked => { OverviewBridge.push-alerts(root.card.session); } }
+                Rectangle { height: 1px; background: Palette.rule; }
+                // i18n: All agents overview, agent card menu item (verb): archive the agent
+                MenuItem { text: @tr("Archive"); clicked => { OverviewBridge.archive(root.card.session); } }
+                MenuItem {
+                    text: OverviewBridge.confirm-release == root.card.session
+                        // i18n: All agents overview, agent card menu item after one click on Release: click again to confirm (verb phrase)
+                        ? @tr("Confirm release")
+                        // i18n: All agents overview, agent card menu item (verb): release the agent, ending it for good (asks to confirm)
+                        : @tr("Release…");
                     danger: true;
                     clicked => { OverviewBridge.release(root.card.session); }
                 }
@@ -234,12 +269,17 @@ export component AgentOverview inherits Modal {
             VerticalLayout {
                 horizontal-stretch: 1;
                 spacing: 2px;
-                Text { text: "AGENTS"; color: Palette.text; font-family: "JetBrains Mono"; font-size: 17 * Look.unit; font-weight: 600; letter-spacing: 1.5 * Look.unit; }
-                Text { text: OverviewBridge.cards.length + " active"; color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
+                // i18n: All agents overview, title at the top (noun, plural; written in capitals where the script has them)
+                Text { text: @tr("AGENTS"); color: Palette.text; font-family: "JetBrains Mono"; font-size: 17 * Look.unit; font-weight: 600; letter-spacing: 1.5 * Look.unit; }
+                // i18n: All agents overview, line beside the title; {n} is how many agents are running (adjective)
+                Text { text: @tr("{n} active" | "{n} active" % OverviewBridge.cards.length); color: Palette.muted; font-family: "JetBrains Mono"; font-size: 11 * Look.unit; }
             }
-            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/plus.svg"); tip: "New agent"; clicked => { OverviewBridge.new-agent(); } }
-            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/route.svg"); tip: "Orchestrator"; clicked => { OverviewBridge.orchestrator(); } }
-            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { OverviewBridge.close(); } }
+            // i18n: All agents overview, tooltip of the + button: create a new agent
+            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/plus.svg"); tip: @tr("New agent"); clicked => { OverviewBridge.new-agent(); } }
+            // i18n: All agents overview, tooltip of the button that opens the Orchestrator dialog (feature name, left as is)
+            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/route.svg"); tip: @tr("Orchestrator"); clicked => { OverviewBridge.orchestrator(); } }
+            // i18n: All agents overview, tooltip of the close button (verb)
+            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/close.svg"); tip: @tr("Close"); clicked => { OverviewBridge.close(); } }
         }
         ListView {
             vertical-stretch: 1;
@@ -251,7 +291,8 @@ export component AgentOverview inherits Modal {
         if OverviewBridge.archived.length > 0: VerticalLayout {
             height: 88px;
             spacing: 6px;
-            Text { text: "ARCHIVED"; color: Palette.muted; font-size: 12 * Look.unit; font-weight: 600; letter-spacing: 1.2 * Look.unit; }
+            // i18n: All agents overview, heading over archived agents (adjective used as a noun; written in capitals where the script has them)
+            Text { text: @tr("ARCHIVED"); color: Palette.muted; font-size: 12 * Look.unit; font-weight: 600; letter-spacing: 1.2 * Look.unit; }
             ScrollView {
                 vertical-stretch: 1;
                 content-width: archived-row.preferred-width;
@@ -275,7 +316,8 @@ export component AgentOverview inherits Modal {
                                 Text { text: item.name; color: Palette.text; font-size: 13 * Look.unit; font-weight: 500; }
                                 Text { text: item.preview; color: Palette.muted; font-size: 11 * Look.unit; overflow: elide; }
                             }
-                            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/restore.svg"); tip: "Restore"; clicked => { OverviewBridge.restore(item.session); } }
+                            // i18n: All agents overview, archived agent row, tooltip (verb): bring the agent back from the archive
+                            IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/restore.svg"); tip: @tr("Restore"); clicked => { OverviewBridge.restore(item.session); } }
                         }
                     }
                 }
@@ -284,7 +326,8 @@ export component AgentOverview inherits Modal {
         if OverviewBridge.contacts.length > 0: VerticalLayout {
             height: 126px;
             spacing: 7px;
-            Text { text: "READY CONTACTS"; color: Palette.muted; font-size: 12 * Look.unit; font-weight: 600; letter-spacing: 1.2 * Look.unit; }
+            // i18n: All agents overview, heading over contacts that can be started as agents (written in capitals where the script has them)
+            Text { text: @tr("READY CONTACTS"); color: Palette.muted; font-size: 12 * Look.unit; font-weight: 600; letter-spacing: 1.2 * Look.unit; }
             ScrollView {
                 vertical-stretch: 1;
                 content-width: contact-row.preferred-width;
@@ -321,7 +364,11 @@ export component AgentOverview inherits Modal {
                             VerticalLayout {
                                 alignment: center;
                                 TextButton {
-                                    text: contact.starting ? "Starting…" : "Start";
+                                    text: contact.starting
+                                        // i18n: All agents overview, ready contact, button while the contact is being started as an agent (a state)
+                                        ? @tr("Starting…")
+                                        // i18n: All agents overview, ready contact, button (verb): start this contact as an agent
+                                        : @tr("Start");
                                     enabled: !OverviewBridge.starting;
                                     clicked => { OverviewBridge.start(contact.name); }
                                 }
