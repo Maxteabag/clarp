@@ -13,7 +13,7 @@ use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use clarp_core::transit::{self, Step};
 
 use crate::{
-    App, AppWindow, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
+    App, AppWindow, NamedItem, NotifyChoice, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
 };
 
 /// The overlays this group owns.
@@ -175,6 +175,8 @@ pub struct Shown {
     pub prompts_more: bool,
     pub mcp: usize,
     pub schedules: usize,
+    /// Per-event choices for this contact (none while it is muted).
+    pub notify: usize,
 }
 
 /// Every row the keyboard walks, in the order the profile draws them.
@@ -211,6 +213,9 @@ pub fn stops(shown: &Shown) -> Vec<Stop> {
     for id in ["heartbeat", "dreaming", "push-alerts"] {
         add(id.into(), "autonomy");
     }
+    for index in 0..shown.notify {
+        add(format!("notify:{index}"), "autonomy");
+    }
     for index in 0..shown.mcp {
         add(format!("mcp:{index}"), "mcp");
     }
@@ -226,6 +231,32 @@ pub fn stops(shown: &Shown) -> Vec<Stop> {
         add(id.into(), "actions");
     }
     out
+}
+
+/// This contact's choice per event, on a Host that keeps them: Default
+/// (naming the owner's choice it follows), On or Off.
+fn notify_choices(engine: &clarp_engine::Engine, session: &str) -> Vec<NotifyChoice> {
+    use clarp_core::notify_events::{event_label, text};
+    let Some((settings, agent_id)) = engine.notification_settings_for(session) else { return Vec::new() };
+    let (on, off) = (text("notify.settings.on"), text("notify.settings.off"));
+    settings
+        .events
+        .iter()
+        .map(|event| {
+            let default = format!("{} · {}", text("notify.settings.default"), if event.on { on } else { off });
+            let choices: Vec<SharedString> = [default.as_str(), on, off].into_iter().map(SharedString::from).collect();
+            NotifyChoice {
+                id: event.id.as_str().into(),
+                label: event_label(&event.id).into(),
+                choices: ModelRc::new(VecModel::from(choices)),
+                index: match settings.agent_choice(&agent_id, &event.id) {
+                    None => 0,
+                    Some(true) => 1,
+                    Some(false) => 2,
+                },
+            }
+        })
+        .collect()
 }
 
 /// Where `step` rows (or, with `by_card`, cards) from `cursor` lands: the
@@ -279,6 +310,7 @@ fn shown_now(window: &AppWindow) -> Shown {
         prompts_more: info.prompts_more,
         mcp: if info.mcp_shown { bridge.get_mcp().row_count() } else { 0 },
         schedules: bridge.get_schedules().row_count(),
+        notify: if info.push_alerts { bridge.get_notify_events().row_count() } else { 0 },
     }
 }
 
@@ -339,6 +371,17 @@ pub fn resume(app: &App, window: &AppWindow) {
 fn step_choice(window: &AppWindow, id: &str, step: i32, round: bool) {
     let bridge = window.global::<ProfileBridge>();
     let mut info = bridge.get_info();
+    if let Some(row) = index_of(id, "notify:") {
+        let Some(mut event) = bridge.get_notify_events().row_data(row) else { return };
+        let count = event.choices.row_count() as i32;
+        let next = if round { (event.index.max(0) + step).rem_euclid(count.max(1)) } else { (event.index + step).clamp(0, (count - 1).max(0)) };
+        if next != event.index {
+            event.index = next;
+            bridge.get_notify_events().set_row_data(row, event.clone());
+            bridge.invoke_set_notify_event(event.id, next);
+        }
+        return;
+    }
     let (current, count) = match id {
         "chat-view" => (info.chat_view_index, bridge.get_chat_view_choices().row_count()),
         "agent-messages" => (info.agent_messages_index, bridge.get_agent_message_choices().row_count()),
@@ -385,6 +428,7 @@ fn enter(window: &AppWindow, id: &str) {
         "terminal" => bridge.invoke_open_terminal(),
         "voice" => bridge.invoke_voice(),
         "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort" => step_choice(window, id, 1, true),
+        id if id.starts_with("notify:") => step_choice(window, id, 1, true),
         "backend" if info.backend_enabled => bridge.invoke_open_transit(),
         "history-more" if !info.prompts_loading => bridge.invoke_load_older(),
         "heartbeat" => bridge.invoke_set_heartbeat(!info.heartbeat),
@@ -486,7 +530,7 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
             id if id.starts_with("schedule:") => index_of(id, "schedule:").and_then(|i| bridge.get_schedules().row_data(i)).map(|s| on(s.on).into()),
             _ => None,
         };
-        let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort");
+        let choice = matches!(cursor.as_str(), "chat-view" | "agent-messages" | "tool-activity" | "model" | "effort") || cursor.starts_with("notify:");
         out.push(("1-9".into(), "Sections".into()));
         out.push((pair("profile-up", "profile-down"), "Move".into()));
         out.push((key("profile-next-card"), "Next card".into()));
@@ -647,6 +691,7 @@ pub fn refresh(app: &App, window: &AppWindow, changes: &[Change]) {
                 | Change::Teams
                 | Change::Avatars
                 | Change::Connection
+                | Change::NotificationSettings
         )
     });
     if relevant {
@@ -754,6 +799,7 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let mcp: Vec<NamedItem> =
         available.iter().map(|n| NamedItem { id: n.as_str().into(), name: n.as_str().into(), on: chosen.contains(n), ..NamedItem::default() }).collect();
     bridge.set_mcp(ModelRc::new(VecModel::from(mcp)));
+    bridge.set_notify_events(ModelRc::new(VecModel::from(notify_choices(&engine, session))));
     let schedules: Vec<NamedItem> = details
         .get("schedules")
         .and_then(Value::as_array)
@@ -1107,6 +1153,16 @@ pub fn wire(window: &AppWindow) {
     bridge.on_set_heartbeat(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_heartbeat(session, on)));
     bridge.on_set_dreaming(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_dreaming(session, on)));
     bridge.on_set_push_alerts(|on| with_session(|app, _, session| app.engine.borrow_mut().set_agent_push_muted(session, !on)));
+    bridge.on_set_notify_event(|id, index| {
+        with_session(|app, _, session| {
+            let choice = match index {
+                1 => Some(true),
+                2 => Some(false),
+                _ => None,
+            };
+            app.engine.borrow_mut().set_agent_notification_event(session, &id, choice);
+        })
+    });
     // This chat's own choices (#653): messages between agents (its Host's)
     // and Tool activity (this device's).
     bridge.on_set_agent_messages(|index| {

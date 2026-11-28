@@ -82,6 +82,15 @@ export struct PromptItem {
     meta: string,
 }
 
+// One event's choice for this contact (Host feature notification_events):
+// its words, and Default (the owner's choice, named), On or Off.
+export struct NotifyChoice {
+    id: string,
+    label: string,
+    choices: [string],
+    index: int,
+}
+
 export struct NamedItem {
     id: string,
     name: string,
@@ -126,6 +135,9 @@ export global ProfileBridge {
     callback set-heartbeat(bool);
     callback set-dreaming(bool);
     callback set-push-alerts(bool);
+    // Per event for this contact, while its push alerts are on.
+    in property <[NotifyChoice]> notify-events;
+    callback set-notify-event(string, int);
     callback set-agent-messages(int);
     // Bumped to bring the profile's Publications card into view (the chat's
     // ⋯ menu's Artifacts).
@@ -573,6 +585,22 @@ export component AgentProfile inherits Modal {
                     }
                     Spot { spot: "dreaming"; ToggleRow { label: "Dreaming"; checked: root.info.dreaming; toggled(on) => { ProfileBridge.set-dreaming(on); } } }
                     Spot { spot: "push-alerts"; ToggleRow { label: "Push alerts"; checked: root.info.push-alerts; toggled(on) => { ProfileBridge.set-push-alerts(on); } } }
+                    // Muted wins over every event: the choices show while alerts are on.
+                    if root.info.push-alerts: for event[index] in ProfileBridge.notify-events: Spot {
+                        spot: "notify:" + index;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            Text { text: event.label; color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            ComboBox {
+                                horizontal-stretch: 1;
+                                model: event.choices;
+                                current-index: event.index;
+                                accessible-label: event.label;
+                                selected => { ProfileBridge.set-notify-event(event.id, self.current-index); }
+                                changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
+                            }
+                        }
+                    }
                 }
                 if ProfileBridge.teams.length > 0: Card {
                     title: "TEAMS";
