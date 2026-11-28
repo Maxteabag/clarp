@@ -90,6 +90,18 @@ Unattributed older records have their own totals. On a Host configured with
 monthly spend and remaining key cap if present. This is the key's allowance.
 If the remote result is unavailable, unsupported or disabled, show that status.
 
+## Host health metrics
+
+When the Host advertises `host_health_metrics`, authenticated `GET /diagnostics/health`
+includes `host_health`. Its `instance_id` identifies this startup and `observed_at_ms`
+is Unix epoch milliseconds. Optional `data_filesystem` gives `available_bytes` and
+`total_bytes` for Host data. Optional `io_pressure` gives Linux system I/O PSI
+`some_avg10_pct` and `full_avg10_pct` independently, on a 0–100 scale.
+On SQLite, `slow_sqlite_commits` counts successful agent-log commits lasting at
+least `threshold_ms` over the last complete monotonic seconds. Compare `covered_ms`
+to `window_ms` for partial coverage. `max_ms` is null for an empty window.
+Show unavailable fields as unknown.
+
 ## Install a Host on a new machine
 
 On Linux with systemd and glibc 2.34+ (x86_64 or aarch64), as the user the Host is to run as,

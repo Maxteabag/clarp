@@ -14,6 +14,7 @@ use clarp_ports::log::{AgentLog, Item, Kinds, LogEngine, LogError, NewItem, Seq}
 use rusqlite::{Connection, OpenFlags, Params, params};
 
 pub mod client_events;
+pub mod commit_health;
 pub mod search;
 
 /// The name of the log file inside an agent's directory.
@@ -41,6 +42,7 @@ pub struct SqliteEngine;
 
 impl SqliteEngine {
     pub fn new() -> Self {
+        commit_health::start();
         Self
     }
 }
@@ -234,6 +236,8 @@ impl AgentLog for SqliteLog {
         }
         let committing = Instant::now();
         transaction.commit().map_err(storage)?;
+        let commit_elapsed = committing.elapsed();
+        commit_health::record(commit_elapsed);
         // A commit that took long says how long, and reads nothing more. It never opens the
         // WAL's index (the -shm file) itself: closing any descriptor of a file drops every POSIX
         // lock this process holds on it, SQLite's own included, and another connection then
@@ -245,7 +249,7 @@ impl AgentLog for SqliteLog {
                 items.len(),
                 self.file.display(),
                 took.as_millis(),
-                committing.elapsed().as_millis(),
+                commit_elapsed.as_millis(),
             );
         }
         Ok(seq as Seq)
