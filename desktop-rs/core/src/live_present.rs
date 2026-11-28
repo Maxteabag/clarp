@@ -831,7 +831,7 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
                 // i18n: chat, reasoning row title while the agent thinks (verb, ongoing)
                 (false, true) => tr!("Thinking"),
                 // i18n: chat, reasoning row title while the agent thinks; {} is the thought's own short title
-                (false, false) => tr!("Thinking: {}", title),
+                (false, false) => tr!("Thinking: {}", title), // ui-text: allow (the Host's short headline for the thought, not its text; desktop wording kept as it was)
             };
             let body: Vec<String> = text(item, "text").lines().map(str::to_owned).collect();
             entry.expandable = !body.iter().all(|l| l.trim().is_empty());
