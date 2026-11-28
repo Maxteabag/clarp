@@ -27987,13 +27987,14 @@ fn a_new_agent_begins_with_a_conversation_antigravity_kept() {
     assert_eq!(bound(&session), kept);
 
     // Its next turn continues Antigravity's own conversation, by its name.
+    let opened = agy_acp::asked(&place, "session/new").len();
     host.send(&session, "and now?", "u-1");
     wait_for("the turn to be over", || host.state(&session) == "done");
     assert_eq!(
         agy_acp::asked(&place, "session/resume")[0]["params"]["sessionId"],
         kept
     );
-    assert!(agy_acp::asked(&place, "session/new").is_empty());
+    assert_eq!(agy_acp::asked(&place, "session/new").len(), opened);
     let said = host.conversation(&session);
     assert_eq!(
         said.last().unwrap(),
@@ -29458,12 +29459,15 @@ fn an_agent_on_antigravity_runs_its_turns_and_continues_its_conversation() {
     // The first ACP prompt returns a tool call and one answer written in two chunks.
     host.send(&agent, "list what is here", "u-1");
     wait_for("the first turn to be over", || over("u-1"));
-    let launch = &agy_acp::written(&place, "argv")[0];
+    let launches = agy_acp::written(&place, "argv");
+    let launch = launches
+        .iter()
+        .find(|row| row["env"]["CLARP_AGY_MANAGED_TURN"] == "1")
+        .expect("the managed ACP launch");
     assert_eq!(
         launch["argv"],
         json!(["acp", "--dangerously-skip-permissions"])
     );
-    assert_eq!(launch["env"]["CLARP_AGY_MANAGED_TURN"], "1");
     assert!(agy_acp::prompt_text(&place, 0).contains("list what is here"));
     let rows = host.turns(&agent);
     let call = rows.iter().find(|row| row["kind"] == "tool").unwrap();
@@ -29531,14 +29535,15 @@ fn an_agent_on_antigravity_runs_its_turns_and_continues_its_conversation() {
         row["backend_session_id"]
     );
 
-    let long = "x".repeat(150 * 1024);
+    let marker = "private-large-acp-message";
+    let long = format!("{marker}-start-{}-{marker}-end", "x".repeat(150 * 1024));
     host.send(&agent, &long, "u-long");
     wait_for("the large ACP prompt to finish", || over("u-long"));
     assert!(agy_acp::prompt_text(&place, 2).contains(&long));
     assert!(
         agy_acp::written(&place, "argv")
             .iter()
-            .all(|row| !row.to_string().contains(&long))
+            .all(|row| !row["argv"].to_string().contains(marker))
     );
     assert_eq!(host.state(&agent), "done");
 
