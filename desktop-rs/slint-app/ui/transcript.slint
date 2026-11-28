@@ -39,6 +39,10 @@ export struct MessageBlock {
     // sideways when the chat is narrower; `table-chars` is their sum.
     columns: [int],
     table-chars: int,
+    // A code block's language, as its fence names it ("" for none).
+    language: string,
+    // A table's Markdown (view.rs `table_markdown`): what its copy copies.
+    source: string,
 }
 
 export struct ToolRow {
@@ -601,6 +605,63 @@ component PromptLine inherits Rectangle {
     }
 }
 
+// A code block's and a table's actions: copy (the Rust side puts the text
+// on the clipboard) and open it over the window (block_view.slint).
+export global BlockBridge {
+    callback copy(string);
+    callback open(MessageBlock);
+}
+
+// An icon button of a block's line and of its viewer: faint, the accent
+// under the pointer.
+export component BlockIcon inherits Rectangle {
+    in property <image> icon;
+    in property <string> label;
+    in property <length> size: 14px * ChatText.scale;
+    callback clicked();
+    width: self.size + 8px;
+    height: self.size + 8px;
+    accessible-role: button;
+    accessible-label: self.label;
+    accessible-action-default => { root.clicked(); }
+    Image {
+        x: 4px;
+        y: 4px;
+        source: root.icon;
+        width: root.size;
+        height: root.size;
+        colorize: touch.has-hover ? Palette.accent : Palette.faint;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Copy: the icon turns into a checkmark for a moment (no toast).
+export component CopyIcon inherits Rectangle {
+    in property <string> text;
+    in property <string> label: "Copy code";
+    in property <length> size: 14px * ChatText.scale;
+    out property <bool> copied;
+    width: icon.width;
+    height: icon.height;
+    icon := BlockIcon {
+        size: root.size;
+        icon: root.copied ? @image-url("icons/check.svg") : @image-url("icons/copy.svg");
+        label: root.copied ? "Copied" : root.label;
+        clicked => {
+            BlockBridge.copy(root.text);
+            root.copied = true;
+        }
+    }
+    Timer {
+        interval: 1.5s;
+        running: root.copied;
+        triggered => { root.copied = false; }
+    }
+}
+
 export component Block inherits VerticalLayout {
     in property <MessageBlock> block;
     // The chat's visible band (an image block in the chat reports where it
@@ -611,7 +672,12 @@ export component Block inherits VerticalLayout {
     property <bool> selected: root.block.key != "" && ArtifactBridge.cursor == root.block.key;
     in property <length> body-size;
     in property <brush> body-color;
+    // A click on a code block, or a wide table's expand icon, opens it
+    // over the window (off in a viewer that already fills it).
+    in property <bool> viewer: true;
     callback link-clicked(string);
+    // A right-click on a code block: the message's own (its work).
+    callback secondary-clicked();
     if root.block.kind == "prose": StyledText {
         text: root.block.styled;
         default-color: root.body-color;
@@ -634,17 +700,52 @@ export component Block inherits VerticalLayout {
     // row: a wrapped quote or code line came out lines short and the next
     // message was drawn over it (Slint 1.18 measures a conditional layout
     // at its preferred width).
-    if root.block.kind == "code": Rectangle {
+    // A code block: a thin line over its code with its language (when the
+    // fence names one) and a copy icon, so nothing lies on the code. A
+    // click on it that did not drag opens it over the window.
+    if root.block.kind == "code": code-box := Rectangle {
+        property <length> line: 22px * ChatText.scale;
         background: Palette.sunken;
         border-radius: 2px;
         min-width: code-text.min-width + 20px;
         preferred-width: code-text.preferred-width + 20px;
-        height: code-text.preferred-height + 20px;
+        height: self.line + code-text.preferred-height + 20px;
+        open-touch := TouchArea {
+            enabled: !root.measuring;
+            mouse-cursor: root.viewer ? pointer : default;
+            clicked => {
+                if (root.viewer && Math.abs(self.mouse-x - self.pressed-x) < 5px && Math.abs(self.mouse-y - self.pressed-y) < 5px) {
+                    BlockBridge.open(root.block);
+                }
+            }
+            pointer-event(event) => {
+                if (event.button == PointerEventButton.right && event.kind == PointerEventKind.down) {
+                    root.secondary-clicked();
+                }
+            }
+        }
+        Text {
+            x: 10px;
+            width: parent.width - 20px - copy-code.width;
+            height: code-box.line;
+            text: root.block.language;
+            color: Palette.faint;
+            font-size: ChatText.detail;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        copy-code := CopyIcon {
+            x: parent.width - self.width - 2px;
+            y: (code-box.line - self.height) / 2;
+            accessible-id: root.measuring ? "" : "code-copy";
+            text: root.block.text;
+        }
+        Rectangle { y: code-box.line; height: 1px; background: Palette.rule; }
         code-text := Text {
             x: 10px;
-            y: 10px;
+            y: code-box.line + 10px;
             width: parent.width - 20px;
-            height: parent.height - 20px;
+            height: parent.height - code-box.line - 20px;
             text: root.block.text;
             font-family: Palette.code-family;
             font-size: root.body-size * Look.code-scale;
@@ -691,6 +792,20 @@ export component Block inherits VerticalLayout {
         accessible-label: self.count + " columns";
         VerticalLayout {
             spacing: 0px;
+            // Wider than the chat: an expand icon in a thin line over it
+            // opens it over the window.
+            Rectangle {
+                visible: table-box.wide && root.viewer;
+                height: self.visible ? 22px * ChatText.scale : 0px;
+                min-width: 0px;
+                BlockIcon {
+                    x: parent.width - self.width - 2px;
+                    accessible-id: root.measuring ? "" : "table-expand";
+                    icon: @image-url("icons/fullscreen.svg");
+                    label: "Full screen";
+                    clicked => { BlockBridge.open(root.block); }
+                }
+            }
             table-view := Rectangle {
                 height: table-grid.preferred-height;
                 min-width: 0px;
@@ -1062,6 +1177,9 @@ component TranscriptRow inherits HorizontalLayout {
                 body-size: root.message.author == "activity" || root.message.author == "system" ? ChatText.label : ChatText.body;
                 body-color: root.message.author == "activity" || root.message.author == "system" ? Palette.muted : Palette.text;
                 link-clicked(url) => { root.link-clicked(url); }
+                secondary-clicked => {
+                    if (root.message.work-key != "" && !root.measuring) { ArtifactBridge.open(root.message.work-key); }
+                }
             }
             // A stopped answer says so under its text.
             if root.message.live.kind == "message" && root.message.live.meta != "": Text {
