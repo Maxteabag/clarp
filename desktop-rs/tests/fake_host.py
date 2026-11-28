@@ -2863,6 +2863,16 @@ class Handler(BaseHTTPRequestHandler):
                 event.setdefault("conv", "conv-1")
             live_step(session, {"event": event}, set(body.get("skip", [])))
             return self.reply(200, {"ok": True})
+        if url.path == "/__control/release-chat-read":
+            chat_read_release.set()
+            return self.reply(200, {"ok": True})
+        if url.path == "/__control/chat-read-receipt":
+            # Deliver this receipt by HTTP alone so the check can delay its SSE echo.
+            with state_lock:
+                if body.get("hold"):
+                    chat_read_release.clear()
+                chat_read_receipts.append(body)
+            return self.reply(200, {"ok": True})
         if url.path == "/__control/event":
             # Test control: push one SSE event to every stream.
             broadcast(body)
@@ -3119,16 +3129,6 @@ class Handler(BaseHTTPRequestHandler):
                 document = json.loads(json.dumps(notification_settings))
             broadcast({"type": "notification-settings-changed", **document})
             return self.reply(200, document)
-        if url.path == "/__control/release-chat-read":
-            chat_read_release.set()
-            return self.reply(200, {"ok": True})
-        if url.path == "/__control/chat-read-receipt":
-            # Deliver this receipt by HTTP alone so the check can delay its SSE echo.
-            with state_lock:
-                if body.get("hold"):
-                    chat_read_release.clear()
-                chat_read_receipts.append(body)
-            return self.reply(200, {"ok": True})
         if url.path == "/chat-read":
             record({"method": "POST", "path": url.path, "body": body})
             session = body.get("session", "")
