@@ -12,7 +12,9 @@
 
   // `last`: this part is the one the turn ends in (a turn split at a steer draws its
   // fold button and error once, there); an unsplit turn is its own last part.
-  let { liveState, items, explanations = true, last = true } = $props();
+  // `errorPlan`/`session`: the chat's failure cards (planTurnErrors), so the
+  // live failure counts repeats and offers a retry only while it is the newest.
+  let { liveState, items, explanations = true, last = true, errorPlan = null, session = '' } = $props();
 
   let running = $derived(items.some(i => i.status === 'running' || i.status === 'pending'));
   // Elapsed times and the 600 ms output delay need a clock, but only while
@@ -95,6 +97,7 @@
     {/if}
   {/each}
   {#if fold && fold.error}
-    <TurnNotice message={fold.error.message} detail={fold.error.detail} />
+    <TurnNotice message={fold.error.message} detail={fold.error.detail} explained={fold.error.explained || null} {session}
+      count={errorPlan ? errorPlan.counts.get('live') || 1 : 1} actionable={!!errorPlan && errorPlan.actionable === 'live'} />
   {/if}
 </div>

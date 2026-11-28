@@ -8,7 +8,9 @@
 
   // `strip`: the tool calls, cells and commentary the turn's work row took
   // (static/lib/history-fold.js).
-  let { turn: row, strip = null } = $props();
+  // `errorPlan`/`session`: the chat's failure cards (planTurnErrors): this
+  // card's count of repeats and whether it offers a retry.
+  let { turn: row, strip = null, errorPlan = null, session = '' } = $props();
   let turn = $derived(strip ? {
     ...row,
     text: strip.text ? '' : row.text,
@@ -44,7 +46,8 @@
      costs no layout or paint. -->
 {#if empty}
 {:else if notice}
-<div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} /></div>
+<div class="turn notice"><TurnNotice message={notice.message} detail={notice.detail} explained={notice.explained || null} {session}
+  count={errorPlan ? errorPlan.counts.get(turn.id) || 1 : 1} actionable={!!errorPlan && errorPlan.actionable === turn.id} /></div>
 {:else}
 <div
   class="turn {turn.role}"

@@ -1086,6 +1086,34 @@ body.chat-open .status { display: none !important; }
   color: var(--washi-dim);
   overflow-wrap: anywhere;
 }
+/* The Host's explanation (docs/turn-errors.md): colour by severity, the
+   buttons, a count for repeats and a closed Details. */
+.turn-error { font-size: 14px; }
+.turn-error.warning { border-color: rgba(224, 175, 104, 0.5); background: color-mix(in srgb, #e0af68 8%, transparent); }
+.turn-error.warning .tn-glyph { color: #e0af68; }
+.turn-error.info { border-color: var(--washi-low, #555); background: transparent; }
+.turn-error.info .tn-glyph, .turn-error.info .tn-message { color: var(--washi-dim); }
+.turn-error .tn-body { flex: 1; min-width: 0; }
+.turn-error .tn-count {
+  margin-left: 8px; padding: 0 6px; border-radius: 9px;
+  font-size: 11px; font-weight: 700; background: color-mix(in srgb, currentColor 15%, transparent);
+}
+.turn-error .tn-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.turn-error .tn-actions button {
+  font: 12px/1 var(--font-body); padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--washi-low, #555); background: transparent; color: var(--washi, inherit);
+}
+.turn-error .tn-actions button.primary { border-color: currentColor; font-weight: 600; }
+.turn-error .tn-actions button:disabled { cursor: default; opacity: 0.75; }
+.turn-error .tn-note { margin-top: 6px; font-size: 12px; color: #9ece6a; }
+.turn-error .tn-note.failed { color: #f7768e; }
+.turn-error .tn-details { margin-top: 6px; font-size: 12px; color: var(--washi-dim); }
+.turn-error .tn-details summary { cursor: pointer; }
+.turn-error .tn-details pre {
+  margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+  font: 11px/1.4 var(--font-mono, monospace);
+}
+.turn-error .tn-details .tn-meta { color: var(--washi-low); }
 
 .turn.activity {
   display: flex;
