@@ -1630,7 +1630,9 @@ fn main() -> ExitCode {
         .is_some_and(|word| word == clarp_acp::agy::DRIVER)
     {
         argv.next();
-        return match agy_acp::run(&argv.next().unwrap_or_else(|| "agy".into())) {
+        let program = argv.next().unwrap_or_else(|| "agy".into());
+        let read_only = argv.next().as_deref() == Some(clarp_acp::agy::READ_ONLY);
+        return match agy_acp::run(&program, read_only) {
             Ok(code) => ExitCode::from(code),
             Err(error) => {
                 eprintln!("clarp-shim: Antigravity over ACP: {error}");

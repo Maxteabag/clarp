@@ -180,7 +180,7 @@ clarp-admin agent transit --session lena-1a3f --backend codex --model gpt-5.5
 clarp-admin agent transit --session lena-1a3f --backend claude --model opus --effort high
 ```
 
-`--backend` is one of `claude`, `codex`, `agy`, `agy-acp`, `grok`, `opencode` whose row in
+`--backend` is one of `claude`, `codex`, `agy-acp`, `grok`, `opencode` whose row in
 `GET /agent-model-options` says `available: true`; `--model` is an exact ID that
 row lists (`""` for the tool's default). The command waits until the move is
 done or failed and prints its last state. From contract 202 (`agent_backend_transit_queue`),
@@ -208,6 +208,11 @@ part as it was and the rest as one summary at its head. From contract 202, a sep
 model reading writes that summary outside the agent's queue. On older Hosts, the agent
 may be asked for it in one last automated turn. The
 agent's name, voice, goals and chat history stay.
+
+Use `agy-acp` for new Antigravity agents. On a Rust Host with
+`antigravity_acp_only` (contract 217), the legacy `agy` name selects `agy-acp`
+and existing standalone agents on the shared store move at a turn boundary.
+Their archive status, queued messages and native conversation stay with the agent.
 
 `agy-acp` ("Antigravity (ACP)" in the pickers, on a Rust Host with the feature
 `backend_agy_acp`, contract 165) is Antigravity driven over the Agent Client

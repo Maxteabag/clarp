@@ -361,7 +361,14 @@ async fn run_with(
             cwd.display()
         )));
     }
-    let mut command = crate::child::one_off(&launch.program, keeps);
+    let program = if launch.program == "clarp-shim" {
+        std::env::current_exe()
+            .map(|exe| exe.with_file_name("clarp-shim"))
+            .map_err(|error| Unanswered::NotStarted(error.to_string()))?
+    } else {
+        PathBuf::from(&launch.program)
+    };
+    let mut command = crate::child::one_off(&program, keeps);
     command
         .process_group(0)
         .args(&launch.args)
