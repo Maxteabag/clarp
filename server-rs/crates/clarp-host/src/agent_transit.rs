@@ -1008,7 +1008,15 @@ async fn carry_at_boundary(
             effort: goal.effort.clone(),
         }
     };
-    let _ = app.fleet.amend_any(before.agent_id.clone(), amend).await;
+    let kept = app
+        .fleet
+        .amend_any(before.agent_id.clone(), amend)
+        .await
+        .map_err(|why| why.0)
+        .and_then(|record| record.map_err(|why| format!("{why:?}")));
+    if let Err(why) = kept {
+        app.fleet.unkept("agent-transit", &why);
+    }
     Ok(carried)
 }
 
@@ -1239,7 +1247,7 @@ mod tests {
         assert_eq!(row["available"], false);
         assert_eq!(row["unavailable_reason"], "not_supported");
         let mut row = json!({"installed": false, "models": []});
-        judge("agy", &mut row, &used_up, None);
+        judge("agy-acp", &mut row, &used_up, None);
         assert_eq!(row["unavailable_reason"], "not_installed");
         let mut row = json!({"installed": true, "models": [{"id": "a"}, {"id": "b"}]});
         judge("muse", &mut row, &used_up, Some("b"));

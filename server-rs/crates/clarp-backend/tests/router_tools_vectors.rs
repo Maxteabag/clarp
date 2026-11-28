@@ -4,18 +4,16 @@
 //! `routing_text`).
 //!
 //! Where the question goes (on standard input, in a file, or on the command line) is not held here: it is the
-//! port of the Python Host's PR 437 (`routing_input`), and the arguments are compared without it. Five things
-//! this Host does otherwise, on purpose, and each is named where it is put right below:
+//! port of the Python Host's PR 437 (`routing_input`), and the arguments are compared without it.
+//! Intentional differences in this Host are named where they are covered below:
 //!
 //! - Codex is given its effort as a TOML string (`model_reasoning_effort="high"`), where the Python Host
 //!   writes it bare: Codex reads both as the same, and a quoted value cannot be read as something else.
 //!
 //! - Claude Code is asked with none of its user's MCP servers (`--strict-mcp-config`): a question has no use
 //!   for them, and would wait for them to start.
-//! - Antigravity is asked for its answer as one JSON object that says how the question ended
-//!   (`--output-format json`): a question it could not answer is told as such, not read as an answer. It is
-//!   given an effort only where no model is named, and in small letters, as its turns are: a model's name
-//!   carries its effort.
+//! - Antigravity now runs through ACP. The old vector's prompt and selection belong in
+//!   the driver's stdin order, and its terminal result distinguishes an answer from a refusal.
 //! - OpenCode and DeepSeek are asked with OpenCode's own question tool denied (`OPENCODE_PERMISSION`), as
 //!   their turns are: nobody is there to answer it.
 
@@ -39,7 +37,7 @@ fn texts(value: &Value) -> Vec<String> {
 }
 
 /// What the Python Host's command for a question would be on this Host, but for where the question goes.
-fn put_right(tool: &str, model: &str, effort: &str, theirs: Vec<String>) -> Vec<String> {
+fn put_right(tool: &str, effort: &str, theirs: Vec<String>) -> Vec<String> {
     let mut want = theirs;
     match tool {
         "codex" => {
@@ -68,16 +66,6 @@ fn put_right(tool: &str, model: &str, effort: &str, theirs: Vec<String>) -> Vec<
                 .iter()
                 .position(|arg| arg == "--no-session-persistence");
             want.insert(at.unwrap() + 1, "--strict-mcp-config".to_string());
-        }
-        "agy" => {
-            want.splice(1..1, ["--output-format".to_string(), "json".to_string()]);
-            if let Some(at) = want.iter().position(|arg| arg == "--effort") {
-                if model.is_empty() {
-                    want[at + 1] = effort.trim().to_lowercase();
-                } else {
-                    want.drain(at..at + 2);
-                }
-            }
         }
         _ => {}
     }
@@ -135,6 +123,26 @@ fn every_tool_is_asked_one_question_as_the_python_hosts_router_asks_it() {
                 .once(&question)
                 .unwrap_or_else(|| panic!("{id}: it cannot be asked"));
             let what = format!("{id}, model {model:?}, effort {effort:?}");
+            if id == "agy" {
+                assert_eq!(
+                    backend.id(),
+                    "agy-acp",
+                    "{what}: the legacy name selects ACP"
+                );
+                assert_eq!(launch.program, "clarp-shim", "{what}");
+                assert_eq!(launch.args, ["agy-acp-turn", "agy"], "{what}");
+                let order: Value = serde_json::from_slice(&launch.stdin).unwrap();
+                assert_eq!(order["prompt"], prompt, "{what}");
+                assert_eq!(order["model"], model.trim(), "{what}");
+                assert_eq!(order["effort"], effort.trim().to_lowercase(), "{what}");
+                assert_eq!(
+                    launch.env,
+                    [("CLARP_AGY_ACP_PROFILE".to_string(), String::new())],
+                    "{what}"
+                );
+                commands += 1;
+                continue;
+            }
             assert_eq!(
                 launch.program,
                 command["program"].as_str().unwrap(),
@@ -145,7 +153,7 @@ fn every_tool_is_asked_one_question_as_the_python_hosts_router_asks_it() {
             ours.retain(|arg| arg != prompt && arg != "-");
             let mut theirs = texts(&command["args"]);
             theirs.retain(|arg| arg != prompt);
-            assert_eq!(ours, put_right(id, model, effort, theirs), "{what}");
+            assert_eq!(ours, put_right(id, effort, theirs), "{what}");
             // Where the question went, it went whole: on standard input, or as one argument.
             let on_stdin = launch.stdin == prompt.as_bytes();
             let in_args = launch.args.iter().any(|arg| arg.contains(prompt));
@@ -200,22 +208,18 @@ fn the_answer_is_found_where_the_python_hosts_router_finds_it() {
 #[test]
 fn antigravity_says_how_its_answer_ended() {
     let agy = by_id("agy").unwrap();
-    let ended = |status: &str, response: &str| {
-        let printed =
-            format!("Warming up...\n{{\"status\": \"{status}\", \"response\": {response:?}}}");
+    let ended = |failed: bool, response: &str| {
+        let frame = serde_json::json!({"type":"result","is_error":failed,"result":response});
+        let printed = format!("Warming up...\n{frame}");
         agy.answered(&printed)
     };
     assert_eq!(
-        ended("SUCCESS", "{\"kind\": \"ignored\"}"),
+        ended(false, "{\"kind\": \"ignored\"}"),
         Ok("{\"kind\": \"ignored\"}".to_string())
     );
-    assert!(
-        ended("ERROR", "half")
-            .unwrap_err()
-            .starts_with("agy status \"ERROR\"")
-    );
+    assert_eq!(ended(true, "out of quota"), Err("out of quota".to_string()));
     assert_eq!(
-        ended("SUCCESS", "  "),
-        Err("agy returned no answer".to_string())
+        ended(false, "  "),
+        Err("Antigravity ACP returned no answer".to_string())
     );
 }

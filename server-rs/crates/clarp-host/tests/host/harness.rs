@@ -360,7 +360,10 @@ fn every_tool_a_host_knows_has_a_program_the_harness_keeps_from_the_machine() {
     let unkept: Vec<&String> = known
         .iter()
         .filter(|tool| {
-            let program = clarp_backend::PROGRAMS.iter().find(|(id, _, _)| id == tool);
+            let backend = clarp_backend::canonical_id(tool);
+            let program = clarp_backend::PROGRAMS
+                .iter()
+                .find(|(id, _, _)| *id == backend);
             !program
                 .is_some_and(|(_, variable, _)| pinned.contains_key(std::ffi::OsStr::new(variable)))
         })
