@@ -70,9 +70,11 @@ impl std::fmt::Debug for Progress {
 /// What the agent's own thread is asked to do: go on with this tool.
 #[derive(Debug, Clone)]
 pub struct Change {
+    pub from: String,
     pub backend: String,
     pub model: String,
     pub effort: String,
+    pub preserve_selection: bool,
     /// The version of the new tool, as it says it, when the Host knows it.
     pub tool_version: Option<String>,
     /// The tool and the model as a person reads them, for the row the change leaves.
@@ -594,13 +596,14 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .cloned()
         .filter(|member| !member.record.is_janitor)
         .ok_or_else(|| Refusal::Plain(ApiError::new(StatusCode::NOT_FOUND, "no such agent")))?;
-    start_for(app, member, asked).await
+    start_for(app, member, asked, false).await
 }
 
 async fn start_for(
     app: &App,
     member: Arc<crate::fleet::Member>,
     asked: &Fields,
+    preserve_selection: bool,
 ) -> Result<String, Refusal> {
     let before = member.record.clone();
     let request = optional(asked, "request_id")?
@@ -726,6 +729,7 @@ async fn start_for(
         backend,
         model,
         effort,
+        preserve_selection,
         tool_version: row["cli_version"].as_str().and_then(version_in),
         shown,
     };
@@ -779,10 +783,7 @@ async fn retire_legacy_agent(app: &App, member: Arc<crate::fleet::Member>) -> Re
     if member.agent.view().backend == clarp_backend::agy_acp::ID {
         let amended = app
             .fleet
-            .amend_any(
-                member.record.agent_id.clone(),
-                Amend::Tool(clarp_backend::agy_acp::ID.to_string()),
-            )
+            .amend_any(member.record.agent_id.clone(), Amend::RetiredAgy)
             .await;
         member
             .agent
@@ -799,7 +800,7 @@ async fn retire_legacy_agent(app: &App, member: Arc<crate::fleet::Member>) -> Re
         ("model".to_string(), json!(member.record.model)),
         ("effort".to_string(), json!(member.record.effort)),
     ]);
-    start_for(app, member, &asked)
+    start_for(app, member, &asked, true)
         .await
         .map_err(|why| why.answered().1.to_string())?;
     Ok(())
@@ -817,6 +818,7 @@ struct Goal {
     backend: String,
     model: String,
     effort: String,
+    preserve_selection: bool,
     tool_version: Option<String>,
     shown: Shown,
 }
@@ -935,9 +937,11 @@ async fn carry_at_boundary(
         summarized(app, member, budget).await
     };
     let change = Change {
+        from: before.backend.clone(),
         backend: goal.backend.clone(),
         model: goal.model.clone(),
         effort: goal.effort.clone(),
+        preserve_selection: goal.preserve_selection,
         tool_version: goal.tool_version.clone(),
         shown_as: (goal.shown.backend.clone(), goal.shown.model.clone()),
         shown_from: goal.shown.old_backend.clone(),
@@ -968,17 +972,16 @@ async fn carry_at_boundary(
     };
     // The log has the change: the fleet's record follows it. Should that fail, the agent runs
     // on the new tool all the same, and its record is put right when the Host next opens it.
-    let _ = app
-        .fleet
-        .amend_any(
-            before.agent_id.clone(),
-            Amend::ToolChanged {
-                backend: goal.backend.clone(),
-                model: goal.model.clone(),
-                effort: goal.effort.clone(),
-            },
-        )
-        .await;
+    let amend = if goal.preserve_selection {
+        Amend::RetiredAgy
+    } else {
+        Amend::ToolChanged {
+            backend: goal.backend.clone(),
+            model: goal.model.clone(),
+            effort: goal.effort.clone(),
+        }
+    };
+    let _ = app.fleet.amend_any(before.agent_id.clone(), amend).await;
     Ok(carried)
 }
 
