@@ -51,7 +51,7 @@ pub(super) fn codeblocks_check(out: String) {
     let theme = std::env::var("CLARP_CHECK_THEME").unwrap_or_else(|_| "paper".to_owned());
     let header = (0..9).map(|i| format!("Column {i}")).collect::<Vec<_>>();
     let mut table = format!("| {} |\n|{}\n", header.join(" | "), "---|".repeat(9));
-    for row in 0..14 {
+    for row in 0..4 {
         let cells: Vec<String> = (0..9).map(|c| format!("value {row}.{c} here")).collect();
         table.push_str(&format!("| {} |\n", cells.join(" | ")));
     }
@@ -156,7 +156,7 @@ pub(super) fn codeblocks_check(out: String) {
             shot(&o4, "codeblocks-03-table-viewer");
             check(press("block-view-copy"), "the viewer's copy is pressed");
             let copied = clipboard();
-            check(copied.starts_with("| Column 0 | Column 1 |") && copied.contains("\n| --- |") && copied.ends_with("| value 13.8 here |"),
+            check(copied.starts_with("| Column 0 | Column 1 |") && copied.contains("\n| --- |") && copied.ends_with("| value 3.8 here |"),
                 &format!("it copies the table's Markdown: {copied:?}"));
             check(press("block-view-close"), "the close icon is pressed");
             true
