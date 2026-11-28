@@ -108,7 +108,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error),
     }
-    let login = Login::read(&mut options, account)?;
+    let login = Login::read(&mut options, |value| account(value).map(str::to_owned))?;
     let directory = options["cwd"].as_str().map(str::to_owned).map_or_else(
         || std::env::current_dir().map(|d| d.display().to_string()),
         Ok,

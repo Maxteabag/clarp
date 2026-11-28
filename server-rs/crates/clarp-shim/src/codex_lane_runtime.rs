@@ -11,6 +11,7 @@ use std::path::Path;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant};
 
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use clarp_shim::Reply;
 use clarp_shim::codex_app::{AppServer, Frame};
 use clarp_shim::codex_lane::{
@@ -53,8 +54,21 @@ pub(super) enum Input {
 const PROVIDER_MISMATCH: &str = "provider_mismatch:";
 
 /// The account a Codex login file names: a refreshed token of the same account keeps the lane.
-fn account(auth: &Value) -> Option<&str> {
-    auth["tokens"]["account_id"].as_str()
+pub(super) fn account(auth: &Value) -> Option<String> {
+    let tokens = &auth["tokens"];
+    let workspace = tokens["account_id"].as_str()?;
+    let Some(token) = tokens.get("id_token") else {
+        return Some(json!([workspace]).to_string());
+    };
+    // Read stable identity claims for local comparison. A refreshed token can have
+    // different timestamps and signatures for the same user and workspace.
+    let payload = token.as_str()?.split('.').nth(1)?;
+    let claims: Value = serde_json::from_slice(&URL_SAFE_NO_PAD.decode(payload).ok()?).ok()?;
+    let user = claims["https://api.openai.com/auth"]["chatgpt_user_id"]
+        .as_str()
+        .filter(|id| !id.is_empty())
+        .or_else(|| claims["sub"].as_str().filter(|id| !id.is_empty()))?;
+    Some(json!([workspace, user]).to_string())
 }
 
 impl Input {

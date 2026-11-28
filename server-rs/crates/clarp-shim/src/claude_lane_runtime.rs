@@ -136,11 +136,11 @@ fn run(path: &Path, mut options: Value) -> io::Result<()> {
         }
         let (send, input) = mpsc::sync_channel(256);
         let _listener = Socket::control(path, send.clone(), Input::control)?;
-        let login = Login::read(&mut options, account)?;
+        let login = Login::read(&mut options, |value| account(value).map(str::to_owned))?;
         // The credentials are a second login file, read the same way with no lock of its own.
         let credentials = Login::read(
             &mut json!({ clarp_shim::lane::key::LOGIN_FILE: options[key::CREDENTIALS_FILE].take() }),
-            credentials,
+            |value| credentials(value).map(str::to_owned),
         )?;
         let session = options[key::SESSION]
             .as_str()
