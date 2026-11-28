@@ -198,7 +198,7 @@ msgstr "Conversation entre agents"
 #. chat list, row that opens the list of conversations between agents (agent-to-agent rooms) (noun)
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the rooms where agents talk to each other.
 msgid "Agent conversations"
-msgstr "Conversations entre agents"
+msgstr "Échanges entre agents"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the rooms where agents talk to each other.
 msgid "Agent conversations (agent to agent)"
@@ -451,8 +451,7 @@ msgstr ""
 #. Settings page and Ctrl+K, the line under the preference “Confirm stop and release” saying what it does.
 msgid ""
 "Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"
-msgstr ""
-"Demander confirmation avant que Arrêter l’agent (Ctrl+.) ou Libérer l’agent n’interrompe ou ne libère un agent"
+msgstr "Demander confirmation avant d’arrêter (Ctrl+.) ou de libérer un agent"
 
 #. processes panel note after asking a helper agent to stop; {} is its name
 msgid "Asked {} to stop."
@@ -1542,7 +1541,7 @@ msgstr "Diagnostics"
 
 #. Keys (key context “New agent hub”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It new agent hub: picks the folder the agent works in
 msgid "Directory"
-msgstr "Répertoire"
+msgstr "Dossier"
 
 #. Settings page and Ctrl+K, the line under the setting “Reduce Motion” saying what it does
 msgid "Disable animations and shimmer."
@@ -3123,7 +3122,7 @@ msgstr "Prochain agent qui vous attend"
 #. Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
 #. Vim mode, the which-key panel: what the keys "<Space> a" do in the chat and the explorer
 msgid "Next attention"
-msgstr "Prochain agent en attente"
+msgstr "Agent à traiter"
 
 #. chat list, accessibility label of the small numbered badge on a chat row: its place in the queue of chats that need the user's attention; {} is the number (1 is next)
 msgid "Next attention, number {}"
@@ -4306,7 +4305,7 @@ msgstr "Rétablir la valeur par défaut"
 
 #. font picker, button: back to the theme's font and size; {0} the font's name, {1} its size in pixels
 msgid "Reset to theme default ({0} {1} px)"
-msgstr "Rétablir la police du thème ({0} {1} px)"
+msgstr "Police du thème ({0} {1} px)"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats at 100% again.
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats at 100% again.
@@ -4780,7 +4779,7 @@ msgstr "Afficher la bande des messages en attente au-dessus de la zone de saisie
 #. Settings page and Ctrl+K, a setting's name, the row label (a switch). What it does: Show replies once complete.
 #. Settings page and Ctrl+K, a preference's name, the row label. What it does: Show an answer once it is complete instead of as it streams
 msgid "Show when ready"
-msgstr "Afficher une fois prêt"
+msgstr "Afficher les réponses terminées"
 
 #. chat, accessibility label of a reply's work icon (an action): shows the tool calls and steps of the turn
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Opens or folds the work of a finished turn in Conversation view (the message the keyboard is on, else the latest turn), or the running turn's Running box.
@@ -5146,7 +5145,7 @@ msgstr "Arrêter ce tour et envoyer"
 
 #. Keys (key context “Composer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It stops the voice reply that is playing
 msgid "Stop voice"
-msgstr "Arrêter la voix"
+msgstr "Arrêter la lecture"
 
 #. process list popover, accessibility label of a job's stop button (an action: asks to stop it); {} is the job's title
 #. process list popover, accessibility label of a sub-agent's stop button (an action: asks to stop it); {} is the sub-agent's name
@@ -7326,8 +7325,7 @@ msgstr "↑↓ naviguer · Enter exécuter ou ouvrir · Esc fermer"
 #. Ctrl+K command palette, the key hint line at the bottom; key names stay, the words say what each key does
 msgid ""
 "↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close"
-msgstr ""
-"↑↓ naviguer · Enter exécute une commande, bascule un paramètre ou liste ses choix · Esc fermer"
+msgstr "↑↓ naviguer · Enter exécuter, activer/désactiver ou choisir · Esc fermer"
 
 #. chat, wide table, clickable hint above it: scrolls the table sideways to its end; {n} is how many columns it has; the arrow points right
 msgid "→ {n} column"
@@ -8158,6 +8156,12 @@ msgstr "Activée"
 msgctxt "select text"
 msgid "You"
 msgstr "Vous"
+
+#. shortcut bar, action label before its key chord; keep {}, localize the colon spacing
+#. context: shortcut label
+msgctxt "shortcut label"
+msgid "{}:"
+msgstr "{} :"
 
 #. Settings > Agent picture size, option (adjective): the large portrait size
 #. context: size

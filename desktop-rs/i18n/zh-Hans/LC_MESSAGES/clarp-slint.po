@@ -7971,6 +7971,12 @@ msgctxt "select text"
 msgid "You"
 msgstr "你"
 
+#. shortcut bar, action label before its key chord; keep {}, localize the colon spacing
+#. context: shortcut label
+msgctxt "shortcut label"
+msgid "{}:"
+msgstr "{}："
+
 #. Settings > Agent picture size, option (adjective): the large portrait size
 #. context: size
 msgctxt "size"

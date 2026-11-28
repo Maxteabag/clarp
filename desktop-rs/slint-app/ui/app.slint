@@ -117,19 +117,21 @@ component ShortcutBar inherits Rectangle {
             vertical-alignment: center;
             overflow: elide;
         }
-        // The hints clip at the window's edge: however many the state has,
-        // they never widen the layout above them.
-        if root.vim-line == "": Rectangle {
+        // Preserve the connection status and let long or customized shortcut rows scroll.
+        if root.vim-line == "": hint-strip := Flickable {
             horizontal-stretch: 1;
             min-width: 0px;
             clip: true;
-            HorizontalLayout {
-                x: 0;
+            content-width: Math.max(self.width, hint-row.preferred-width);
+            content-height: self.height;
+            hint-row := HorizontalLayout {
                 width: self.preferred-width;
-                spacing: 16px;
+                height: hint-strip.height;
+                spacing: 8px;
                 for hint in root.hints: HorizontalLayout {
                     spacing: 5px;
-                    Text { text: hint.label + ":"; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
+                    // i18n: shortcut bar, action label before its key chord; keep {}, localize the colon spacing
+                    Text { text: @tr("shortcut label" => "{}:", hint.label); color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
                     Text { text: hint.keys; color: Palette.accent; font-size: 11 * Look.unit; font-weight: 700; vertical-alignment: center; }
                 }
             }
