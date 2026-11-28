@@ -618,6 +618,8 @@ export component BlockIcon inherits Rectangle {
     in property <image> icon;
     in property <string> label;
     in property <length> size: 14px * ChatText.scale;
+    // A toggle that is on (the viewer's wrap) stays lit.
+    in property <bool> on;
     callback clicked();
     width: self.size + 8px;
     height: self.size + 8px;
@@ -630,7 +632,7 @@ export component BlockIcon inherits Rectangle {
         source: root.icon;
         width: root.size;
         height: root.size;
-        colorize: touch.has-hover ? Palette.accent : Palette.faint;
+        colorize: touch.has-hover || root.on ? Palette.accent : Palette.faint;
     }
     touch := TouchArea {
         mouse-cursor: pointer;

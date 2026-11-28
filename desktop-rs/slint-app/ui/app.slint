@@ -15,6 +15,9 @@ import { PreviewPanel, PreviewBanner, PreviewWindow, PreviewVersion } from "prev
 import { Updates, AttentionView, JobView, ArtifactView } from "updates.slint";
 import { ReportView } from "report.slint";
 import { ImageView } from "image_view.slint";
+import { BlockView } from "block_view.slint";
+import { BlockBridge } from "transcript.slint";
+export { BlockBridge }
 import { Teams, TeamView, TeamMessageView, TeamMemberView, TeamCreateDialog, TeamEditDialog, TeamMemberDialog, TeamDeleteDialog } from "teams.slint";
 import { ProcessPopover, ProcessJob, ProcessHelper } from "processes.slint";
 // ---- launch dialogs
@@ -326,6 +329,12 @@ export component AppWindow inherits Window {
     in property <int> image-view-count;
     callback image-view-moved(int);
     public function focus-image-view() { image-view.focus-keys(); }
+    // A code block or a table over the window: it, and a table's header
+    // row and the rows under it.
+    in property <MessageBlock> block-view;
+    in property <TableRow> block-view-head;
+    in property <[TableRow]> block-view-body;
+    public function focus-block-view() { block-viewer.focus-keys(); }
     // The report's links (1-9 open them) and its keyboard.
     in property <int> report-links;
     callback report-link(int);
@@ -822,6 +831,16 @@ export component AppWindow inherits Window {
             images: root.image-view-images;
             index: root.image-view-index;
             moved(delta) => { root.image-view-moved(delta); }
+            done => { root.overlay-closed(); }
+        }
+        block-viewer := BlockView {
+            visible: root.overlay == "block";
+            width: parent.width;
+            height: parent.height;
+            block: root.block-view;
+            head: root.block-view-head;
+            body: root.block-view-body;
+            link-clicked(url) => { root.link-clicked(url); }
             done => { root.overlay-closed(); }
         }
         team-create := TeamCreateDialog {

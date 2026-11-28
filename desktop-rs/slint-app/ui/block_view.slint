@@ -1,0 +1,154 @@
+import { ScrollView } from "std-widgets.slint";
+import { Palette, ChatText, ChromeText } from "theme.slint";
+import { MessageBlock, TableRow, BlockIcon, CopyIcon } from "transcript.slint";
+
+// One cell of the viewer's table, at its column's width.
+component ViewerCell inherits Rectangle {
+    in property <styled-text> text;
+    in property <bool> header;
+    callback link-clicked(string);
+    border-width: 1px;
+    border-color: Palette.rule;
+    background: root.header ? Palette.raised : transparent;
+    VerticalLayout {
+        padding: 8px;
+        StyledText {
+            text: root.text;
+            default-color: root.header ? Palette.chrome-text : Palette.text;
+            default-font-size: ChatText.body;
+            default-font-family: Palette.body-family;
+            link-color: Palette.link;
+            link-clicked(url) => { root.link-clicked(url); }
+        }
+    }
+}
+
+// A code block or a table over the whole window. Code is selectable, in
+// monospace at the reading size and wrapped; the wrap icon turns wrapping
+// off and it scrolls sideways. A table scrolls both ways under its header
+// row, which stays in place, and uses the window's width. Copy copies the
+// code, or the table as Markdown; close or Escape (the keyboard map)
+// closes it.
+export component BlockView inherits Rectangle {
+    in property <MessageBlock> block;
+    // A table's header row, and the rows under it.
+    in property <TableRow> head;
+    in property <[TableRow]> body;
+    callback link-clicked(string);
+    callback done();
+    public function focus-keys() { keys.focus(); }
+    property <bool> code: root.block.kind == "code";
+    property <bool> wrap: true;
+    changed block => { root.wrap = true; }
+    background: Palette.window;
+    accessible-role: groupbox;
+    accessible-label: root.code ? "Code" : "Table";
+    // Nothing under it takes a click.
+    TouchArea { }
+    keys := FocusScope { }
+    VerticalLayout {
+        padding: 16px;
+        spacing: 10px;
+        HorizontalLayout {
+            spacing: 4px;
+            height: 26px;
+            Text {
+                text: root.code ? root.block.language : "";
+                color: Palette.muted;
+                font-size: ChromeText.body;
+                vertical-alignment: center;
+                overflow: elide;
+                horizontal-stretch: 1;
+                min-width: 0px;
+            }
+            if root.code: BlockIcon {
+                accessible-id: "block-view-wrap";
+                size: 18px;
+                icon: @image-url("icons/wrap.svg");
+                label: "Wrap lines";
+                on: root.wrap;
+                accessible-checkable: true;
+                accessible-checked: root.wrap;
+                clicked => { root.wrap = !root.wrap; }
+            }
+            CopyIcon {
+                accessible-id: "block-view-copy";
+                size: 18px;
+                text: root.code ? root.block.text : root.block.source;
+                label: root.code ? "Copy code" : "Copy table";
+            }
+            BlockIcon {
+                accessible-id: "block-view-close";
+                size: 18px;
+                icon: @image-url("icons/close.svg");
+                label: "Close";
+                clicked => { root.done(); }
+            }
+        }
+        Rectangle { height: 1px; background: Palette.rule; }
+        if root.code: code-view := ScrollView {
+            vertical-stretch: 1;
+            content-width: root.wrap ? self.visible-width : Math.max(self.visible-width, code-input.preferred-width + 8px);
+            content-height: Math.max(self.visible-height, code-input.preferred-height + 8px);
+            code-input := TextInput {
+                accessible-id: "block-view-code";
+                text: root.block.text;
+                read-only: true;
+                single-line: false;
+                wrap: root.wrap ? word-wrap : no-wrap;
+                font-family: Palette.code-family;
+                font-size: ChatText.body;
+                color: Palette.text;
+            }
+        }
+        if !root.code: table := Rectangle {
+            vertical-stretch: 1;
+            property <length> char: ChatText.body * 0.62;
+            property <length> pad: 18px;
+            property <int> count: root.block.columns.length;
+            property <length> natural: root.block.table-chars * self.char + self.count * self.pad;
+            // A table narrower than the window grows to its width.
+            property <float> grow: Math.max(1, (self.width - 14px) / Math.max(1px, self.natural));
+            pure function column-width(column: int) -> length {
+                ((column < root.block.columns.length ? root.block.columns[column] : 4) * table.char + table.pad) * table.grow
+            }
+            accessible-role: AccessibleRole.table;
+            accessible-label: self.count + " columns";
+            clip: true;
+            head := Rectangle {
+                y: 0;
+                width: parent.width;
+                height: head-row.preferred-height;
+                clip: true;
+                head-row := HorizontalLayout {
+                    x: rows-view.content-x;
+                    alignment: start;
+                    for cell[column] in root.head.cells: ViewerCell {
+                        width: table.column-width(column);
+                        text: cell;
+                        header: true;
+                        link-clicked(url) => { root.link-clicked(url); }
+                    }
+                }
+            }
+            rows-view := ScrollView {
+                y: head.height;
+                width: parent.width;
+                height: parent.height - head.height;
+                content-width: Math.max(self.visible-width, table.natural * table.grow);
+                content-height: body-grid.preferred-height;
+                body-grid := VerticalLayout {
+                    alignment: start;
+                    for row in root.body: HorizontalLayout {
+                        alignment: start;
+                        for cell[column] in row.cells: ViewerCell {
+                            width: table.column-width(column);
+                            text: cell;
+                            link-clicked(url) => { root.link-clicked(url); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

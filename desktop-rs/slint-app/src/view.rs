@@ -368,7 +368,15 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
             rows: empty(),
             ..MessageBlock::default()
         },
-        Block::Code { text, .. } => MessageBlock { kind: "code".into(), styled: slint::StyledText::default(), text: text.clone().into(), level: 0, rows: empty(), ..MessageBlock::default() },
+        Block::Code { language, text } => MessageBlock {
+            kind: "code".into(),
+            styled: slint::StyledText::default(),
+            text: text.clone().into(),
+            language: language.clone().into(),
+            level: 0,
+            rows: empty(),
+            ..MessageBlock::default()
+        },
         Block::Quote(markdown) => MessageBlock { kind: "quote".into(), styled: styled(markdown, false), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
         Block::Table(rows) => {
             let columns = table_columns(rows);
@@ -376,6 +384,7 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
                 kind: "table".into(),
                 table_chars: columns.iter().sum(),
                 columns: ModelRc::new(VecModel::from(columns)),
+                source: table_markdown(rows).into(),
                 styled: slint::StyledText::default(),
                 text: SharedString::new(),
                 level: 0,
@@ -393,6 +402,35 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
         }
         Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
     }
+}
+
+/// A table as Markdown (what its copy copies): its first row the header,
+/// every row as wide as the widest. A cell is its Markdown source, so a
+/// `\|` stays as it is and only a bare `|` is escaped.
+pub(crate) fn table_markdown(rows: &[Vec<String>]) -> String {
+    let count = rows.iter().map(Vec::len).max().unwrap_or(0);
+    if count == 0 {
+        return String::new();
+    }
+    let line = |cells: &[String]| {
+        let escape = |cell: &str| {
+            let mut out = String::with_capacity(cell.len());
+            let mut previous = ' ';
+            for c in cell.chars() {
+                if c == '|' && previous != '\\' {
+                    out.push('\\');
+                }
+                out.push(c);
+                previous = c;
+            }
+            out
+        };
+        let cells = (0..count).map(|i| cells.get(i).map_or(String::new(), |c| escape(c)));
+        format!("| {} |", cells.collect::<Vec<_>>().join(" | "))
+    };
+    let mut out = vec![line(&rows[0]), format!("|{}", " --- |".repeat(count))];
+    out.extend(rows[1..].iter().map(|row| line(row)));
+    out.join("\n")
 }
 
 /// The characters each column of a table needs: its widest cell's longest
@@ -904,6 +942,14 @@ mod tests {
         let url = row(&["https://example.com/a/very/long/path/that/does/not/break/anywhere"]);
         assert_eq!(super::table_columns(&[url]), vec![32]);
         assert!(super::table_columns(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_table_copies_as_markdown() {
+        let row = |cells: &[&str]| cells.iter().map(|c| (*c).to_owned()).collect::<Vec<_>>();
+        let rows = vec![row(&["step", "state"]), row(&["port", "**done**"]), row(&["a|b", "c\\|d"])];
+        assert_eq!(super::table_markdown(&rows), "| step | state |\n| --- | --- |\n| port | **done** |\n| a\\|b | c\\|d |");
+        assert_eq!(super::table_markdown(&[]), "");
     }
 
     /// The explorer's preview and activity lines are one line each: a helper
