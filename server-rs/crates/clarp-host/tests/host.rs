@@ -18320,13 +18320,16 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
         listed["assets"].as_array().unwrap().clone()
     };
     let shown = gallery(&host, &maker);
-    assert_eq!(shown.len(), 1, "{shown:?}");
-    assert_eq!(shown[0]["asset_id"], id.as_str());
+    let [latest, chart] = shown.as_slice() else {
+        panic!("both of the maker's images belong in the gallery: {shown:?}");
+    };
+    assert_eq!(latest["asset_id"], beside["asset"]["asset_id"]);
+    assert_eq!(chart["asset_id"], id.as_str());
     assert_eq!(
         (
-            &shown[0]["source_name"],
-            &shown[0]["mime_type"],
-            &shown[0]["caption"]
+            &chart["source_name"],
+            &chart["mime_type"],
+            &chart["caption"]
         ),
         (
             &json!("My_chart.png"),
@@ -18335,10 +18338,10 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
         )
     );
     assert_eq!(
-        (&shown[0]["width"], &shown[0]["height"]),
+        (&chart["width"], &chart["height"]),
         (&json!(640), &json!(480))
     );
-    assert_eq!(shown[0]["bytes"], png.len());
+    assert_eq!(chart["bytes"], png.len());
     assert_eq!(gallery(&host, &other).len(), 1);
     assert!(gallery(&host, "nobody").is_empty());
 
