@@ -237,7 +237,7 @@ impl Engine {
         if let Some(session) = tag.strip_prefix(OPTIONS) {
             let options = self.transits.options.entry(session.to_owned()).or_default();
             options.loading = false;
-            options.error = transit::OPTIONS_FAILED.to_owned();
+            options.error = transit::options_failed();
         } else if let Some(session) = tag.strip_prefix(START) {
             let backend = match self.transits.flows.get(session).map(|f| &f.step) {
                 Some(transit::Step::Moving { backend, .. }) => backend.clone(),

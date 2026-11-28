@@ -327,7 +327,7 @@ pub(crate) fn row_activity(row: &clarp_core::roster::AgentRow, clock: clarp_core
     if let Some(line) = row.availability.as_ref().and_then(|a| clarp_core::availability::line(a, clock)) {
         line
     } else if row.stalled_since.is_some() {
-        clarp_core::stall::ROW_STATUS.to_owned()
+        clarp_core::stall::row_status()
     } else if row.busy && !row.status_text.is_empty() {
         one_line(&row.status_text)
     } else {

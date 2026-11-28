@@ -14,6 +14,9 @@ use crate::list_ops::ListOp;
 use crate::protocol::{Agent, display_name, is_busy_state};
 use crate::text::name_order;
 use crate::time_format::compact_duration;
+use crate::tr;
+
+// i18n-screen: chat list
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -855,7 +858,13 @@ pub fn describe_agent_processes(roster: &Roster, jobs: &JobTracker, session: &st
                 let sub_agent = is_sub_agent(job);
                 let mut title = json::string(job, "title").trim().to_owned();
                 if title.is_empty() {
-                    title = if sub_agent { "Sub-agent" } else { "Background job" }.into();
+                    title = if sub_agent {
+                        // i18n: chat list and processes, title of a helper agent that has none of its own (noun)
+                        tr!("Sub-agent")
+                    } else {
+                        // i18n: chat list and processes, title of a background job that has none of its own (noun)
+                        tr!("Background job")
+                    };
                 }
                 json!({
                     "jobId": json::string(job, "job_id"),

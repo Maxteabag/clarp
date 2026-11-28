@@ -15,6 +15,9 @@ use clarp_core::transit::{self, Step};
 use crate::{
     App, AppWindow, NamedItem, PlanItem, ProfileArtifact, ProfileBridge, ProfileInfo, PromptItem, TransitChoice, commands, pump_now,
 };
+use clarp_core::tr;
+
+// i18n-screen: profile
 
 /// The overlays this group owns.
 const OWNED: &[&str] = &["profile", "overview", "voices", "orchestrator"];
@@ -928,10 +931,11 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
         Step::Moving { backend: target, phase, .. } => {
             row.moving = true;
             let target_model = model_label(target, &flow.target_model);
-            let shown_model = if target_model.is_empty() { "the default model".to_owned() } else { target_model };
+            // i18n: agent profile, Backend row while the model changes, in place of a model's name ("Switching to the default model…")
+            let shown_model = if target_model.is_empty() { tr!("the default model") } else { target_model };
             row.detail = transit::progress(&backend_label(target), &shown_model, target == backend, *phase);
         }
-        _ if blocked => row.detail = transit::TURN_BLOCKED.to_owned(),
+        _ if blocked => row.detail = transit::turn_blocked(),
         Step::Failed { reason, .. } => {
             row.detail = reason.clone();
             row.failed = true;
@@ -945,7 +949,7 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
     match &flow.step {
         Step::Picking => {
             picker.step = "backends";
-            picker.title = transit::ROW_TITLE.to_owned();
+            picker.title = transit::row_title();
             picker.choices = options
                 .choices()
                 .map(|b| TransitChoice {
@@ -959,19 +963,20 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
         }
         Step::Model { backend: chosen } => {
             picker.step = "models";
-            picker.title = format!("{} · Model", backend_label(chosen));
+            // i18n: agent profile, Backend picker title on the model step; {} is the backend's name ("Claude · Model")
+            picker.title = tr!("{} · Model", backend_label(chosen));
             let models = options.backends.iter().find(|b| b.id == *chosen).map(|b| b.models.clone()).unwrap_or_default();
             let current = |id: &str| chosen == backend && id == model;
             picker.choices = if models.is_empty() {
                 // A tool that lists no models runs its own default ("").
-                vec![TransitChoice { id: "".into(), label: transit::DEFAULT_MARK.into(), enabled: !current(""), current: current(""), ..TransitChoice::default() }]
+                vec![TransitChoice { id: "".into(), label: transit::default_mark().into(), enabled: !current(""), current: current(""), ..TransitChoice::default() }]
             } else {
                 models
                     .iter()
                     .map(|m| TransitChoice {
                         id: m.id.as_str().into(),
                         label: m.label.as_str().into(),
-                        detail: if m.default { transit::DEFAULT_MARK } else { "" }.into(),
+                        detail: if m.default { transit::default_mark() } else { String::new() }.into(),
                         enabled: !current(&m.id),
                         current: current(&m.id),
                     })
@@ -981,13 +986,14 @@ fn backend_row(engine: &clarp_engine::Engine, session: &str, name: &str, backend
         Step::Confirming { backend: chosen, model: target } => {
             picker.step = "confirm";
             let label = model_label(chosen, target);
-            let label = if label.is_empty() { transit::DEFAULT_MARK.to_lowercase() + " model" } else { label };
+            // i18n: agent profile, confirmation title, in place of a model's name ("Switch Theo to default model?")
+            let label = if label.is_empty() { tr!("default model") } else { label };
             if chosen == backend {
                 picker.title = transit::switch_title(name, &label);
-                picker.body = transit::SWITCH_BODY.to_owned();
+                picker.body = transit::switch_body();
             } else {
                 picker.title = transit::confirm_title(name, &backend_label(chosen), &label);
-                picker.body = transit::confirm_body(engine.transit_carries_tools(session)).to_owned();
+                picker.body = transit::confirm_body(engine.transit_carries_tools(session));
             }
         }
         _ => {}

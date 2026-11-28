@@ -3,6 +3,9 @@
 //! until it is opened by its key, which keeps it open per message id.
 
 use crate::protocol::Message;
+use crate::tr;
+
+// i18n-screen: chat
 
 /// The key a prompt is opened and folded by (and J/K reach it by).
 pub const PREFIX: &str = "a2a:";
@@ -37,7 +40,8 @@ pub fn of(message: &Message) -> Option<AgentPrompt> {
     let text = if message.display_text.is_empty() { &message.text } else { &message.display_text };
     Some(AgentPrompt {
         key: key(&message.id),
-        sender: sender.map_or_else(|| "An agent".to_owned(), |s| s.trim().to_owned()),
+        // i18n: chat, who sent a prompt from another agent, when it has no name
+        sender: sender.map_or_else(|| tr!("An agent"), |s| s.trim().to_owned()),
         line: first_line(text),
     })
 }
