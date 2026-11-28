@@ -115,7 +115,7 @@ fn run(path: &Path, program: &str, mut options: Value) -> io::Result<()> {
     }
     let (send, input) = mpsc::sync_channel(64);
     let _listener = Socket::control(path, send.clone(), Input::control)?;
-    let login = Login::read(&mut options, account)?;
+    let login = Login::read(&mut options, |value| account(value).map(str::to_owned))?;
     let session = options[key::SESSION]
         .as_str()
         .unwrap_or_default()
