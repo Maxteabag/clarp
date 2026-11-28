@@ -789,22 +789,21 @@ pub fn find_in_chat_check(out: String) {
             }
             check(window.get_switcher_note().is_empty() && window.get_switcher_hint().is_empty(), "the page says nothing more");
             let app = app_now();
-            let mut engine = app.engine.borrow_mut();
-            let original = clarp_core::i18n::current();
-            let date = chrono::NaiveDate::from_ymd_opt(2020, 3, 20).unwrap();
-            let english = clarp_core::i18n::format::date_short("en", date);
-            let french = clarp_core::i18n::format::date_short("fr", date);
-            check(english != french, "the fixture distinguishes English and French date formats");
+            let original = crate::language::stored(app.engine.borrow().settings());
+            // The fixture timestamp of o-300, converted to the device's calendar day.
+            let day = chrono::DateTime::parse_from_rfc3339("2020-03-20T08:05:00Z").unwrap().with_timezone(&chrono::Local).date_naive();
+            let expected = |tag| clarp_core::i18n::format::date_short(tag, day);
+            let (english, french) = (expected("en"), expected("fr"));
+            check(english != french, "the fixture date distinguishes the two selected locales");
             for (tag, stamp) in [("en", english), ("fr", french)] {
-                clarp_core::i18n::set_current(tag);
-                let local = crate::search_view::items(&mut engine, "heron", 50).0;
-                let host = crate::search_view::found(&mut engine, "heron").items;
-                for hits in [local, host] {
-                    check(hits.iter().any(|r| r.label.contains(stamp.as_str())), &format!("search timestamps use the {tag} date format"));
-                }
+                crate::language::choose(&app, window, tag);
+                let has_stamp = |label: &str| label.split(" · ").any(|field| field == stamp);
+                let hits: Vec<_> = window.get_switcher_rows().iter().filter(|r| r.kind == "message").collect();
+                check(hits.len() == 4 && hits.iter().all(|r| has_stamp(&r.label)), &format!("the four displayed Host hits use the selected {tag} date {stamp}"));
+                let local = crate::search_view::items(&mut app.engine.borrow_mut(), "heron", 50).0;
+                check(local.iter().any(|r| crate::search_view::split(&r.target) == Some(("oscar", "o-300")) && has_stamp(&r.label)), &format!("the loaded fenced hit uses the selected {tag} date {stamp}"));
             }
-            clarp_core::i18n::set_current(original);
-            drop(engine);
+            crate::language::choose(&app, window, &original);
             shot(&out4, "find-in-chat-04-search-page");
             // Newest first: the third is o-300.
             window.invoke_switcher_chosen(2);
