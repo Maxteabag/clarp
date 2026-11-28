@@ -22,11 +22,14 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
             .extend(more.as_object().unwrap().clone());
         let (status, made) = host.ask("POST", "/decisions", Some(&body));
         assert_eq!(status, 201, "{made}");
-        let id = made["artifact"]["decision"]["decision_id"].as_str().unwrap();
+        let id = made["artifact"]["decision"]["decision_id"]
+            .as_str()
+            .unwrap();
         let artifact = made["artifact"]["artifact_id"].as_str().unwrap();
         (id.to_string(), artifact.to_string())
     };
-    let resolve = |id: &str, body: Value| host.ask("POST", &format!("/decisions/{id}/resolve"), Some(&body));
+    let resolve =
+        |id: &str, body: Value| host.ask("POST", &format!("/decisions/{id}/resolve"), Some(&body));
     let undo = |id: &str, revision: i64| {
         host.ask(
             "POST",
@@ -39,16 +42,25 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
     // Approval rows offer the user's own words on a Host with the feature.
     let shown = host.get(&format!("/artifacts/{artifact_id}"));
     assert_eq!(shown["decision"]["allow_custom_text"], true, "{shown}");
-    let refused = resolve(&id, json!({ "choice": "accepted", "expected_revision": 1, "undo_ms": 20_000 }));
+    let refused = resolve(
+        &id,
+        json!({ "choice": "accepted", "expected_revision": 1, "undo_ms": 20_000 }),
+    );
     assert_eq!(refused.0, 400, "{refused:?}");
     let before = host_now();
-    let (status, said) = resolve(&id, json!({ "choice": "accepted", "expected_revision": 1, "undo_ms": 15_000 }));
+    let (status, said) = resolve(
+        &id,
+        json!({ "choice": "accepted", "expected_revision": 1, "undo_ms": 15_000 }),
+    );
     assert_eq!(status, 200, "{said}");
     let decision = &said["artifact"]["decision"];
     assert_eq!(decision["status"], "accepted");
     assert_eq!(decision["undoable"], true, "{said}");
     let until = decision["undo_until"].as_i64().unwrap();
-    assert!(until >= before + 14_000 && until <= host_now() + 15_000, "{until}");
+    assert!(
+        until >= before + 14_000 && until <= host_now() + 15_000,
+        "{until}"
+    );
     let revision = decision["revision"].as_i64().unwrap();
     let shown = host.get(&format!("/artifacts/{artifact_id}"));
     assert_eq!(shown["decision"]["undoable"], true, "{shown}");
@@ -79,11 +91,11 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
     assert_eq!(status, 200, "{again}");
     assert_eq!(again["undone"], false);
     // Nothing of the answer taken back reached the agent.
-    assert!(
-        !host.turns("undo").iter().any(|row| row["text"]
+    assert!(!host.turns("undo").iter().any(|row| {
+        row["text"]
             .as_str()
-            .is_some_and(|text| text.contains("[Clarp decision resolved]"))),
-    );
+            .is_some_and(|text| text.contains("[Clarp decision resolved]"))
+    }),);
 
     // Answered again with a short hold, the answer goes to the agent when the hold ends, and
     // then it is too late.
@@ -96,7 +108,8 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
     let after = said["artifact"]["decision"]["revision"].as_i64().unwrap();
     wait_for("the held answer to go", || {
         let shown = host.get(&format!("/artifacts/{artifact_id}"));
-        shown["decision"]["delivery_pending"] == false && shown["decision"].get("undoable").is_none()
+        shown["decision"]["delivery_pending"] == false
+            && shown["decision"].get("undoable").is_none()
     });
     wait_for("the agent to be told", || {
         host.turns("undo").iter().any(|row| {
@@ -107,13 +120,23 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
         })
     });
     let (status, late) = undo(&id, after);
-    assert_eq!((status, late["error"].as_str()), (409, Some("too_late")), "{late}");
+    assert_eq!(
+        (status, late["error"].as_str()),
+        (409, Some("too_late")),
+        "{late}"
+    );
 
     // An answer without `undo_ms` is as it always was.
     let (other, _) = ask(json!({ "question": "Ship the other?" }));
-    let (status, said) = resolve(&other, json!({ "choice": "rejected", "expected_revision": 1 }));
+    let (status, said) = resolve(
+        &other,
+        json!({ "choice": "rejected", "expected_revision": 1 }),
+    );
     assert_eq!(status, 200, "{said}");
-    assert!(said["artifact"]["decision"].get("undoable").is_none(), "{said}");
+    assert!(
+        said["artifact"]["decision"].get("undoable").is_none(),
+        "{said}"
+    );
 }
 
 /// A held answer that became a message waiting behind the agent's running turn is taken back
@@ -142,7 +165,10 @@ fn an_answer_waiting_in_the_queue_is_taken_back_from_it() {
         })),
     );
     assert_eq!(status, 201, "{made}");
-    let id = made["artifact"]["decision"]["decision_id"].as_str().unwrap().to_string();
+    let id = made["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let waiting = |item: &str| {
         let queue = host.get("/turn-queue?session=queued");
         queue["items"]
@@ -197,12 +223,21 @@ fn a_spoken_answer_is_matched_against_the_request() {
         })),
     );
     assert_eq!(status, 201, "{made}");
-    let id = made["artifact"]["decision"]["decision_id"].as_str().unwrap().to_string();
-    let artifact_id = made["artifact"]["artifact_id"].as_str().unwrap().to_string();
+    let id = made["artifact"]["decision"]["decision_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let artifact_id = made["artifact"]["artifact_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let matched = |body: Value| host.ask("POST", &format!("/decisions/{id}/match"), Some(&body));
     assert_eq!(
         matched(json!({ "text": "velg B" })),
-        (200, json!({ "kind": "option", "option_id": "b", "label": "Granite" }))
+        (
+            200,
+            json!({ "kind": "option", "option_id": "b", "label": "Granite" })
+        )
     );
     assert_eq!(
         matched(json!({ "text": "videre", "commands": { "next": ["videre"] } })),
@@ -210,7 +245,10 @@ fn a_spoken_answer_is_matched_against_the_request() {
     );
     assert_eq!(
         matched(json!({ "text": "B men bare for prod" })),
-        (200, json!({ "kind": "custom", "text": "B men bare for prod" }))
+        (
+            200,
+            json!({ "kind": "custom", "text": "B men bare for prod" })
+        )
     );
     assert_eq!(matched(json!({ "words": "B" })).0, 400);
     let shown = host.get(&format!("/artifacts/{artifact_id}"));
@@ -237,7 +275,14 @@ fn a_held_form_answer_is_taken_back_and_the_form_opens_again() {
         ("X-Clarp-Client", "ios/12 contract=74"),
     ];
     let send = |method: &str, path: &str, body: &Value| {
-        let got = fetch(&host, &host.token, method, path, &client, body.to_string().as_bytes());
+        let got = fetch(
+            &host,
+            &host.token,
+            method,
+            path,
+            &client,
+            body.to_string().as_bytes(),
+        );
         let said: Value = serde_json::from_slice(&got.body).unwrap_or(Value::Null);
         (got.status, said)
     };
@@ -281,7 +326,11 @@ fn a_held_form_answer_is_taken_back_and_the_form_opens_again() {
         "/artifacts/spec-undo/submissions/undo-answer-0001/undo",
         &json!({}),
     );
-    assert_eq!((status, again["undone"].clone()), (200, json!(false)), "{again}");
+    assert_eq!(
+        (status, again["undone"].clone()),
+        (200, json!(false)),
+        "{again}"
+    );
     // The id taken back is not taken again; new answers under a new id are.
     let (status, refused) = send("POST", "/artifacts/spec-undo/submit", &held);
     assert_eq!(status, 409, "{refused}");

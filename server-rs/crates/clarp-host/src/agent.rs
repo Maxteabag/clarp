@@ -2535,7 +2535,12 @@ impl Worker {
                         .is_none()
                         .then(|| actor.artifacts().next_hold())
                         .flatten();
-                    actor.artifacts().next_expiry().into_iter().chain(held).min()
+                    actor
+                        .artifacts()
+                        .next_expiry()
+                        .into_iter()
+                        .chain(held)
+                        .min()
                 })
                 .map(|due| {
                     let wait = u64::try_from(due - self.now_ms()).unwrap_or(0);

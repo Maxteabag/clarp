@@ -50,15 +50,30 @@ impl Commands {
 // says `annuler` for undo and `abandonner` for cancel, since a transcript cannot tell two
 // `annuler` apart.
 const NEXT: &[&str] = &[
-    "neste", "hopp over", "next", "skip", "suivant", "siguiente", "अगला", "下一个",
+    "neste",
+    "hopp over",
+    "next",
+    "skip",
+    "suivant",
+    "siguiente",
+    "अगला",
+    "下一个",
 ];
 const UNDO: &[&str] = &["angre", "undo", "annuler", "deshacer", "पूर्ववत", "撤销"];
 const CANCEL: &[&str] = &[
-    "avbryt", "cancel", "abandonner", "cancelar", "रद्द करो", "रद्द", "取消",
+    "avbryt",
+    "cancel",
+    "abandonner",
+    "cancelar",
+    "रद्द करो",
+    "रद्द",
+    "取消",
 ];
 
 /// Sounds that say nothing, wherever they are.
-const FILLER: &[&str] = &["eh", "ehm", "øh", "øhm", "um", "uh", "uhm", "hmm", "mm", "erm"];
+const FILLER: &[&str] = &[
+    "eh", "ehm", "øh", "øhm", "um", "uh", "uhm", "hmm", "mm", "erm",
+];
 
 /// Openings that say nothing before what is said.
 const FILLER_OPENINGS: &[&str] = &["ok så", "okei så", "okay so", "ok so"];
@@ -87,14 +102,49 @@ const LEAD_INS: &[&str] = &[
 
 /// Words that may end a choice without saying more ("the first one", "B takk").
 const TRAILERS: &[&str] = &[
-    "one", "please", "takk", "thanks", "option", "alternativet", "da",
+    "one",
+    "please",
+    "takk",
+    "thanks",
+    "option",
+    "alternativet",
+    "da",
 ];
 
 /// Words that may stand around an option's label without making the answer more than it.
 const CARRIERS: &[&str] = &[
-    "please", "thanks", "takk", "the", "one", "den", "det", "jeg", "i", "will", "want", "vil",
-    "ha", "take", "tar", "go", "with", "med", "går", "option", "alternativet", "alternativ",
-    "choose", "velger", "pick", "velg", "lets", "let's", "la", "oss", "ta", "gå",
+    "please",
+    "thanks",
+    "takk",
+    "the",
+    "one",
+    "den",
+    "det",
+    "jeg",
+    "i",
+    "will",
+    "want",
+    "vil",
+    "ha",
+    "take",
+    "tar",
+    "go",
+    "with",
+    "med",
+    "går",
+    "option",
+    "alternativet",
+    "alternativ",
+    "choose",
+    "velger",
+    "pick",
+    "velg",
+    "lets",
+    "let's",
+    "la",
+    "oss",
+    "ta",
+    "gå",
 ];
 
 /// Letters, as written and as their names are said in Norwegian and English.
@@ -140,14 +190,45 @@ const NUMBERS: &[(&str, usize)] = &[
 ];
 
 const YES: &[&str] = &[
-    "ja", "jepp", "jo", "jada", "ja takk", "ok", "okei", "okay", "godkjenn", "kjør", "yes",
-    "yep", "yeah", "yes please", "sure", "approve", "go ahead", "sí", "si", "oui", "हाँ", "हां",
-    "是", "好",
+    "ja",
+    "jepp",
+    "jo",
+    "jada",
+    "ja takk",
+    "ok",
+    "okei",
+    "okay",
+    "godkjenn",
+    "kjør",
+    "yes",
+    "yep",
+    "yeah",
+    "yes please",
+    "sure",
+    "approve",
+    "go ahead",
+    "sí",
+    "si",
+    "oui",
+    "हाँ",
+    "हां",
+    "是",
+    "好",
 ];
 
 const NO: &[&str] = &[
-    "nei", "nope", "nei takk", "avvis", "stopp", "no", "no thanks", "reject", "deny", "non",
-    "नहीं", "不",
+    "nei",
+    "nope",
+    "nei takk",
+    "avvis",
+    "stopp",
+    "no",
+    "no thanks",
+    "reject",
+    "deny",
+    "non",
+    "नहीं",
+    "不",
 ];
 
 /// Folds a letter to its plain form: accents go, but æ, ø and å are letters of their own.
@@ -229,7 +310,10 @@ fn joined(words: &[String]) -> String {
 
 /// Whether the whole of what was said is one of `phrases`, compared as words.
 fn is_one_of<S: AsRef<str>>(said: &str, phrases: &[S]) -> bool {
-    !said.is_empty() && phrases.iter().any(|phrase| joined(&words(phrase.as_ref())) == said)
+    !said.is_empty()
+        && phrases
+            .iter()
+            .any(|phrase| joined(&words(phrase.as_ref())) == said)
 }
 
 /// The option a single word names by its letter or its number, where it names one there is.
