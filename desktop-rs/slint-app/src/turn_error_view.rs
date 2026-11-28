@@ -1,13 +1,16 @@
 //! A failed turn's card (docs/turn-errors.md, Rust Host contract 217): the
-//! Host's sentence in the device's language, the buttons that fit, a count
-//! for repeats and a closed Details. `clarp_core::turn_error` decides what
-//! shows; this fills the card and does what its buttons say.
+//! sentence from the catalog by the Host's key (`clarp_core::turn_error_text`)
+//! in the app's language, the buttons that fit, a count for repeats and a
+//! closed Details. `clarp_core::turn_error` decides what shows; this fills the
+//! card and does what its buttons say.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
+use clarp_core::json::Object;
 use clarp_core::turn_error::{Action, LIVE_PREFIX, Plan, TurnError};
+use clarp_core::turn_error_text as text;
 use clarp_engine::{Change, Engine, RetryState};
 use slint::{ModelRc, VecModel};
 
@@ -17,32 +20,32 @@ use crate::{App, AppWindow, ErrorAction, ErrorCard};
 /// `turn-error:<action>␟<session>␟<card id>`.
 const PREFIX: &str = "turn-error:";
 const DETAILS: &str = "details";
-/// How long "Copied" shows.
+/// How long "Diagnostics copied" shows.
 const COPIED_FOR: Duration = Duration::from_secs(2);
 
 thread_local! {
-    /// The language the cards speak: the device's, or a check's choice.
-    static NORWEGIAN: Cell<Option<bool>> = const { Cell::new(None) };
+    /// The language the cards speak: the app's, or a check's choice.
+    static LANGUAGE: Cell<Option<&'static str>> = const { Cell::new(None) };
     /// Cards whose Details are open (`<session>␟<card id>`).
     static OPEN: RefCell<HashSet<String>> = RefCell::default();
     /// Cards whose details were just copied, and when.
     static COPIED: RefCell<HashMap<String, Instant>> = RefCell::default();
 }
 
-/// Whether the cards speak Norwegian (the device prefers `nb`, `nn`, `no`).
-pub(crate) fn norwegian() -> bool {
-    NORWEGIAN.with(|n| {
-        if n.get().is_none() {
-            n.set(Some(clarp_core::turn_error::device_prefers_norwegian()));
+/// The app's language (one of `turn_error_text::LANGUAGES`).
+pub(crate) fn language() -> &'static str {
+    LANGUAGE.with(|l| {
+        if l.get().is_none() {
+            l.set(Some(text::app_language()));
         }
-        n.get().unwrap_or(false)
+        l.get().unwrap_or("en")
     })
 }
 
 /// A check speaks the language it shows.
 #[allow(dead_code)]
-pub(crate) fn set_norwegian(on: bool) {
-    NORWEGIAN.with(|n| n.set(Some(on)));
+pub(crate) fn set_language(language: &'static str) {
+    LANGUAGE.with(|l| l.set(Some(language)));
 }
 
 fn card_key(session: &str, id: &str) -> String {
@@ -53,45 +56,41 @@ fn key(action: &str, session: &str, id: &str) -> String {
     format!("{PREFIX}{action}\u{1f}{session}\u{1f}{id}")
 }
 
-fn say(nb: bool, norwegian: &str, english: &str) -> String {
-    if nb { norwegian } else { english }.to_owned()
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
 }
 
 /// The card's own words, before the pane knows its place: sentence,
 /// severity, Details. `finish` adds the rest.
 pub(crate) fn card(error: &TurnError) -> ErrorCard {
-    let nb = norwegian();
+    let language = language();
     ErrorCard {
-        sentence: error.sentence(nb).into(),
+        sentence: error.sentence_in(language, now_ms()).into(),
         severity: error.severity.as_str().into(),
         count: 1,
         detail: error.detail.as_str().into(),
         meta: error.meta().into(),
-        details_label: if nb { "Detaljer" } else { "Details" }.into(),
+        details_label: text::word(language, "error.details").into(),
         ..ErrorCard::default()
     }
 }
 
 /// The note a pressed retry leaves under the buttons, and whether it says
-/// it failed.
-fn retry_note(state: &RetryState, nb: bool) -> (String, bool) {
+/// it failed (the Host's own reason stays in the log).
+fn retry_note(state: &RetryState, action: &Action, language: &str, now: i64) -> (String, bool) {
     match state {
         RetryState::Sending => (String::new(), false),
-        RetryState::Done(status) => (
-            match status.as_str() {
-                "scheduled" => say(nb, "Planlagt.", "Scheduled."),
-                "compacting" => say(nb, "Komprimerer samtalen, så sendes meldingen på nytt.", "Compacting the conversation, then sending the message again."),
-                "refreshing" => say(nb, "Starter en ny økt med samme samtale.", "Starting a fresh session with the same conversation."),
-                _ => say(nb, "Sendt på nytt.", "Sent again."),
-            },
-            false,
-        ),
-        RetryState::Failed(404, _) => (say(nb, "Meldingen finnes ikke lenger i samtalen.", "The message is no longer in the conversation."), true),
-        RetryState::Failed(409, _) => (say(nb, "Agenten har allerede svart på en nyere melding.", "The agent has already answered a newer message."), true),
-        RetryState::Failed(_, words) => {
-            let words = words.trim();
-            let lead = say(nb, "Kunne ikke sende den på nytt", "Could not send it again");
-            (if words.is_empty() { format!("{lead}.") } else { format!("{lead}: {words}") }, true)
+        RetryState::Done(status) if status == "scheduled" => {
+            let mut params = Object::new();
+            if let Some(at) = action.at_ms {
+                params.insert("time_ms".into(), at.into());
+            }
+            (text::say(language, "error.retry_scheduled", &params, now).unwrap_or_else(|| text::word(language, "error.retry_sent")), false)
+        }
+        RetryState::Done(_) => (text::word(language, "error.retry_sent"), false),
+        RetryState::Failed(status, words) => {
+            eprintln!("clarp-slint: the Host refused the retry ({status}): {words}");
+            (text::word(language, "error.action_failed"), true)
         }
     }
 }
@@ -99,13 +98,13 @@ fn retry_note(state: &RetryState, nb: bool) -> (String, bool) {
 /// The whole card for `error` drawn as `id` in `session`: its count, the
 /// buttons the plan shows with their state, Details open or not and a note.
 pub(crate) fn finish(error: &TurnError, id: &str, session: &str, plan: &Plan, engine: &Engine) -> ErrorCard {
-    let nb = norwegian();
+    let language = language();
     let mut card = card(error);
     let open_key = card_key(session, id);
     let copied = COPIED.with(|c| c.borrow().get(&open_key).is_some_and(|at| at.elapsed() < COPIED_FOR));
     let mut note = (String::new(), false);
     let mut actions = Vec::new();
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = now_ms();
     refresh_at(session, error.next_change_ms(now), now);
     for action in &error.actions_at(now) {
         let shown = match action.id.as_str() {
@@ -119,26 +118,28 @@ pub(crate) fn finish(error: &TurnError, id: &str, session: &str, plan: &Plan, en
         }
         let state = if clarp_core::turn_error::retries(&action.id) { engine.turn_retry_state(session, &error.message_id, &action.id) } else { None };
         if let Some(state) = &state {
-            let said = retry_note(state, nb);
+            let said = retry_note(state, action, language, now);
             if !said.0.is_empty() {
                 note = said;
             }
         }
         let done = matches!(state, Some(RetryState::Done(_))) || (action.id == "copy_details" && copied);
         if action.id == "copy_details" && copied {
-            note = (say(nb, "Kopiert.", "Copied."), false);
+            note = (text::word(language, "error.copied"), false);
         }
         actions.push(ErrorAction {
             id: action.id.as_str().into(),
-            label: action.label.get(nb).into(),
+            label: action.label_in(language, now).into(),
             key: key(&action.id, session, id).into(),
             primary: actions.is_empty(),
             busy: matches!(state, Some(RetryState::Sending)),
             done,
         });
     }
+    let count = plan.count(id);
     card.id = id.into();
-    card.count = plan.count(id) as i32;
+    card.count = count as i32;
+    card.count_label = if count > 1 { text::repeat_count(language, count).into() } else { Default::default() };
     card.actions = ModelRc::new(VecModel::from(actions));
     card.details_key = key(DETAILS, session, id).into();
     card.details_open = OPEN.with(|o| o.borrow().contains(&open_key));

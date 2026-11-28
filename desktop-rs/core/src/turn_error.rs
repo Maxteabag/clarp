@@ -76,7 +76,11 @@ pub fn retries(id: &str) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct TurnError {
     pub code: String,
+    /// The sentence's catalog key (`error.<code>`, docs/turn-errors.md).
     pub key: String,
+    /// What fills the sentence: `backend`, `model`, `folder`, `time_ms`.
+    pub params: Object,
+    /// The Host's own sentence: the fallback for a key the catalog lacks.
     pub text: Words,
     /// `error`, `warning`, `info`.
     pub severity: String,
@@ -125,6 +129,7 @@ impl TurnError {
         Some(Self {
             code: s("code"),
             key: s("key"),
+            params: object.get("params").and_then(Value::as_object).cloned().unwrap_or_default(),
             text,
             severity: severity.to_owned(),
             actions,
@@ -146,12 +151,8 @@ impl TurnError {
         let mut out: Vec<Action> = Vec::with_capacity(self.actions.len());
         for action in &self.actions {
             let action = match action.at_ms.or(self.resets_at_ms) {
-                Some(at) if action.id == "retry_at" && at <= now_ms => Action {
-                    id: "retry".into(),
-                    label: Words { en: "Try again".into(), nb: "Prøv igjen".into() },
-                    at_ms: None,
-                    backend: String::new(),
-                },
+                // Its words come from the catalog (`error.action.retry`).
+                Some(at) if action.id == "retry_at" && at <= now_ms => Action { id: "retry".into(), ..Action::default() },
                 _ => action.clone(),
             };
             if !out.iter().any(|a| a.id == action.id) {
@@ -164,11 +165,6 @@ impl TurnError {
     /// When the next `retry_at` turns into a plain retry, if one waits.
     pub fn next_change_ms(&self, now_ms: i64) -> Option<i64> {
         self.actions.iter().filter(|a| a.id == "retry_at").filter_map(|a| a.at_ms.or(self.resets_at_ms)).filter(|at| *at > now_ms).min()
-    }
-
-    /// The sentence in the device's language.
-    pub fn sentence(&self, norwegian: bool) -> &str {
-        self.text.get(norwegian)
     }
 
     /// `backend · model · trace_id`, each where known: Details' last line.
@@ -208,25 +204,6 @@ pub fn of_live_turn(turn: &Object) -> Option<TurnError> {
         return None;
     }
     turn.get("error").and_then(TurnError::from_json)
-}
-
-/// Whether a POSIX locale or language tag names Norwegian (`nb`, `nn`,
-/// `no`, as `nb_NO.UTF-8` or `nb-NO`).
-pub fn norwegian_locale(name: &str) -> bool {
-    let language = name.split(['_', '-', '.', '@', ':']).next().unwrap_or_default().to_ascii_lowercase();
-    matches!(language.as_str(), "nb" | "nn" | "no")
-}
-
-/// The device prefers Norwegian: the first of `LANGUAGE`'s list, then
-/// `LC_ALL`, `LC_MESSAGES`, `LANG`, as gettext orders them.
-pub fn device_prefers_norwegian() -> bool {
-    let var = |name: &str| std::env::var(name).ok().map(|v| v.trim().to_owned()).filter(|v| !v.is_empty() && v != "C" && v != "POSIX");
-    var("LANGUAGE")
-        .map(|list| list.split(':').next().unwrap_or_default().to_owned())
-        .or_else(|| var("LC_ALL"))
-        .or_else(|| var("LC_MESSAGES"))
-        .or_else(|| var("LANG"))
-        .is_some_and(|name| norwegian_locale(&name))
 }
 
 /// A reply of the agent's: what ends a run of repeats and makes a card's

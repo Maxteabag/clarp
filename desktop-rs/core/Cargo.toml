@@ -13,4 +13,9 @@ uuid = { version = "1", features = ["v4"] }
 sha2 = "0.10"
 pulldown-cmark = { version = "0.13", default-features = false }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp"] }
+# Turn errors' {time} and repeat counts in the app's locale (docs/turn-errors.md):
+# the CLDR formatter and plural rules, never hand-built date words.
+icu_datetime = "~2.3"
+icu_locale_core = "~2.3"
+icu_plurals = "~2.3"
 

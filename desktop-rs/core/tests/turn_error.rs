@@ -5,6 +5,7 @@
 
 use clarp_core::protocol::Message;
 use clarp_core::turn_error::{self, TurnError};
+use clarp_core::turn_error_text as text;
 use serde_json::{Value, json};
 
 fn fixture() -> Value {
@@ -27,10 +28,10 @@ fn failure_rows_decode_and_user_rows_do_not() {
     let first = rows.iter().find(|r| r.id == "marker-u1").unwrap().turn_error.clone().expect("the failure row carries its explanation");
     assert_eq!(first.code, "invalid_request");
     assert_eq!(first.severity, "error");
-    assert_eq!(first.sentence(true), "Codex avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen.");
-    assert!(first.sentence(false).starts_with("Codex rejected the conversation history."));
+    assert_eq!(first.key, "error.invalid_request");
+    assert_eq!(first.sentence_in("en", 0), "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.", "the catalog's words, filled");
     assert_eq!(first.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), ["fresh_retry", "switch_model", "copy_details"]);
-    assert_eq!(first.actions[0].label.get(true), "Ny økt, prøv igjen");
+    assert_eq!(first.actions[0].label_in("en", 0), "New session, try again");
     assert_eq!(first.meta(), "codex · gpt-6.1 · t1");
     assert!(first.clipboard().starts_with("A Clarp agent turn failed."));
     let usage = rows.iter().find(|r| r.id == "marker-u4").unwrap().turn_error.clone().unwrap();
@@ -47,7 +48,7 @@ fn unknown_actions_and_an_older_hosts_error_are_left_out() {
         "actions": [{"id": "dance", "label": {"en": "Dance"}}, {"id": "retry", "label": {"en": "Try again"}}]})).unwrap();
     assert_eq!(error.actions.len(), 1);
     assert_eq!(error.severity, "error", "an unknown severity reads as an error");
-    assert_eq!(error.sentence(true), "E", "a missing language falls back to the other");
+    assert_eq!(error.sentence_in("nb", 0), "E", "no key: the Host's text, the other language when one is missing");
     assert!(TurnError::from_json(&json!({"reason": "provider_busy", "message": "API unavailable"})).is_none(), "no sentence, no card");
 }
 
@@ -120,13 +121,54 @@ fn the_live_failed_turn_shows_once() {
 }
 
 #[test]
-fn norwegian_locales() {
-    for name in ["nb_NO.UTF-8", "nn", "no-NO", "nb"] {
-        assert!(turn_error::norwegian_locale(name), "{name}");
+fn the_app_language_is_one_clarp_ships() {
+    for (name, language) in [("nb_NO.UTF-8", "nb"), ("nn", "nb"), ("no-NO", "nb"), ("zh_CN.UTF-8", "zh-Hans"), ("zh-Hans", "zh-Hans"), ("zh_TW", "en"),
+        ("hi_IN", "hi"), ("es-MX", "es"), ("fr_CA.UTF-8", "fr"), ("sv_SE", "en"), ("C", "en"), ("", "en")] {
+        assert_eq!(text::language_of(name), language, "{name}");
     }
-    for name in ["en_US.UTF-8", "C", "", "sv_SE"] {
-        assert!(!turn_error::norwegian_locale(name), "{name}");
-    }
+}
+
+#[test]
+fn unknown_keys_and_empty_placeholders_fall_back_to_the_hosts_text() {
+    let mut error = rows().into_iter().find(|r| r.id == "marker-u4").unwrap().turn_error.unwrap();
+    let norwegian = error.text.nb.clone();
+    let english = error.text.en.clone();
+    error.key = "error.something_new".into();
+    assert_eq!(error.sentence_in("nb", 0), norwegian, "an unknown key: the Host's Norwegian when the app speaks it");
+    assert_eq!(error.sentence_in("fr", 0), english, "else its English");
+    error.key = "error.usage_limit_until".into();
+    error.params.remove("time_ms");
+    assert_eq!(error.sentence_in("en", 0), english, "a placeholder with nothing to fill it: the Host's text");
+    error.key = "error.folder_missing".into();
+    error.params.insert("folder".into(), json!(""));
+    assert_eq!(error.sentence_in("en", 0), english);
+}
+
+#[test]
+fn time_reads_as_the_locale_writes_it() {
+    use chrono::TimeZone;
+    let at = chrono::Local.with_ymd_and_hms(2026, 11, 28, 18, 27, 0).unwrap().timestamp_millis();
+    let morning = chrono::Local.with_ymd_and_hms(2026, 11, 28, 9, 0, 0).unwrap().timestamp_millis();
+    assert_eq!(text::format_time("nb", at, morning), "18:27", "today: the time alone");
+    let en = text::format_time("en", at, morning);
+    assert!(en.starts_with("6:27") && en.ends_with("PM"), "{en}");
+    let days_before = chrono::Local.with_ymd_and_hms(2026, 11, 25, 9, 0, 0).unwrap().timestamp_millis();
+    let weekday = text::format_time("en", at, days_before);
+    assert!(weekday.starts_with("Sat") && weekday.contains("6:27"), "within a week, with the weekday: {weekday}");
+    let month_before = chrono::Local.with_ymd_and_hms(2026, 10, 1, 9, 0, 0).unwrap().timestamp_millis();
+    let dated = text::format_time("en", at, month_before);
+    assert!(dated.contains("Nov") && dated.contains("28") && dated.contains("6:27"), "further away, with the date: {dated}");
+    let usage = rows().into_iter().find(|r| r.id == "marker-u4").unwrap().turn_error.unwrap();
+    let sentence = usage.sentence_in("en", usage.params["time_ms"].as_i64().unwrap() - 3_600_000);
+    assert!(sentence.starts_with("Your Codex account is out of usage until ") && sentence.ends_with(". Try again then, or switch model."), "{sentence}");
+}
+
+#[test]
+fn the_repeat_count_goes_through_the_plural_rules() {
+    assert_eq!(text::repeat_count("en", 3), "3×");
+    assert_eq!(text::repeat_count("zh-Hans", 2), "2×");
+    assert_eq!(text::word("en", "error.details"), "Details");
+    assert_eq!(text::word("en", "error.action.copy_details"), "Copy diagnostics");
 }
 
 #[test]
@@ -135,10 +177,11 @@ fn a_retry_at_whose_time_has_passed_is_a_plain_retry() {
     let usage = rows.iter().find(|r| r.id == "marker-u4").unwrap().turn_error.clone().unwrap();
     let at = usage.actions[0].at_ms.unwrap();
     let before = usage.actions_at(at - 1);
-    assert_eq!((before[0].id.as_str(), before[0].label.get(true)), ("retry_at", "Prøv igjen kl. 18:27"));
+    assert_eq!(before[0].id, "retry_at");
+    assert!(before[0].label_in("en", at - 1).starts_with("Try again at "), "{}", before[0].label_in("en", at - 1));
     assert_eq!(usage.next_change_ms(at - 1), Some(at));
     let after = usage.actions_at(at);
-    assert_eq!((after[0].id.as_str(), after[0].label.get(true), after[0].label.get(false)), ("retry", "Prøv igjen", "Try again"));
+    assert_eq!((after[0].id.as_str(), after[0].label_in("en", at).as_str()), ("retry", "Try again"));
     assert_eq!(usage.retry_body("tt-codex", &after[0]).unwrap(), json!({"session": "tt-codex", "message_id": "u4"}), "no at_ms in the past");
     assert_eq!(usage.next_change_ms(at), None);
 }

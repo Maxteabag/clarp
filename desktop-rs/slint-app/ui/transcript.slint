@@ -133,6 +133,8 @@ export struct ErrorCard {
     severity: string,
     // How many failures it stands for (repeats collapse; 1 for one).
     count: int,
+    // The count as the catalog says it (error.repeat_count, "3×").
+    count-label: string,
     actions: [ErrorAction],
     detail: string,
     // backend · model · trace_id.
@@ -968,7 +970,7 @@ component TurnErrorCard inherits Rectangle {
                 accessible-id: root.measuring ? "" : "error-count:" + root.card.id;
                 accessible-label: count-text.text;
                 count-text := Text {
-                    text: root.card.count + "×";
+                    text: root.card.count-label;
                     color: root.tone;
                     font-size: ChatText.note;
                     font-weight: 700;

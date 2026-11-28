@@ -1,6 +1,6 @@
 //! `--check turn-errors` (docs/turn-errors.md, Rust Host contract 217): the
 //! contract fixture's failure rows (`tests/fixtures/turn-errors.json`) draw
-//! as cards in Norwegian. Three equal invalid_request failures with the
+//! as cards in the catalog's words. Three equal invalid_request failures with the
 //! user's messages between them are one card with "3×" at the newest, only
 //! the chat's newest failure offers a retry, Details opens with the raw
 //! words, a retry posts `/turn-retry` and shows itself done, Copy fills the
@@ -72,7 +72,8 @@ fn load(rows: Vec<Value>) -> bool {
 
 pub fn turn_errors_check(out: String) {
     let (o1, o2, o3, o4, o5, o6) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out.clone());
-    crate::turn_error_view::set_norwegian(true);
+    // The catalog's English source (translations land with clarp-i18n).
+    crate::turn_error_view::set_language("en");
     let stages: Vec<Stage> = vec![
         ("ready", Box::new(|app, _, _| {
             if app.engine.borrow().selected_session() != SESSION {
@@ -98,8 +99,8 @@ pub fn turn_errors_check(out: String) {
             check(has_row("u1") && has_row("u2") && has_row("u3"), "the user's messages stay");
             check(has_row("q1"), "the Host's other notice stays as it was");
             let sentence = label("error-card:marker-u3");
-            check(sentence == "Codex avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen.", &format!("the card says it in Norwegian: {sentence:?}"));
-            check(label("error-action:fresh_retry:marker-u3") == "Ny økt, prøv igjen", "its first button is the fresh retry, in Norwegian");
+            check(sentence == "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.", &format!("the card says the catalog's sentence for its key: {sentence:?}"));
+            check(label("error-action:fresh_retry:marker-u3") == "New session, try again", "its first button is the fresh retry, in the catalog's words");
             check(drawn("error-action:switch_model:marker-u3") && drawn("error-action:copy_details:marker-u3"), "then Switch model and Copy");
             check(drawn("error-details:marker-u3") && !drawn("error-detail:marker-u3"), "Details is there, closed");
             check(press("error-details:marker-u3"), "Details opens");
@@ -156,7 +157,7 @@ pub fn turn_errors_check(out: String) {
                 return false;
             }
             check(copied == fixture()["log_rows"][10]["error"]["copy_text"].as_str().unwrap_or("?"), &format!("the clipboard holds the Host's prompt: {copied:?}"));
-            check(label("error-note:marker-u5") == "Kopiert.", &format!("the card says it was copied: {:?}", label("error-note:marker-u5")));
+            check(label("error-note:marker-u5") == "Diagnostics copied", &format!("the card says it was copied: {:?}", label("error-note:marker-u5")));
             shot(&o5, "turn-errors-05-copied");
             check(control("/__control/live", &json!({"on": true})).is_ok(), "the Host turns live items on");
             app_now().engine.borrow_mut().reconnect();
