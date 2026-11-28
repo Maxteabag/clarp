@@ -2037,8 +2037,8 @@ fn desktop_check(out: String) {
             if bridge.get_notify_events().row_count() == 0 || elapsed < Duration::from_millis(400) {
                 return false;
             }
-            // The keyboard on Notifications brings the card into view.
-            bridge.set_cursor("notify-preset".into());
+            // The keyboard on the last event's choice brings the card into view.
+            bridge.set_cursor(format!("notify:{}", bridge.get_notify_events().row_count() - 1).into());
             true
         })),
         ("contact shown", Box::new(move |_, window, elapsed| {
@@ -2062,9 +2062,18 @@ fn desktop_check(out: String) {
             if !needs_me || info.notify_preset != 1 || elapsed < Duration::from_millis(500) {
                 return false;
             }
+            window.global::<crate::ProfileBridge>().set_cursor("notify-customize".into());
             let last = posts("/notification-settings").last().cloned().unwrap_or_default();
             check(last["body"]["events"]["needs_you"] == true && last["body"]["events"]["failed"] == true && last["body"]["events"]["update"] == false,
                   &format!("Only when it needs me sets the contact's choices on the Host: {}", last["body"]));
+            true
+        })),
+        ("preset shown", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            let info = window.global::<crate::ProfileBridge>().get_info();
+            check(info.notify_preset == 1, "the profile shows Only when it needs me");
             shot(&out3, "desktop-notifications-contact");
             headless::press(slint::platform::Key::Escape);
             true

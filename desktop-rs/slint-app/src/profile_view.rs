@@ -824,8 +824,11 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
         available.iter().map(|n| NamedItem { id: n.as_str().into(), name: n.as_str().into(), on: chosen.contains(n), ..NamedItem::default() }).collect();
     bridge.set_mcp(ModelRc::new(VecModel::from(mcp)));
     bridge.set_notify_events(ModelRc::new(VecModel::from(notify_choices(&engine, session))));
-    let presets: Vec<SharedString> = clarp_core::notify_events::Preset::ALL.iter().map(|p| SharedString::from(p.label())).collect();
-    bridge.set_notify_presets(ModelRc::new(VecModel::from(presets)));
+    // Once: a ComboBox given a new model resets its index.
+    if bridge.get_notify_presets().row_count() == 0 {
+        let presets: Vec<SharedString> = clarp_core::notify_events::Preset::ALL.iter().map(|p| SharedString::from(p.label())).collect();
+        bridge.set_notify_presets(ModelRc::new(VecModel::from(presets)));
+    }
     let preset = engine.notification_settings_for(session).map(|(settings, agent_id)| settings.preset(&agent_id, details.get("muted").and_then(Value::as_bool) == Some(true)));
     let schedules: Vec<NamedItem> = details
         .get("schedules")

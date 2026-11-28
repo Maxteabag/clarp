@@ -568,7 +568,7 @@ fn notifications() -> Vec<Setting> {
                 true,
             ),
             Setting::stored_toggle(
-                e("notification-sound", notify_events::SOUND_LABEL, "notifications", notify_events::SOUND_ABOUT, &["sounds", "chime", "ding", "audio alert", "beep", "notification sound", "toggle"]),
+                e("notification-sound", notify_events::SOUND_LABEL, "notifications", notify_events::SOUND_ABOUT, &["sounds", "chime", "ding", "audio alert", "beep", "notification sound", "notifications", "toggle"]),
                 "NOTIFICATIONS",
                 "notifications/sound",
                 false,

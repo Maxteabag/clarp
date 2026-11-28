@@ -596,10 +596,14 @@ export component AgentProfile inherits Modal {
                     // One choice first; Customize shows each event (Muted wins over them).
                     if root.info.notify-shown: Spot {
                         spot: "notify-preset";
+                        // A pick in the box ends its binding: a change from the
+                        // Host (another device) still shows.
+                        property <int> preset: root.info.notify-preset;
+                        changed preset => { preset-box.current-index = self.preset; }
                         HorizontalLayout {
                             spacing: 8px;
                             Text { text: @tr("notify.settings.contact" => "Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
-                            ComboBox {
+                            preset-box := ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.notify-presets;
                                 current-index: root.info.notify-preset;
