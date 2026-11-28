@@ -2104,8 +2104,11 @@ impl Actor {
                 });
                 // The same failure as every app draws it (feature `turn_error_explained`): the
                 // fields above stay for the apps that read only them.
+                // Only the user's own message can be sent again (`POST /turn-retry`).
                 let message_id = self
                     .message_at(settled.message_seq)
+                    .ok()
+                    .filter(|message| message.origin == Origin::User && message.sender.is_none())
                     .map(|message| message.id)
                     .unwrap_or_default();
                 explain_into(
@@ -5640,7 +5643,15 @@ impl Actor {
         // its model fits no better: the turn after such a failure begins a new session, which
         // opens with the Host's own record of the conversation (`docs/turn-errors.md`). A
         // tool that can shorten its own conversation is asked to (`compact_retry`) instead.
+        // Only the turn's first attempt: the session it begins is the turn's from then on, and
+        // a later attempt (after a wait, a busy provider, a restart) goes on in it. Never a
+        // compaction, whose word means nothing in an empty session.
+        let compacting = matches!(&message.origin, Origin::Trigger { name } if name == COMPACTION);
         let rejected = takeover.is_none()
+            && attempt <= 1
+            && before.is_none()
+            && !matches!(self.recorder.agent().live(), Some(Turn::Starting(starting)) if starting.ran_before)
+            && !compacting
             && backend_session.is_some()
             && self.recorder.agent().last().is_some_and(|last| {
                 matches!(&last.outcome, Outcome::Failed { kind, .. }

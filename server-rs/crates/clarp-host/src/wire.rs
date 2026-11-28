@@ -1850,7 +1850,13 @@ pub fn row(version: &Versioned) -> Value {
 /// `turn_error_explained`, `docs/turn-errors.md`): its code, its sentence in both languages,
 /// what the user can do and the tool's raw words. `None` for any other row. A row written
 /// before the feature is read the same way, so the history is told as plainly.
-pub fn turn_error_of(version: &Versioned, row: &Value, backend: &str, model: &str) -> Option<Value> {
+pub fn turn_error_of(
+    version: &Versioned,
+    row: &Value,
+    backend: &str,
+    model: &str,
+    sent_by_user: &dyn Fn(&str) -> bool,
+) -> Option<Value> {
     use clarp_kernel::turn_error::{Failure, explained};
     let interrupted = |text: &str, kind: Option<&String>| match kind {
         Some(kind) if !kind.is_empty() => kind.clone(),
@@ -1896,6 +1902,9 @@ pub fn turn_error_of(version: &Versioned, row: &Value, backend: &str, model: &st
     if said.trim().is_empty() {
         return None;
     }
+    // Only the user's own message can be sent again (`POST /turn-retry`): a goal's wake, an
+    // agent's word or a schedule's prompt has no button for it.
+    let message_id = if sent_by_user(message_id) { message_id } else { "" };
     Some(explained(&Failure {
         kind: &kind,
         said,
@@ -1905,6 +1914,7 @@ pub fn turn_error_of(version: &Versioned, row: &Value, backend: &str, model: &st
         trace_id,
         resets_at_ms: None,
         at_ms: version.ts_ms,
+        row: true,
     }))
 }
 
@@ -1936,13 +1946,26 @@ pub fn log_response(
     let conversation = conversation_id(record, status);
     let file = (record.backend == "claude" && !conversation.is_empty())
         .then(|| format!("{conversation}.jsonl"));
+    // The user's own messages on the page: a failure under one of them can be sent again. One
+    // under a message the page does not hold is offered, and the Host's answer decides.
+    let others: std::collections::HashSet<&str> = page
+        .entries
+        .iter()
+        .filter_map(|version| match &version.entry {
+            Entry::Message(message) if message.origin != Origin::User || message.sender.is_some() => {
+                Some(message.id.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let sent_by_user = |id: &str| !id.is_empty() && !others.contains(id);
     json!({
         "conversation_id": conversation,
         "turns": page.entries.iter().map(|version| {
             let mut row = row(version);
             // A row that tells why a turn failed says it for every app to draw the same way
             // (feature `turn_error_explained`), in the agent's backend and model.
-            if let Some(error) = turn_error_of(version, &row, &record.backend, &record.model) {
+            if let Some(error) = turn_error_of(version, &row, &record.backend, &record.model, &sent_by_user) {
                 row["error"] = error;
             }
             // A row brought from another Host is the user's here, as every row of an agent

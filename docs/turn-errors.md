@@ -152,7 +152,7 @@ weekday within a week, else with the date. Backend and model names are never tra
 
 | id | what the app does |
 |---|---|
-| `retry` | `POST /turn-retry {"session", "message_id"}`: the Host sends the same message again (text and attachments) as a new turn. |
+| `retry` | `POST /turn-retry {"session", "message_id"}`: the Host sends the same message again as a new message of the user's (an attachment is a link in its text, so it goes along). Its id is made from the failed message's, so a second tap does not send it twice. |
 | `retry_at` | `POST /turn-retry {"session", "message_id", "at_ms"}`: the Host sends it again at that time. The card then reads the label's time as scheduled. |
 | `fresh_retry` | `POST /turn-retry {"session", "message_id", "fresh": true}`. The turn after one whose history the provider rejected (`invalid_request`), or one too long on a tool that cannot compact (`prompt_too_long` off Claude), begins a new session by itself that opens with the Host's record of the conversation, so this is a try again whose turn is fresh. Any new message of the user's is fresh the same way. |
 | `compact_retry` | `POST /turn-retry {"session", "message_id", "compact": true}`: the Host compacts the conversation, then sends the message again. |
@@ -160,8 +160,12 @@ weekday within a week, else with the date. Backend and model names are never tra
 | `sign_in` | Open the app's sign-in for `backend` (the action carries `"backend"`). Leave it out if the app has none. |
 | `copy_details` | Copy `copy_text` to the clipboard. |
 
-`POST /turn-retry` answers `{"ok": true, "status": "queued" | "scheduled" | "compacting" | "refreshing"}`, or 404
-when the message is not in the agent's conversation, 409 when it has a newer answer already.
+`POST /turn-retry` answers `{"ok": true, "status": "queued" | "scheduled" | "compacting"}`, 404
+when the message is not in the agent's conversation, 409 when it is not the user's own, its turn
+still runs, it has an answer, or it was sent again already, and 400 for an `at_ms` more than a
+week ahead. A device with limited access may try again but not compact. A try planned for a
+time is checked again when it is due and dropped if any of the 409 reasons hold by then; a try
+sent now drops the planned one.
 
 ## Drawing it
 

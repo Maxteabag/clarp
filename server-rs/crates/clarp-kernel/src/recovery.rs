@@ -190,12 +190,12 @@ pub enum Next {
     Fail,
 }
 
-/// What follows the failure of an attempt of a turn, on a Host that treats accounts this way.
 /// How many tries a turn whose tool's session is held elsewhere gets in all.
 pub const SESSION_LOCKED_TRIES: u32 = 3;
 /// How long it waits before its second try; the third waits twice that.
 pub const SESSION_LOCKED_BACKOFF_MS: i64 = 5_000;
 
+/// What follows the failure of an attempt of a turn, on a Host that treats accounts this way.
 pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
     // Waits for an account are no tries against a bad line: they do not use those up. Nor
     // are attempts that followed a wait in which the network was gone.

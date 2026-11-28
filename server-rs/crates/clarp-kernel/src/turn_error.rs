@@ -31,6 +31,9 @@ pub struct Failure<'a> {
     pub resets_at_ms: Option<i64>,
     /// When the turn failed. 0: unknown.
     pub at_ms: i64,
+    /// `said` is a row that tells the failure ("Sentence.\n\nthe tool's words"), not the
+    /// tool's raw words: only then is its first paragraph the Host's and left out of `detail`.
+    pub row: bool,
 }
 
 /// The codes, stable: an app may choose an icon by one, and never reads the sentence.
@@ -80,6 +83,19 @@ static HOST_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"· resets (?:(Mon|Tue|Wed|Thu|Fri|Sat|Sun) )?(\d{1,2}):(\d{2})\b")
         .expect("a fixed pattern compiles")
 });
+// A reset beyond the week as the Host's own row says it: "· resets 30 Nov 18:27", "· resets
+// 2 Jan 2027 18:27".
+static HOST_DATE_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(r"· resets (\d{1,2}) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?: (\d{4}))? (\d{1,2}):(\d{2})\b")
+        .expect("a fixed pattern compiles")
+});
+// The zone a tool names after its reset: "(Europe/Oslo)".
+static NAMED_ZONE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    #[allow(clippy::expect_used)]
+    Regex::new(r"\(([A-Za-z_]+/[A-Za-z_/+-]+)\)")
+        .expect("a fixed pattern compiles")
+});
 // A reset as a tool says it: "resets 10:10am (Europe/Oslo)", "resets Dec 2, 7pm", "try again
 // at 6:27 PM".
 static TOOL_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -100,6 +116,11 @@ pub fn code_of(kind: &str, said: &str) -> &'static str {
     };
     if FREE_MODEL_RE.is_match(said) {
         return "free_model_restricted";
+    }
+    // A turn that ended while it waited for an account ran out of usage, whatever its process
+    // said: shown so, though the recovery reads it as the Python Host does.
+    if failures::is_account_wait_message(said) || failures::is_account_wait_message(raw_words(said)) {
+        return "usage_limit";
     }
     if said.contains("No network for 15 minutes") {
         return "network_gone";
@@ -240,9 +261,13 @@ pub fn reset_words(at_ms: i64, said_at_ms: i64, zone: &jiff::tz::TimeZone) -> Op
             format!("{} {clock}", at.strftime("%a")),
             format!("{} kl. {clock}", NB_DAYS.get(weekday)?),
         ),
-        _ => Said::new(
+        _ if at.year() == said.year() => Said::new(
             format!("{} {} {clock}", at.day(), at.strftime("%b")),
             format!("{}. {} kl. {clock}", at.day(), NB_MONTHS.get(month)?),
+        ),
+        _ => Said::new(
+            format!("{} {} {} {clock}", at.day(), at.strftime("%b"), at.year()),
+            format!("{}. {} {} kl. {clock}", at.day(), NB_MONTHS.get(month)?, at.year()),
         ),
     })
 }
@@ -253,11 +278,29 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
     if at_ms <= 0 {
         return None;
     }
+    // A tool that names its zone says the time in it.
+    let named = NAMED_ZONE_RE
+        .captures(said)
+        .and_then(|found| found.get(1))
+        .and_then(|name| jiff::tz::TimeZone::get(name.as_str()).ok());
+    let zone = named.as_ref().unwrap_or(zone);
     let written = jiff::Timestamp::from_millisecond(at_ms)
         .ok()?
         .to_zoned(zone.clone());
+    let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
     let (day, hour, minute): (Option<jiff::civil::Date>, i8, i8) =
-        if let Some(found) = HOST_RESET_RE.captures(said) {
+        if let Some(found) = HOST_DATE_RESET_RE.captures(said) {
+            let date: i8 = found.get(1)?.as_str().parse().ok()?;
+            let month = months.iter().position(|m| found.get(2).is_some_and(|f| f.as_str().eq_ignore_ascii_case(m)))?;
+            let month = i8::try_from(month + 1).ok()?;
+            let year: i16 = match found.get(3) {
+                Some(year) => year.as_str().parse().ok()?,
+                None => written.year(),
+            };
+            let hour = found.get(4)?.as_str().parse().ok()?;
+            let minute = found.get(5)?.as_str().parse().ok()?;
+            (Some(jiff::civil::Date::new(year, month, date).ok()?), hour, minute)
+        } else if let Some(found) = HOST_RESET_RE.captures(said) {
             let hour = found.get(2)?.as_str().parse().ok()?;
             let minute = found.get(3)?.as_str().parse().ok()?;
             let day = match found.get(1) {
@@ -284,7 +327,6 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
             }
             let day = match (found.get(1), found.get(2)) {
                 (Some(month), Some(date)) => {
-                    let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
                     let month = months.iter().position(|m| month.as_str().eq_ignore_ascii_case(m))?;
                     let month = i8::try_from(month + 1).ok()?;
                     let date: i8 = date.as_str().parse().ok()?;
@@ -308,7 +350,8 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
     } else {
         at
     };
-    Some(at.timestamp().as_millisecond())
+    // A reset is ahead of what said it: a day that has passed is no reset to wait for.
+    (at.timestamp() > written.timestamp()).then(|| at.timestamp().as_millisecond())
 }
 
 /// One action, with its label in both languages.
@@ -318,7 +361,18 @@ fn action(id: &str, label: &Said) -> Value {
 
 /// What the user is told of a failed turn: the object of `docs/turn-errors.md`.
 pub fn explained(failure: &Failure<'_>) -> Value {
-    explained_in(failure, &jiff::tz::TimeZone::system())
+    // The zone is looked up only where a time is told: this is asked for every failed
+    // agent's state.
+    let tells_time = (failure.row && failure.at_ms > 0)
+        || failure.resets_at_ms.is_some()
+        || HOST_RESET_RE.is_match(failure.said)
+        || HOST_DATE_RESET_RE.is_match(failure.said)
+        || TOOL_RESET_RE.is_match(failure.said);
+    if tells_time {
+        explained_in(failure, &jiff::tz::TimeZone::system())
+    } else {
+        explained_in(failure, &jiff::tz::TimeZone::UTC)
+    }
 }
 
 /// [`explained`], with the times told in this zone.
@@ -326,7 +380,8 @@ pub fn explained(failure: &Failure<'_>) -> Value {
 pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
     let said = failure.said.trim();
     let code = code_of(failure.kind, said);
-    let detail: String = failures::provider_message(raw_words(said))
+    let words = if failure.row { raw_words(said) } else { said };
+    let detail: String = failures::provider_message(words)
         .chars()
         .take(1000)
         .collect();
@@ -770,6 +825,7 @@ mod tests {
                 backend: "claude",
                 message_id: "u",
                 at_ms: at,
+                row: true,
                 ..Failure::default()
             },
             &oslo(),
@@ -795,6 +851,24 @@ mod tests {
             Some(ms("2026-12-02T18:00:00Z"))
         );
         assert_eq!(said_reset("You've hit your usage limit.", at, &zone), None);
+        assert_eq!(
+            said_reset("Usage limit reached · resets 30 Nov 18:27.", at, &zone),
+            Some(ms("2026-11-30T17:27:00Z"))
+        );
+        assert_eq!(
+            said_reset("Usage limit reached · resets 2 Jan 2027 18:27.", at, &zone),
+            Some(ms("2027-01-02T17:27:00Z"))
+        );
+        assert_eq!(
+            said_reset("resets 12am (UTC/Unknown)", at, &zone),
+            Some(ms("2026-11-28T23:00:00Z")),
+            "an unknown zone is the system's: midnight in Oslo"
+        );
+        assert_eq!(
+            said_reset("resets 10:10am (America/New_York)", at, &zone),
+            Some(ms("2026-11-28T15:10:00Z")),
+            "a named zone says the time in it"
+        );
     }
 
     #[test]
@@ -804,6 +878,7 @@ mod tests {
             said: "Usage limit reached.\n\nYour workspace is out of credits. Ask your workspace owner to refill in order to continue.",
             backend: "codex",
             message_id: "u",
+            row: true,
             ..Failure::default()
         });
         assert_eq!(error["code"], "billing");
@@ -834,6 +909,9 @@ mod tests {
             ("claude exited with code 143", "runner_exit"),
             ("Waiting for a claude account with available usage", "usage_limit"),
             ("claude reported an error", "unknown"),
+            ("API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy", "refused"),
+            (r#"{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}"#, "prompt_too_long"),
+            ("stream disconnected: {\"type\":\"function_call\",\"call_id\":\"call_1\"} connection reset", "connection"),
         ];
         for (said, code) in cases {
             assert_eq!(code_of("", said), code, "{said}");

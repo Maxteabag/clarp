@@ -296,10 +296,13 @@ static ACCOUNT_PLAN_RE: LazyLock<Regex> = LazyLock::new(|| {
 // content cannot be empty if `is_error` is true" (Claude Code), "Invalid response.create payload:
 // Invalid 'input[29].call_id': string too long" (Codex).
 static INVALID_REQUEST_RE: LazyLock<Regex> = LazyLock::new(|| {
+    // Narrow on purpose: a bare 400 or `invalid_request_error` is also a context that is too
+    // long, a sign-in or a plan, and a call id in a tail of tool events says nothing.
     pattern(concat!(
-        r"invalid_request_error|invalid [\w.]+ payload|invalid '?input\[\d+\]|",
-        r"\bcall_id\b|\btool_use_id\b|\btool_result\b.{0,40}(?:empty|must|cannot|invalid)|",
-        r"messages\.\d+\.content|api error:? 400\b|\b400 bad request\b|status(?: code)?:? 400\b|",
+        r"invalid [\w.]+ payload|invalid '?input\[\d+\]|input\[\d+\]\.call_id|",
+        r"\bcall_id\b.{0,40}(?:too long|not found|invalid|missing)|no tool (?:call|output) found|",
+        r"\btool_use_id\b.{0,60}(?:not found|invalid|unexpected|without|must|does not)|",
+        r"\btool_result\b.{0,40}(?:empty|must|cannot|invalid)|messages\.\d+\.content|",
         r"expected a string with maximum length",
     ))
 });
@@ -307,7 +310,8 @@ static INVALID_REQUEST_RE: LazyLock<Regex> = LazyLock::new(|| {
 static REFUSED_RE: LazyLock<Regex> = LazyLock::new(|| {
     pattern(concat!(
         r"content safety filters?|blocked by (?:the )?(?:content|safety) (?:filter|polic)|",
-        r"prohibited use policy|stop_reason\W{0,4}refusal",
+        r"prohibited use policy|stop_reason\W{0,4}refusal|",
+        r"appears to violate our usage policy|unable to respond to this request",
     ))
 });
 // A session another process holds: Codex's "thread-store conflict: thread ... already has an
@@ -316,7 +320,9 @@ static SESSION_LOCKED_RE: LazyLock<Regex> =
     LazyLock::new(|| pattern(r"already has an active writer|thread-store conflict|session is locked"));
 // Claude Code 2.1.321: "Prompt is too long · the request is ~1050000 tokens (limit 1000000)
 // ...", with `terminal_reason` `prompt_too_long` on its result.
-static PROMPT_TOO_LONG_RE: LazyLock<Regex> = LazyLock::new(|| pattern(r"\bprompt is too long\b"));
+static PROMPT_TOO_LONG_RE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r"\bprompt is too long\b|context_length_exceeded|exceeds the context window|maximum context length")
+});
 static RUNNER_EXIT_RE: LazyLock<Regex> = LazyLock::new(|| {
     pattern(concat!(
         r"\b(codex|clarp|agy|claude|agent|opencode)\s+exited\s+rc=\d+|",
@@ -379,11 +385,6 @@ pub fn classify_error(message: &str) -> &'static str {
     }
     if text.starts_with(ENDED_FROM_OUTSIDE_MARK) {
         return ENDED_FROM_OUTSIDE;
-    }
-    // A turn that ended while it waited for an account ended on a usage limit, whatever its
-    // process said of it.
-    if is_account_wait_message(text) {
-        return USAGE_LIMIT;
     }
     let text = affirmed(text);
     // The order is the reading. A watchdog's kill is a signal too, and is a timeout, not a

@@ -3864,13 +3864,13 @@ pub(crate) async fn send_own(app: &App, request: SendRequest) -> Result<SendResp
     .await
 }
 
-/// Delivers a due schedule, keeping the prompt and reply in Session view.
 /// A message of the user's sent again at their word (`POST /turn-retry`): the user's send,
 /// from nobody's turn.
 pub(crate) async fn send_again(app: &App, request: SendRequest) -> Result<SendResponse, ApiError> {
     send_as(app, request, false, None, &crate::coordination::Made::default(), None).await
 }
 
+/// Delivers a due schedule, keeping the prompt and reply in Session view.
 pub(crate) async fn send_scheduled_prompt(
     app: &App,
     request: SendRequest,
