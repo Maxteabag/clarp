@@ -96,7 +96,7 @@ const READS_WITHIN: &str = "120s";
 pub const OWN: &str = ".gemini/antigravity-cli";
 /// What of the Host's environment Antigravity is left with when it only reads: where it
 /// is, who it runs as, and how it reaches its provider. Its home is the one made for it.
-const KEPT_APART: [&str; 16] = [
+pub(crate) const KEPT_APART: [&str; 16] = [
     "PATH",
     "USER",
     "LOGNAME",

@@ -58,7 +58,11 @@ HEARTBEAT_SEC = 90
 PROGRESS_SEC = 20
 PROGRESS_MAX = 200
 POLL_SEC = 30
-CLARP_BACKENDS = ("claude", "codex", "grok", "agy", "opencode", "deepseek")
+CLARP_BACKENDS = ("claude", "codex", "grok", "agy-acp", "opencode", "deepseek")
+
+
+def _backend_alias(value: str) -> str:
+    return "agy-acp" if value in ("agy", "antigravity") else value
 # A prompt longer than this many bytes is not inlined into the message; the helper is
 # told to read the copied prompt file instead (argv and chat rows stay small).
 INLINE_PROMPT_MAX = 60_000
@@ -485,17 +489,19 @@ def main(argv: list[str]) -> int:
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start")
     s.add_argument("name"); s.add_argument("workdir"); s.add_argument("prompt_file")
-    s.add_argument("--model"); s.add_argument("--backend", choices=CLARP_BACKENDS, default="claude")
-    s.add_argument("--effort", help="reasoning effort for the helper (not on agy: it is in the model id)")
+    s.add_argument("--model")
+    s.add_argument("--backend", type=_backend_alias, choices=CLARP_BACKENDS, default="claude")
+    s.add_argument("--effort", help="reasoning effort where supported by the helper's backend")
     s.add_argument("--title")
     s.add_argument("--clarp-agent", action="store_true",
                    help="run as a Clarp helper agent the owner can open and steer")
     f = sub.add_parser("fork", help="fork this agent: helpers that start from its conversation")
     f.add_argument("name"); f.add_argument("--task"); f.add_argument("--task-file")
     f.add_argument("--count", type=int); f.add_argument("--worktree", help="REPO:BRANCH")
-    f.add_argument("--cwd"); f.add_argument("--backend", choices=CLARP_BACKENDS)
+    f.add_argument("--cwd")
+    f.add_argument("--backend", type=_backend_alias, choices=CLARP_BACKENDS)
     f.add_argument("--model"); f.add_argument("--title")
-    f.add_argument("--effort", help="reasoning effort for every child (not on agy)")
+    f.add_argument("--effort", help="reasoning effort for every child where supported")
     st = sub.add_parser("status"); st.add_argument("name", nargs="?")
     sp = sub.add_parser("stop", help="stop a sub-agent: a helper's running turn and its unit")
     sp.add_argument("name")

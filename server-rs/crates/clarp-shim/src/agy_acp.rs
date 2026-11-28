@@ -82,6 +82,8 @@ fn ms(since: Instant) -> u64 {
 
 /// What the driver does with what Antigravity says besides its answers.
 struct Record {
+    /// A janitor's question is asked in a sandbox and has no tool permissions.
+    read_only: bool,
     /// What Antigravity says now is the replay of a conversation it loaded, not the turn's.
     quiet: bool,
     /// When agy was started, and when it first said something of the prompt.
@@ -292,7 +294,7 @@ impl Handler for Record {
         }
         let options = schema::permission_options(params);
         // After a Stop, nothing more is allowed: the request is answered as cancelled.
-        let chosen = if self.stopping {
+        let chosen = if self.stopping || self.read_only {
             None
         } else {
             schema::chosen(&options)
@@ -415,15 +417,19 @@ fn stop_watch(inbound: Sender<Inbound>) -> Result<()> {
     Ok(())
 }
 
-fn command(program: &str, cwd: &Path) -> Command {
+fn command(program: &str, cwd: &Path, read_only: bool) -> Command {
     let mut command = Command::new(program);
     command
         .arg("acp")
-        .arg("--dangerously-skip-permissions")
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
+    if read_only {
+        command.args(["--sandbox", "--include-default-customizations=false"]);
+    } else {
+        command.arg("--dangerously-skip-permissions");
+    }
     // What agy is given is `clarp-acp`'s to say; what the Host's environment already holds is
     // read here.
     let bundle = std::env::var_os("SSL_CERT_FILE")
@@ -965,7 +971,7 @@ fn holders(ours: &[std::path::PathBuf]) -> Vec<Pid> {
         .collect()
 }
 
-pub fn run(program: &str) -> Result<u8> {
+pub fn run(program: &str, read_only: bool) -> Result<u8> {
     let (inbound, received) = mpsc::channel();
     // Before any thread starts: the threads take the mask, and only the watch takes SIGUSR1.
     stop_watch(inbound.clone())?;
@@ -984,7 +990,7 @@ pub fn run(program: &str) -> Result<u8> {
         PathBuf::from(&order.cwd)
     };
     let launched = Instant::now();
-    let mut child = command(program, &cwd).spawn()?;
+    let mut child = command(program, &cwd, read_only).spawn()?;
     let output = child.stdout.take().ok_or("agy's output is missing")?;
     let input = child.stdin.take().ok_or("agy's input is missing")?;
     client::read_into(output, inbound);
@@ -1003,6 +1009,7 @@ pub fn run(program: &str) -> Result<u8> {
     let mut turn = Turn {
         client: Client::new(input, received),
         record: Record {
+            read_only,
             quiet: false,
             launched,
             prompting: false,
