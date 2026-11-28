@@ -1,0 +1,5 @@
+{
+  "settings.language.title": "语言",
+  "settings.language.system": "跟随系统",
+  "settings.language.hint": "默认跟随本设备的语言，也可以手动选择。仅保存在本设备上。"
+}

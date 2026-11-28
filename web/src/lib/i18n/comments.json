@@ -1,0 +1,5 @@
+{
+  "settings.language.title": "Settings: label of the Language picker.",
+  "settings.language.system": "Settings > Language: the first option, follow the device's language.",
+  "settings.language.hint": "Settings > Language: one-line note under the picker."
+}
