@@ -1,7 +1,7 @@
 <script>
   // What the Host says about a turn it ended (a failure, a restart): a
   // notice in the chat, never styled as the agent's own reply. A Host that
-  // explains it (`explained`, docs/turn-errors.md, contract 217) gets one
+  // explains it (`explained`, docs/turn-errors.md, contract 220) gets one
   // card: the catalog's sentence for its key in the app's language, the
   // buttons that fit, a count for repeats and a closed Details with the
   // provider's own words.

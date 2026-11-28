@@ -201,6 +201,7 @@ UNLISTED_TYPES = ("image", "image_gallery", "live_task", "event")
 artifact_summary = {"on": False, "hash_pending": [], "digest_pending": [], "wrong_sha": [], "corrupt": {}, "item_delay": 0.0}
 # /server-info's server_id; /__control/server-id changes it (another Host).
 server_id = "fake-host-1"
+previous_server_ids = []
 # An agent's terminal (GET /terminal/<session>): an echo of the keys it is
 # sent. /__control/terminal makes the next ones refused: an HTTP `status`
 # with a `body` (text, or JSON when an object), or a close frame with
@@ -1841,6 +1842,7 @@ class Handler(BaseHTTPRequestHandler):
                     features.append("lanes_live")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
+            info["previous_server_ids"] = previous_server_ids
             info["contract"] = {"host": 999, "min_ios": 1, "features": {"backend_agy_acp": 165}}
             if artifact_summary["on"]:
                 features.append("artifact_summary_v1")
@@ -2378,6 +2380,7 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: this Host answers as another instance.
             global server_id
             server_id = body["server_id"]
+            previous_server_ids[:] = body.get("previous_server_ids", [])
             return self.reply(200, {"ok": True})
         if url.path == "/__control/fail":
             # Test control: the next `count` GETs to `path` answer `status`.

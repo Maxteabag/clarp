@@ -1,5 +1,5 @@
 //! Why a turn failed, in one plain sentence with the buttons that fit
-//! (docs/turn-errors.md, Host contract 217, feature `turn_error_explained`).
+//! (docs/turn-errors.md, Host contract 220, feature `turn_error_explained`).
 //! The Host attaches an `error` object to the `/log` row that says why a
 //! turn failed (`origin` `system`, also the `turn-interrupted` notice) and to
 //! the live failed turn (`turn.error`). The desktop draws it as one card: the

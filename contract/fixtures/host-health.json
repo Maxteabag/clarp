@@ -1,0 +1,1 @@
+{"host_health":{"instance_id":"fixture-start","observed_at_ms":1795856400123,"data_filesystem":{"available_bytes":4294967296,"total_bytes":17179869184},"io_pressure":{"some_avg10_pct":17.5,"full_avg10_pct":4.25},"slow_sqlite_commits":{"window_ms":60000,"covered_ms":12000,"threshold_ms":2000,"count":2,"max_ms":3200}}}

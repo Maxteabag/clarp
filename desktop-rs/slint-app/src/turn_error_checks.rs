@@ -1,4 +1,4 @@
-//! `--check turn-errors` (docs/turn-errors.md, Rust Host contract 217): the
+//! `--check turn-errors` (docs/turn-errors.md, Rust Host contract 220): the
 //! contract fixture's failure rows (`tests/fixtures/turn-errors.json`) draw
 //! as cards in the catalog's words. Three equal invalid_request failures with the
 //! user's messages between them are one card with "3×" at the newest, only

@@ -712,6 +712,46 @@ impl PaneTree {
         self.emit_active();
     }
 
+    /// A paired Host changed its server ID. Rewrite chat references in place,
+    /// including hidden workspaces, retaining pane IDs, focus and zoom.
+    pub fn remap_peer_sessions(&mut self, old: &str, new: &str) {
+        fn rewrite(node: &mut Node, old: &str, new: &str) -> bool {
+            match node {
+                Node::Leaf { session, .. } => {
+                    let Some((id, local)) = crate::all_hosts::split(session) else { return false };
+                    if id != old { return false; }
+                    *session = crate::all_hosts::qualify(new, local);
+                    true
+                }
+                Node::Split { first, second, .. } => {
+                    let left = rewrite(first, old, new);
+                    let right = rewrite(second, old, new);
+                    left || right
+                }
+            }
+        }
+
+        let active = self.active_session();
+        let mut changed = rewrite(&mut self.root, old, new);
+        for (id, state) in &mut self.workspace_states {
+            if *id == self.active_workspace { continue; }
+            let Some(root) = state.get_mut("root") else { continue };
+            let (mut count, mut highest) = (0, 0);
+            if let Some(mut tree) = deserialize(root, 0, &mut count, &mut highest)
+                && rewrite(&mut tree, old, new)
+            {
+                *root = tree.serialize();
+                changed = true;
+            }
+        }
+        if changed {
+            self.emit_tree();
+            if self.active_session() != active {
+                self.emit_active();
+            }
+        }
+    }
+
     pub fn set_active_session(&mut self, new_session: &str) {
         let active = self.active_pane_id.clone();
         match self.root.find_mut(&active) {

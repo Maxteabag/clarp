@@ -12,6 +12,7 @@
 mod agent_terminal;
 mod catalogue;
 mod chat_menu;
+mod host_down_view;
 mod commands;
 mod driver;
 mod headless;
@@ -490,6 +491,7 @@ impl App {
         }
         whole.lap("list");
         self.refresh_panes(&window, changes);
+        host_down_view::apply(self, &window, changes);
         queue_strip::follow(self);
         whole.lap("panes");
         // A chat opens ready to type into, unless the reader is scrolling.
@@ -509,14 +511,27 @@ impl App {
         // No Host and no agents: the connection page asks for one (as the
         // Qt app does), and goes once the Host answers.
         let state = engine.connection_state().to_owned();
+        let repair_target = window.get_repair_target();
+        let peer_dialog = !repair_target.is_empty();
+        let dialog = if peer_dialog { engine.repair_state(&repair_target) } else { Some((state.as_str(), engine.error())) };
+        window.set_dialog_error(match dialog {
+            Some((_, detail)) => detail.into(),
+            // i18n: peer repair dialog when the original saved Host disappeared during editing
+            None => clarp_core::tr!("This Host is no longer available.").into(),
+        });
+        window.set_dialog_state(dialog.map_or("", |d| d.0).into());
         let empty = engine.roster().agents().is_empty();
         let overlay = self.overlay.borrow().clone();
-        if overlay.is_empty() && empty && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
+        // A Host that answered before has its own page (host_down_view)
+        // instead: the connection page is for a desktop without one.
+        let host_down_page = engine.host_down(engine.base_url()).is_some();
+        let close_connection = overlay == "connection" && !window.get_choosing_host() &&
+            if peer_dialog { changes.iter().any(|c| matches!(c, Change::PeerRepaired(url) if url == repair_target.as_str())) }
+            else { self.auto_connection_page.get() && state == "live" && !empty && changes.contains(&Change::Roster) };
+        if overlay.is_empty() && empty && !host_down_page && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
             commands::open_overlay(self, &window, "connection");
             self.auto_connection_page.set(true);
             window.invoke_open_connection_page();
-        } else if overlay == "connection" && self.auto_connection_page.get() && state == "live" && !empty && changes.contains(&Change::Roster) {
-            commands::close_overlay(self, &window);
         }
         window.set_muted(engine.muted());
         let name = engine.server_name();
@@ -524,9 +539,15 @@ impl App {
         let conversation_error = engine.conversation(&selected).map(|c| {
             if c.error().is_empty() { c.voice_error().to_owned() } else { c.error().to_owned() }
         });
-        let error = if engine.error().is_empty() { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
+        // A Host that does not answer has its panel: its raw connection
+        // error is not shown over the chats (only in its diagnostics).
+        let primary_down = engine.host_down(engine.base_url()).is_some();
+        let chat_down = engine.host_down_for_session(&selected).is_some();
+        let conversation_error = conversation_error.filter(|_| !chat_down);
+        let error = if engine.error().is_empty() || primary_down { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
         window.set_error(SharedString::from(error));
         drop(engine);
+        if close_connection { commands::close_overlay(self, &window); }
         // Live items say when the agent works: the bar names Stop.
         if changes.iter().any(|c| matches!(c, Change::Selection | Change::Panes | Change::Composer(_)) || matches!(c, Change::Live(s) if *s == selected)) {
             commands::show_hints(self, &window);
@@ -1086,6 +1107,15 @@ fn main() {
     window.on_keymap_import(|text| with_window(|app, window| commands::keymap_import(app, window, &text)));
     window.on_keymap_export(|| with_window(|app, window| commands::keymap_export(app, window)));
     window.on_keymap_reset(|| with_window(|app, window| commands::keymap_import(app, window, &keymap::export(&keymap::Overrides::new()))));
+    window.on_repair_peer(|original, url, secret, pairing| with_window(|app, _| {
+        app.engine.borrow_mut().repair_peer(&original, &url, &secret, pairing);
+        pump_now(app);
+    }));
+    window.on_switch_content(|url| with_window(|app, window| {
+        app.engine.borrow_mut().switch_to_host_content(&url);
+        commands::close_overlay(app, window);
+        pump_now(app);
+    }));
     window.on_connect_host(|url, token| with_window(|app, _| {
         app.engine.borrow_mut().connect_to_server(&url, &token);
         pump_now(app);
@@ -1094,7 +1124,8 @@ fn main() {
         app.engine.borrow_mut().pair_device(&url, &code);
         pump_now(app);
     }));
-    window.on_forget_host(|| with_window(|app, _| {
+    window.on_forget_host(|| with_window(|app, window| {
+        if !window.get_repair_target().is_empty() || window.get_choosing_host() { return; }
         app.engine.borrow_mut().forget_credential();
         pump_now(app);
     }));
@@ -1258,6 +1289,7 @@ fn main() {
     voice_view::wire(&window);
     font_view::wire(&window);
     orchestrator_view::wire(&window);
+    host_down_view::wire(&window);
     commands::refresh_keys(&state, &window);
     window.on_dismiss_error(|| with_window(|app, window| {
         commands::run(app, window, "dismiss-error");

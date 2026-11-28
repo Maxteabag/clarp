@@ -4,6 +4,7 @@ import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText
 import { CompactWork, ProcessIndicator } from "processes.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar, AvatarArt } from "avatar.slint";
+import { HostDownBridge, HostDownListRow } from "host_down.slint";
 
 export struct ChatRow {
     session: string,
@@ -580,6 +581,13 @@ export component Sidebar inherits Rectangle {
                 accessible-label: root.roster-note;
                 accessible-description: root.roster-note-detail;
             }
+        }
+        // A Host that does not answer: one quiet row each (its chats stay,
+        // shown offline), opening its page. Not while the device is offline:
+        // the window's banner says it once.
+        if !HostDownBridge.device-offline: VerticalLayout {
+            vertical-stretch: 0;
+            for down in HostDownBridge.rows: HostDownListRow { item: down; }
         }
         // Holds the keyboard for J/K/Enter navigation (the keyboard map).
         list := FocusScope {

@@ -968,6 +968,7 @@ version = "0.1.0"
 dependencies = [
  "clarp-core",
  "futures-util",
+ "libc",
  "reqwest",
  "rustls",
  "serde_json",
