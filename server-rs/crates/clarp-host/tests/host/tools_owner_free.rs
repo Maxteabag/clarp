@@ -465,16 +465,18 @@ fn a_delegated_agent_reads_the_decision_it_resolves_only_with_object_access() {
     let desk = "decision-desk";
     host.post(
         "/agents",
-        json!({"name":"Decision desk","session":desk,"backend":"claude"}),
+        json!({"name":"Decision desk","session":desk,"backend":"scripted"}),
     );
     host.send(desk, "Ready", "desk-first-turn");
     wait_for("the desk to finish", || host.state(desk) == "done");
     let turn = first_turn_token(&place, &agent_id(&host, desk));
     let marker = "private-fixture-question";
-    let asked = host.post(
+    let (status, asked) = host.ask(
+        "POST",
         "/decisions",
-        json!({"session":bound,"title":"Private case","question":marker}),
+        Some(&json!({"session":bound,"title":"Private case","question":marker})),
     );
+    assert_eq!(status, 201, "{asked}");
     let artifact = &asked["artifact"];
     let id = artifact["decision"]["decision_id"].as_str().unwrap();
     let artifact_path = format!("/artifacts/{}", artifact["artifact_id"].as_str().unwrap());
