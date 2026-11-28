@@ -11,6 +11,7 @@
     shortActivityPhase, shortActivityText, statusFor,
   } from '../../stores/app.svelte.js';
   import { orderChats } from '../chat-order.js';
+  import StateToggle from '../StateToggle.svelte';
   import { movedLine } from '@core/agent-moved.js';
   import { resolveAvatarUrl } from '@core/avatar.js';
   import { mergeChats, PRIMARY } from '@core/all-hosts.js';
@@ -154,6 +155,7 @@
       </svg>
       {#if !collapsed}<span>{t('sidebar.all_agents')}</span>{/if}
     </button>
+    <div class="sidebar-state"><StateToggle compact={collapsed} /></div>
   </footer>
 </aside>
 
@@ -354,4 +356,9 @@
   transition: color var(--t-snap) var(--ease), border-color var(--t-snap) var(--ease);
 }
 .sidebar-all:hover { color: var(--washi); border-color: var(--ink-edge-hi); }
+.sidebar-state {
+  display: flex;
+  justify-content: center;
+  margin-top: 6px;
+}
 </style>

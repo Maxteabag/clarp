@@ -1,6 +1,6 @@
 <script>
   import { app, isDesktop } from '../stores/app.svelte.js';
-  import { conversation } from '../stores/conversations.svelte.js';
+  import { conversation, placeholderFor } from '../stores/conversations.svelte.js';
   import { delivery } from '../stores/delivery.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
   import { health } from './net.js';
@@ -11,14 +11,16 @@
   import { audio } from '../stores/audio.svelte.js';
   import { mic } from '../stores/mic.svelte.js';
 
-  let open = $state(false);
+  // The button that opens the panel is StateToggle, placed in the layout.
+  import { inspector, toggleInspector } from '../stores/inspector.svelte.js';
+
   let lastCopied = $state(false);
 
   // Ticks only while the panel is open: the ages shown are relative to now, so
   // they have to be recomputed, but not when nobody is looking.
   let nowTick = $state(Date.now());
   $effect(() => {
-    if (!open) return;
+    if (!inspector.open) return;
     const t = setInterval(() => { nowTick = Date.now(); }, 1000);
     return () => clearInterval(t);
   });
@@ -31,9 +33,16 @@
   });
   let counts = $derived.by(() => { delivery.entries; return deliverySummary(delivery); });
 
-  function toggle() {
-    open = !open;
-  }
+  const toggle = toggleInspector;
+
+  // The open chat's transcript state, as the panel shows it. (It once read a
+  // store named `history`; without one the name fell through to the browser's
+  // window.history and the panel failed to open.)
+  let history = $derived.by(() => {
+    const c = conversation(app.session);
+    return { loadedForSession: c.status === 'empty' ? '' : c.session, turns: c.turns,
+      placeholder: placeholderFor(c), latestRevision: c.latestRevision, activity: c.activity };
+  });
 
   function copyState() {
     const snapshot = {
@@ -79,19 +88,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<!-- Floating toggle button -->
-<button
-  class="state-inspector-toggle"
-  class:active={open}
-  title="Toggle Svelte State Inspector (Ctrl+Shift+D)"
-  aria-label="Toggle Svelte State Inspector"
-  onclick={toggle}
->
-  <span class="inspector-pulse" class:live={app.conn === 'live'}></span>
-  <span class="inspector-label">STATE</span>
-</button>
-
-{#if open}
+{#if inspector.open}
   <aside class="state-inspector-panel" aria-label="Live Svelte State Inspector">
     <header class="inspector-header">
       <div class="inspector-title">
@@ -222,41 +219,6 @@
 {/if}
 
 <style>
-  .state-inspector-toggle {
-    position: fixed;
-    top: 10px;
-    right: 12px;
-    z-index: 9999;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 8px;
-    background: rgba(22, 22, 30, 0.85);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 4px;
-    color: #a9b1d6;
-    font-family: monospace;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-    backdrop-filter: blur(8px);
-    transition: all 0.15s ease;
-  }
-  .state-inspector-toggle:hover, .state-inspector-toggle.active {
-    background: #24283b;
-    border-color: #7aa2f7;
-    color: #c0caf5;
-  }
-  .inspector-pulse {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #f7768e;
-  }
-  .inspector-pulse.live {
-    background: #9ece6a;
-    box-shadow: 0 0 6px rgba(158, 206, 106, 0.6);
-  }
   .state-inspector-panel {
     position: fixed;
     top: 38px;

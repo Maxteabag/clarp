@@ -11,6 +11,7 @@
   import { movedLine } from '@core/agent-moved.js';
   import { t } from '../../stores/i18n.svelte.js';
   import HostBadge from '../HostBadge.svelte';
+  import StateToggle from '../StateToggle.svelte';
 
   let { chatOpen = $bindable(), onTapAgent, onHoldAgent } = $props();
 
@@ -70,6 +71,8 @@
   </button>
 
   <span class="dock-spacer"></span>
+
+  <StateToggle compact />
 
   <button id="chatBtn" class="chat-btn" aria-label={t('dock.type_message')}
           onclick={() => chatOpen = !chatOpen}>
