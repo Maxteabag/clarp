@@ -37,19 +37,13 @@ export component PreviewPanel inherits Modal {
             padding: 22px;
             spacing: 12px;
             Text { text: "Preview versions"; color: Palette.text; font-size: 17 * Look.unit; }
-            Text {
-                font-size: ChromeText.body;
-                text: "Choose a build and reopen. Rolling back pauses automatic updates. Chats stay on the Host.";
-                color: Palette.text;
-                wrap: word-wrap;
-            }
             if !root.can-restart: Text {
                 font-size: ChromeText.body;
-                text: "Finish sending, uploads, recording, transcription or playback before switching versions.";
+                text: "Finish active tasks before switching versions.";
                 color: Palette.warning;
                 wrap: word-wrap;
             }
-            if root.pinned: Text { font-size: ChromeText.body; text: "Pinned to an older build — automatic updates paused"; color: Palette.warning; }
+            if root.pinned: Text { font-size: ChromeText.body; text: "Pinned · updates paused"; color: Palette.warning; }
             VerticalLayout {
                 vertical-stretch: 1;
                 spacing: 4px;
@@ -68,12 +62,6 @@ export component PreviewPanel inherits Modal {
             }
             if root.error != "": Text { font-size: ChromeText.body; text: root.error; color: Palette.danger; wrap: word-wrap; }
             if root.notice != "": Text { font-size: ChromeText.body; text: root.notice; color: Palette.success; wrap: word-wrap; }
-            Text {
-                text: "Recovery is always available from Clarp Preview Versions in the app launcher.";
-                color: Palette.muted;
-                font-size: 11 * Look.unit;
-                wrap: word-wrap;
-            }
             HorizontalLayout {
                 spacing: 8px;
                 Button {
@@ -104,7 +92,7 @@ export component PreviewBanner inherits Rectangle {
         spacing: 8px;
         Text {
             font-size: ChromeText.body;
-            text: root.error != "" ? root.error : root.update-label != "" ? "New update available" : "Preview pinned · automatic updates paused";
+            text: root.error != "" ? root.error : root.update-label != "" ? "Update available" : "Pinned · updates paused";
             color: root.error != "" ? Palette.danger : Palette.muted;
             vertical-alignment: center;
             overflow: elide;

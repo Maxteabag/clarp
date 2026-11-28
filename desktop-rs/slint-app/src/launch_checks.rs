@@ -106,7 +106,7 @@ pub(super) fn launch_check(out: String) {
             if hub.get_provider_index() != 1 {
                 return false;
             }
-            check(hub.get_model_summary() == "Server default", "Ctrl+Right switches to Codex with the server's model");
+            check(hub.get_model_summary() == "Default", "Ctrl+Right switches to Codex with the server's model");
             hub.invoke_toggle_edit_model();
             true
         })),
@@ -116,7 +116,7 @@ pub(super) fn launch_check(out: String) {
                 return false;
             }
             let labels: Vec<String> = hub.get_model_labels().iter().map(|l| l.to_string()).collect();
-            check(labels == ["Server default", "GPT-5"], &format!("Edit shows Codex's models: {labels:?}"));
+            check(labels == ["Default", "GPT-5"], &format!("Edit shows Codex's models: {labels:?}"));
             hub.invoke_model_chosen(1);
             hub.invoke_effort_chosen(1);
             true

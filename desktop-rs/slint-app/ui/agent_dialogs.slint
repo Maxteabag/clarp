@@ -74,15 +74,9 @@ export component RenameAgentDialog inherits Modal {
             property <int> request: AgentDialogs.focus-request;
             changed request => { if (AgentDialogs.focus-target == "rename") { self.focus(); self.select-all(); } }
         }
-        if AgentDialogs.rename-session != "": Text {
-            text: "Chat id " + AgentDialogs.rename-session + " stays the same, so history and pairings are kept.";
-            color: Palette.muted;
-            font-size: 12 * Look.unit;
-            wrap: word-wrap;
-        }
         if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
             font-size: ChromeText.body;
-            text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to rename a contact";
+            text: AgentDialogs.error != "" ? AgentDialogs.error : "Not connected";
             color: Palette.warning;
             wrap: word-wrap;
         }
@@ -209,7 +203,7 @@ export component AssignAgentDialog inherits Modal {
             }
             if AgentDialogs.error != "" || !AgentDialogs.connected: Text {
                 font-size: ChromeText.body;
-                text: AgentDialogs.error != "" ? AgentDialogs.error : "Connect to the Host to assign a contact.";
+                text: AgentDialogs.error != "" ? AgentDialogs.error : "Not connected";
                 color: Palette.warning;
                 wrap: word-wrap;
             }
@@ -314,7 +308,7 @@ export component QueueDialog inherits Modal {
                     letter-spacing: 1.2px;
                 }
                 Text {
-                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? "  ·  paused  ·  Send now runs one" : "");
+                    text: AgentDialogs.queue-title + (AgentDialogs.queue-paused ? " · paused" : "");
                     color: AgentDialogs.queue-paused ? Palette.warning : Palette.muted;
                     font-size: 10 * Look.unit;
                 }

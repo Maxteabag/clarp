@@ -184,14 +184,12 @@
     <div class="overview-shell">
       <header class="overview-hero">
         <div class="overview-title-block">
-          <span class="overview-kicker">Computer control surface</span>
           <div class="overview-title-line">
             <h1>Agents</h1>
             <span class="overview-live-mark" class:connected={app.conn === 'live'}>
               <span></span>{app.conn === 'live' ? 'Live' : app.conn}
             </span>
           </div>
-          <p>Chats are running sessions. Contacts are identities ready for a new conversation.</p>
         </div>
         <div class="overview-hero-actions">
           <span class="version-badge" title="Server / client version">{app.version || 'v…'}</span>
@@ -218,14 +216,14 @@
       </header>
 
       <div class="overview-ledger" aria-label="Agent summary">
-        <div><strong>{overview.counts.chats}</strong><span>Open chats</span></div>
+        <div><strong>{overview.counts.chats}</strong><span>Chats</span></div>
         <div class:signal={overview.counts.working > 0}>
-          <strong>{overview.counts.working}</strong><span>Working now</span>
+          <strong>{overview.counts.working}</strong><span>Working</span>
         </div>
         <div class:attention={overview.counts.attention > 0}>
-          <strong>{overview.counts.attention}</strong><span>Need a look</span>
+          <strong>{overview.counts.attention}</strong><span>Needs attention</span>
         </div>
-        <div><strong>{overview.counts.contacts}</strong><span>Ready contacts</span></div>
+        <div><strong>{overview.counts.contacts}</strong><span>Contacts</span></div>
       </div>
 
       <div class="overview-toolbar">
@@ -253,8 +251,8 @@
         {#if visibleChats}
           <section class="overview-section chats-section" aria-labelledby="open-chats-title">
             <div class="overview-section-head">
-              <div><span class="section-index">01</span><h2 id="open-chats-title">Open chats</h2></div>
-              <span>{overview.counts.working ? `${overview.counts.working} in motion` : 'Quiet'}</span>
+              <div><span class="section-index">01</span><h2 id="open-chats-title">Chats</h2></div>
+              {#if overview.counts.working}<span>{overview.counts.working} working</span>{/if}
             </div>
             <div class="agent-card-grid">
               {#each overview.chats as row (row.key)}
@@ -301,11 +299,11 @@
                     <div class="agent-card-detail">
                       <dl>
                         <div><dt>Session</dt><dd>{row.session}</dd></div>
-                        <div><dt>Harness</dt><dd>{backendLabel(row.backend)}</dd></div>
-                        <div><dt>Model</dt><dd>{row.model || 'Harness default'}</dd></div>
+                        <div><dt>Backend</dt><dd>{backendLabel(row.backend)}</dd></div>
+                        <div><dt>Model</dt><dd>{row.model || 'Default'}</dd></div>
                         <div><dt>Effort</dt><dd>{row.effort || 'Default'}</dd></div>
                         <div><dt>Workspace</dt><dd title={row.cwd}>{row.cwd || '—'}</dd></div>
-                        <div><dt>MCP</dt><dd>{row.mcp_servers?.length ? row.mcp_servers.join(', ') : 'None requested'}</dd></div>
+                        <div><dt>MCP</dt><dd>{row.mcp_servers?.length ? row.mcp_servers.join(', ') : 'None'}</dd></div>
                       </dl>
                       <ChatChoices session={row.session} />
                       <div class="agent-toggle-row" aria-label="Quick agent settings">
@@ -344,7 +342,7 @@
                         <button onclick={() => postAgentSetting(row, '/agent-archive', { archived: true }, `${row.name} archived`)}>Archive chat</button>
                         {#if row.name !== 'Mike'}
                           {#if confirmingRelease === row.session}
-                            <span>Release this Chat?</span><button onclick={() => confirmingRelease = ''}>Cancel</button>
+                            <span>Release chat?</span><button onclick={() => confirmingRelease = ''}>Cancel</button>
                             <button class="danger" disabled={!!mutationKey} onclick={() => releaseAgent(row)}>Release</button>
                           {:else}
                             <button class="danger" onclick={() => confirmingRelease = row.session}>Release chat</button>
@@ -362,7 +360,7 @@
         {#if visibleContacts}
           <section class="overview-section contacts-section" aria-labelledby="contacts-title">
             <div class="overview-section-head">
-              <div><span class="section-index">02</span><h2 id="contacts-title">Ready contacts</h2></div><span>Start fresh</span>
+              <div><span class="section-index">02</span><h2 id="contacts-title">Contacts</h2></div>
             </div>
             <div class="contact-stack">
               {#each overview.contacts as contact (contact.key)}
@@ -372,9 +370,9 @@
                   </span>
                   <span class="contact-copy">
                     <span><strong>{contact.name}</strong><small>{contact.builtin ? 'Built-in' : 'Saved'}</small></span>
-                    <p>{contact.personality || 'Ready for a new workspace and conversation.'}</p>
+                    {#if contact.personality}<p>{contact.personality}</p>{/if}
                   </span>
-                  <button onclick={() => onStart(contact.name)} aria-label="Start a chat with {contact.name}">Start</button>
+                  <button onclick={() => onStart(contact.name)} aria-label="Start chat with {contact.name}">Start</button>
                 </article>
               {/each}
             </div>
@@ -384,7 +382,7 @@
         {#if visibleArchived}
           <section class="overview-section archive-section" aria-labelledby="archive-title">
             <div class="overview-section-head">
-              <div><span class="section-index">03</span><h2 id="archive-title">Archived chats</h2></div><span>Hidden from daily flow</span>
+              <div><span class="section-index">03</span><h2 id="archive-title">Archived</h2></div>
             </div>
             <div class="archive-list">
               {#each overview.archived as row (row.key)}
@@ -402,7 +400,7 @@
 
         {#if !hasResults}
           <div class="overview-empty">
-            <span>∅</span><h2>No matching agents</h2><p>Try a name, workspace, model, or clear the search.</p>
+            <span>∅</span><h2>No matching agents</h2>
             {#if query}<button onclick={() => query = ''}>Clear search</button>{/if}
           </div>
         {/if}

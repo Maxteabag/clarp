@@ -48,10 +48,6 @@
         <input type="checkbox" checked={hostsState.allHosts}
                onchange={e => setAllHosts(e.currentTarget.checked)} />
       </label>
-      <p class="start-hint">
-        Lists the chats of the Hosts below beside this Host's. A chat on another Host opens in
-        that Host's own web app. Kept on this device.
-      </p>
 
       <div class="hosts-list" aria-label="Hosts">
         <div class="hosts-row primary"><span class="hosts-name">{app.hosts[0]?.name || 'This Host'}</span><span class="hosts-state">This Host</span></div>
@@ -75,18 +71,16 @@
       </div>
       <div class="hosts-add">
         <label class="start-field">
-          <span>Another Host's address</span>
+          <span>Host address</span>
           <input type="url" placeholder="https://studio.example.ts.net" bind:value={newUrl} autocomplete="off" />
         </label>
         <label class="start-field">
-          <span>Token paired with it</span>
+          <span>Token</span>
           <input type="password" placeholder="cld_…" bind:value={newToken} autocomplete="off" />
         </label>
         {#if addError}<p class="start-hint hosts-error" role="alert">{addError}</p>{/if}
         <p class="start-hint">
-          Hosts this Host is paired with (clarp-admin peers) are listed by themselves, with no token here.
-          For another one, that Host must list this app's origin ({location.origin}) in
-          <code>[server] web_read_origins</code>. It then answers this app its chat list and name, and nothing else.
+          Requires <code>{location.origin}</code> in <code>[server] web_read_origins</code>.
         </p>
         <div class="start-actions">
           <button class="start-btn" type="button" disabled={adding || !newUrl || !newToken} onclick={add}>
@@ -96,18 +90,10 @@
       </div>
 
       <label class="start-field inline-toggle">
-        <span>Show the Host on each chat</span>
+        <span>Show Host badge</span>
         <input type="checkbox" checked={prefs.showHostBadge}
                onchange={e => setShowHostBadge(e.currentTarget.checked)} />
       </label>
-      <p class="start-hint">
-        {#if hostCount > 1}
-          A small label names the Host on every chat row and in the chat header.
-        {:else}
-          Shown once this app reads chats from more than one Host; with one Host there is
-          nothing to tell apart.
-        {/if}
-      </p>
 
       {#if live.hiddenCoordination}
         <label class="start-field inline-toggle">
@@ -115,21 +101,14 @@
           <input type="checkbox" checked={coordination.visibility === 'show'}
                  onchange={e => setCoordinationVisibility(e.currentTarget.checked ? 'show' : 'hide')} />
         </label>
-        <p class="start-hint">
-          {#if coordination.error}{coordination.error}{:else}
-            Messages agents send each other, and the work they do for them, in every chat that has no
-            setting of its own (the chat's … menu). The Host keeps this, so your other devices follow.
-            Notes, cards and files an agent leaves for you always show.
-          {/if}
-        </p>
+        {#if coordination.error}<p class="start-hint">{coordination.error}</p>{/if}
         <!-- Listed whenever the Host hides coordination: a chat's own hide draws these lines
              even while the Host's setting shows them. -->
         <label class="start-field inline-toggle">
-          <span>Show a line where agent messages were</span>
+          <span>Show hidden agent-message marker</span>
           <input type="checkbox" checked={prefs.showCoordinationLine}
                  onchange={e => setShowCoordinationLine(e.currentTarget.checked)} />
         </label>
-        <p class="start-hint">Applies wherever messages between agents are hidden, in every chat.</p>
       {/if}
 
       <label class="start-field">
@@ -138,18 +117,6 @@
           {#each TOOL_ACTIVITY as mode (mode)}<option value={mode}>{TOOL_ACTIVITY_LABELS[mode]}</option>{/each}
         </select>
       </label>
-      <p class="start-hint">
-        {#if prefs.toolActivity === 'grouped'}
-          Each finished turn's tool calls sit behind one line, 'Worked for 11s · 3 tools', which opens in place.
-        {:else if prefs.toolActivity === 'always'}
-          Every tool call shows where it was made.
-        {:else if prefs.toolActivity === 'group_old'}
-          The newest turn shows its tool calls; older turns are grouped.
-        {:else}
-          A turn shows its work while it runs; once it has finished, only its messages stay.
-        {/if}
-        Your messages, replies, cards, errors and notices are never hidden.
-      </p>
 
       <LanguageSetting />
 

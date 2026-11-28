@@ -49,24 +49,18 @@ export component OrchestratorDialog inherits Modal {
             if OrchestratorBridge.loading: Busy { reduced-motion: OrchestratorBridge.reduced-motion; }
             IconButton { icon: @image-url("icons/close.svg"); tip: "Close"; clicked => { OrchestratorBridge.close(); } }
         }
-        Text {
-            text: "Name matching runs first. The routing model resolves delegations that do not clearly select one agent.";
-            color: Palette.muted;
-            font-size: 12 * Look.unit;
-            wrap: word-wrap;
+        HorizontalLayout {
+            spacing: 8px;
+            Switch { checked <=> OrchestratorBridge.enabled; accessible-label: "AI routing"; }
+            Text { text: "AI routing"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         HorizontalLayout {
             spacing: 8px;
-            Switch { checked <=> OrchestratorBridge.enabled; accessible-label: "Use AI to resolve failed delegations"; }
-            Text { text: "Use AI to resolve failed delegations"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
-        }
-        HorizontalLayout {
-            spacing: 8px;
-            Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: "Only when name matching cannot decide"; }
-            Text { text: "Only when name matching cannot decide"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
+            Switch { checked <=> OrchestratorBridge.fallback-only; accessible-label: "Fallback only"; }
+            Text { text: "Fallback only"; color: Palette.chrome-text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         }
         Text {
-            text: "Automatic routing confidence  " + Math.round(OrchestratorBridge.confidence * 100) / 100;
+            text: "Confidence  " + Math.round(OrchestratorBridge.confidence * 100) / 100;
             color: Palette.chrome-text;
             font-size: 12 * Look.unit;
         }
@@ -75,7 +69,7 @@ export component OrchestratorDialog inherits Modal {
             maximum: 0.99;
             step: 0.01;
             value <=> OrchestratorBridge.confidence;
-            accessible-label: "Automatic routing confidence";
+            accessible-label: "Confidence";
         }
         HorizontalLayout {
             spacing: 10px;
@@ -93,8 +87,8 @@ export component OrchestratorDialog inherits Modal {
             }
         }
         Text { text: "Model override"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
-        Field { text <=> OrchestratorBridge.model; placeholder-text: "Provider default"; accessible-label: "Model override"; }
-        Text { text: "Timeout (milliseconds)"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
+        Field { text <=> OrchestratorBridge.model; placeholder-text: "Default"; accessible-label: "Model override"; }
+        Text { text: "Timeout (ms)"; color: Palette.chrome-text; font-size: 12 * Look.unit; }
         HorizontalLayout {
             alignment: start;
             SpinBox {
@@ -103,7 +97,7 @@ export component OrchestratorDialog inherits Modal {
                 maximum: 60000;
                 step-size: 250;
                 value <=> OrchestratorBridge.timeout-ms;
-                accessible-label: "Timeout (milliseconds)";
+                accessible-label: "Timeout (ms)";
             }
         }
         if OrchestratorBridge.last-decision != "": Rectangle {
