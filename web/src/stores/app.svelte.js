@@ -171,7 +171,7 @@ export function rememberUserNotification(ev) {
 
 // ---- agent banner -------------------------------------------------------
 
-const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude', agy: 'Antigravity' };
+const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude', agy: 'Antigravity', 'agy-acp': 'Antigravity' };
 
 export function quotaMessage(quota, now = new Date()) {
   const name = PROVIDER_LABELS[quota.provider_id] || quota.provider_id || 'This backend';

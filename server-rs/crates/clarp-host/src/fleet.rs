@@ -4312,7 +4312,7 @@ impl Fleet {
                     record.effort = effort;
                 }
             }
-            Amend::Tool(backend) => record.backend = backend,
+            Amend::Tool(backend) => record.backend = clarp_backend::canonical_id(&backend).into(),
             Amend::RetiredAgy => {
                 if record.backend == clarp_backend::LEGACY_AGY {
                     record.backend = clarp_backend::agy_acp::ID.to_string();

@@ -8,7 +8,7 @@
   import { reset } from '../stores/conversations.svelte.js';
   import {
     normalizeBackend, resumableBackend, supportsForkBackend, supportsResumeBackend,
-    backendLabel, catalogBackendIds, allowedBackendForContact,
+    backendLabel, catalogBackendIds, allowedBackendForContact, launchBackend, canSelectBackend,
   } from '@core/agent-launch.js';
   import { AgentBackend } from '@core/protocol.js';
   import { pathTail } from './render.js';
@@ -16,7 +16,8 @@
   let { open = $bindable(), name = '', replaceSid = '', onDone } = $props();
 
   let lockedBackend = $derived.by(() => {
-    return allowedBackendForContact(name);
+    const allowed = allowedBackendForContact(name);
+    return allowed && launchBackend(allowed);
   });
 
   // The server's live capability catalogue (/agent-model-options), with a
@@ -33,7 +34,6 @@
           id, label: id, supported_efforts: ['low', 'medium', 'high'],
         })),
       },
-      agy: { models: [], supported_efforts: ['low', 'medium', 'high'] },
       grok: {
         models: ['grok-4.6', 'grok-4.5'].map(id => ({
           id, label: id, supported_efforts: ['low', 'medium', 'high'],
@@ -99,7 +99,7 @@
   // Installed, unhidden providers plus the one the agent being relaunched
   // already runs on, so a CLI that went missing does not vanish mid-chat.
   let backendIds = $derived(catalogBackendIds(catalogue, {
-    current: replaceSid ? existing.backend : backend,
+    current: replaceSid ? launchBackend(existing.backend) : backend,
   }));
 
   // Seed the form when the dialog opens.
@@ -112,11 +112,11 @@
     resumeItems = [];
     resumeState = '';
     suggestions = [];
-    const targetLocked = allowedBackendForContact(name);
+    const targetLocked = lockedBackend;
     if (targetLocked) {
       backend = targetLocked;
     } else {
-      backend = normalizeBackend(
+      backend = launchBackend(
         (replaceSid && existing.backend)
         || localStorage.getItem('lastAgentBackend') || AgentBackend.CLAUDE);
     }
@@ -128,7 +128,7 @@
   // when the backend still matches.
   $effect(() => {
     const canReuse = replaceSid
-      && normalizeBackend(existing.backend) === normalizeBackend(backend);
+      && launchBackend(existing.backend) === backend;
     const existingModel = canReuse ? (existing.model || '') : '';
     const existingEffort = canReuse ? (existing.effort || '') : '';
     modelPreset = models.includes(existingModel) ? existingModel : '';
@@ -230,7 +230,11 @@
   async function submit() {
     const dir = cwd.trim().replace(/\/+$/, '') || '~';
     localStorage.setItem('lastAgentCwd', dir);
-    const chosenBackend = lockedBackend || resumableBackend(backend);
+    const chosenBackend = lockedBackend || launchBackend(backend);
+    if (!canSelectBackend(chosenBackend, catalogue)) {
+      flash('Antigravity ACP is unavailable on this Host.', 4500);
+      return;
+    }
     localStorage.setItem('lastAgentBackend', chosenBackend);
     const selectedModel = (modelCustom || '').trim() || (modelPreset || '').trim();
     const payload = {
