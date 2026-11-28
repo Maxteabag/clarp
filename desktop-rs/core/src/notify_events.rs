@@ -255,7 +255,8 @@ impl Incoming {
             session: json::string(event, "session"),
             agent_id: json::string(event, "agent_id"),
             persona: json::string(event, "persona"),
-            preview: json::string(event, "preview"),
+            // The Host's English fallback where it has no preview (a failure's sentence).
+            preview: first(&["preview", "body"]),
             options,
             response_type: json::string(event, "response_type"),
             decision_id: json::string(event, "decision_id"),
@@ -310,7 +311,10 @@ pub const SOUND_LABEL: &str = "Sound";
 pub const SOUND_ABOUT: &str = "Play the desktop's message sound when an agent asks you something or rings";
 
 /// The events the desktop knows words for, in the Host catalog's order:
-/// wire id, `notify.event.<id>`, `notify.settings.about.<id>`.
+/// wire id, `notify.event.<id>.title` (a switch's label in Settings >
+/// Notifications and a choice's label on a contact's profile, a noun
+/// phrase), `notify.event.<id>.detail` (the line under that switch). The
+/// Host's `message_key` (`notify.event.<id>`) reads as the title.
 pub const EVENTS: &[(&str, &str, &str)] = &[
     ("reply", "Replies", "An agent finished and has something for you"),
     ("needs_you", "Questions for you", "An agent asks you something or waits for your answer"),
@@ -322,41 +326,56 @@ pub const EVENTS: &[(&str, &str, &str)] = &[
     ("account", "Account notices", "Account and usage notices"),
 ];
 
-/// Every other word the desktop shows for notifications, by its stable
-/// key. One place, so the localization pipeline can take them over.
-pub const STRINGS: &[(&str, &str)] = &[
-    ("notify.settings.desktop", DESKTOP_LABEL),
-    ("notify.settings.desktop.about", DESKTOP_ABOUT),
-    ("notify.settings.sound", SOUND_LABEL),
-    ("notify.settings.sound.about", SOUND_ABOUT),
-    ("notify.settings.default", "Default"),
-    ("notify.settings.on", "On"),
-    ("notify.settings.off", "Off"),
-    ("notify.settings.contact", "Notifications"),
-    ("notify.settings.customize", "Customize"),
-    ("notify.settings.preset.all", "All"),
-    ("notify.settings.preset.needs_me", "Only when it needs me"),
-    ("notify.settings.preset.muted", "Muted"),
-    ("notify.settings.preset.custom", "Custom"),
-    ("notify.action.open", "Open"),
-    ("notify.action.mark_read", "Mark read"),
-    // {name}: the contact's name.
-    ("notify.action.mute", "Mute {name}"),
-    ("notify.action.settings", "Settings"),
-    ("notify.body.needs_you", "Waiting for your answer"),
-    ("notify.body.failed", "The turn failed"),
-    ("notify.body.reply", "Done, your turn"),
+/// Every other word the desktop shows for notifications: stable key,
+/// English, and the context note translators get (where it appears, what
+/// it does, the part of speech where English is ambiguous). Placeholders
+/// are named (`{name}`). One place, so the localization sweep takes them.
+pub const STRINGS: &[(&str, &str, &str)] = &[
+    ("notify.settings.desktop", DESKTOP_LABEL, "Settings > Notifications: switch label; turns this computer's notification popups on or off"),
+    ("notify.settings.desktop.detail", DESKTOP_ABOUT, "Settings > Notifications: line under the Desktop notifications switch"),
+    ("notify.settings.sound", SOUND_LABEL, "Settings > Notifications: switch label (noun); plays a sound with questions and calls"),
+    ("notify.settings.sound.detail", SOUND_ABOUT, "Settings > Notifications: line under the Sound switch"),
+    ("notify.settings.default", "Default", "Contact profile > Notifications: choice meaning 'follow the setting for everyone'; shown as 'Default · On'"),
+    ("notify.settings.on", "On", "Contact profile > Notifications: choice (adjective, the event notifies)"),
+    ("notify.settings.off", "Off", "Contact profile > Notifications: choice (adjective, the event stays silent)"),
+    ("notify.settings.customize", "Customize", "Contact profile > Notifications: button (verb) that shows a choice per event"),
+    ("notify.settings.preset.all", "All", "Contact profile > Notifications: preset choice, every notification as set for everyone"),
+    ("notify.settings.preset.needs_me", "Only when it needs me", "Contact profile > Notifications: preset choice, only questions and failed turns"),
+    ("notify.settings.preset.muted", "Muted", "Contact profile > Notifications: preset choice (adjective), nothing from this contact"),
+    ("notify.settings.preset.custom", "Custom", "Contact profile > Notifications: preset choice (adjective), its own choice per event"),
+    ("notify.action.open", "Open", "Desktop notification: button (verb) that opens the chat at the message"),
+    ("notify.action.mark_read", "Mark read", "Desktop notification: button (verb) that marks the chat read without opening it"),
+    ("notify.action.mute", "Mute {name}", "Desktop notification: button (verb); {name} is the contact's name; no more notifications from them"),
+    ("notify.action.settings", "Settings", "Desktop notification: button (noun) that opens Settings > Notifications"),
+    ("notify.body.needs_you", "Waiting for your answer", "Desktop notification: body when an agent's question has no text of its own"),
+    ("notify.body.failed", "The turn failed", "Desktop notification: body when a failed turn has no text of its own"),
+    ("notify.body.reply", "Done, your turn", "Desktop notification: body when an agent finished without words to show"),
 ];
 
 /// The English words for a key; the key itself when none is known.
 pub fn text(key: &str) -> &str {
-    if let Some(id) = key.strip_prefix("notify.event.") {
-        return EVENTS.iter().find(|(e, ..)| *e == id).map_or(key, |(_, label, _)| label);
+    if let Some(rest) = key.strip_prefix("notify.event.") {
+        let (id, part) = rest.split_once('.').unwrap_or((rest, "title"));
+        let found = EVENTS.iter().find(|(e, ..)| *e == id);
+        return match part {
+            "title" => found.map_or(key, |(_, title, _)| title),
+            "detail" => found.map_or(key, |(.., detail)| detail),
+            _ => key,
+        };
     }
-    if let Some(id) = key.strip_prefix("notify.settings.about.") {
-        return EVENTS.iter().find(|(e, ..)| *e == id).map_or(key, |(.., about)| about);
+    STRINGS.iter().find(|(k, ..)| *k == key).map_or(key, |(_, en, _)| en)
+}
+
+/// Every key with its English and context note, for the localization
+/// exporter: the events' titles and details, then `STRINGS`.
+pub fn catalog() -> Vec<(String, &'static str, String)> {
+    let mut out = Vec::new();
+    for (id, title, detail) in EVENTS {
+        out.push((format!("notify.event.{id}.title"), *title, format!("Settings > Notifications and a contact's profile: label (noun phrase) of the {id} event's switch")));
+        out.push((format!("notify.event.{id}.detail"), *detail, format!("Settings > Notifications: line under the {id} event's switch")));
     }
-    STRINGS.iter().find(|(k, _)| *k == key).map_or(key, |(_, v)| v)
+    out.extend(STRINGS.iter().map(|(key, en, note)| ((*key).to_owned(), *en, (*note).to_owned())));
+    out
 }
 
 /// The words for an event id (`reply` → "Replies").
@@ -368,7 +387,7 @@ pub fn event_label(id: &str) -> String {
 
 /// The line under an event's switch.
 pub fn event_about(id: &str) -> String {
-    let key = format!("notify.settings.about.{id}");
+    let key = format!("notify.event.{id}.detail");
     let words = text(&key);
     if words == key { String::new() } else { words.to_owned() }
 }
@@ -465,8 +484,9 @@ mod tests {
         assert!(!off.alerts(false));
         let read = Incoming::parse(&object(json!({"event": "reply", "alert": true, "unread": false})));
         assert!(!read.alerts(false));
-        let on = Incoming::parse(&object(json!({"event": "failed", "alert": true, "unread": true})));
+        let on = Incoming::parse(&object(json!({"event": "failed", "alert": true, "unread": true, "body": "You hit the usage limit."})));
         assert!(on.alerts(false));
+        assert_eq!(on.preview, "You hit the usage limit.", "the Host's English fallback when there is no preview");
     }
 
     #[test]
@@ -503,5 +523,20 @@ mod tests {
             assert!(!event_about(id).is_empty(), "{id}");
         }
         assert_eq!(event_label("new_kind"), "new kind");
+        assert_eq!(text("notify.event.reply"), "Replies", "the Host's message_key reads as the title");
+        assert_eq!(text("notify.event.reply.title"), "Replies");
+        assert_eq!(text("notify.event.reply.detail"), event_about("reply"));
+    }
+
+    #[test]
+    fn every_key_has_english_and_a_context_note() {
+        let catalog = catalog();
+        let mut keys = std::collections::HashSet::new();
+        for (key, en, note) in &catalog {
+            assert!(key.starts_with("notify."), "{key}");
+            assert!(keys.insert(key.clone()), "{key} twice");
+            assert!(!en.is_empty() && note.len() > 20, "{key} needs English and a context note");
+            assert_eq!(text(key), *en, "{key}");
+        }
     }
 }

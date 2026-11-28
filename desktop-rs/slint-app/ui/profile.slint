@@ -598,12 +598,12 @@ export component AgentProfile inherits Modal {
                         spot: "notify-preset";
                         HorizontalLayout {
                             spacing: 8px;
-                            Text { text: @tr("Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            Text { text: @tr("notify.settings.contact" => "Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.notify-presets;
                                 current-index: root.info.notify-preset;
-                                accessible-label: @tr("Notifications");
+                                accessible-label: @tr("notify.settings.contact" => "Notifications");
                                 selected => { ProfileBridge.set-notify-preset(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
                             }
@@ -613,7 +613,7 @@ export component AgentProfile inherits Modal {
                         alignment: start;
                         Spot {
                             spot: "notify-customize";
-                            TextButton { text: @tr("Customize"); clicked => { ProfileBridge.notify-customize = true; } }
+                            TextButton { text: @tr("notify.settings.customize" => "Customize"); clicked => { ProfileBridge.notify-customize = true; } }
                         }
                     }
                     if root.info.notify-shown && root.info.notify-preset != 2 && (ProfileBridge.notify-customize || root.info.notify-preset == 3): VerticalLayout {
