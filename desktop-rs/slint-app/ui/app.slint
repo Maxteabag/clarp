@@ -387,9 +387,12 @@ export component AppWindow inherits Window {
     callback job-output(string);
     public function focus-processes() { processes.take-focus(); }
     // ---- launch dialogs: the switcher's contacts-only mode
-    in property <string> switcher-placeholder: "Agent, contact, setting or command";
-    in property <string> switcher-empty: "No matching agent or contact";
-    in property <string> switcher-hint: "↑↓ move · Enter run or switch · Esc close";
+    // i18n: quick switcher (Ctrl+K), placeholder of the search field: what can be found by typing
+    in property <string> switcher-placeholder: @tr("Agent, contact, setting or command");
+    // i18n: quick switcher, empty state when nothing matches the typed text
+    in property <string> switcher-empty: @tr("No matching agent or contact");
+    // i18n: quick switcher, key help under the list; ↑↓, Enter and Esc are key names left as is; move/run/switch/close are verbs
+    in property <string> switcher-hint: @tr("↑↓ move · Enter run or switch · Esc close");
     in property <[KeymapRow]> keymap-rows;
     in property <string> keymap-context;
     in property <string> keymap-count;
