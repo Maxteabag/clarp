@@ -744,6 +744,7 @@ export component Block inherits VerticalLayout {
         }
         language := Text {
             x: 12px;
+            y: 0px;
             width: Math.max(0px, (root.viewer ? expand-code.x : copy-code.x) - 16px);
             height: code-box.line;
             text: code-box.name;
