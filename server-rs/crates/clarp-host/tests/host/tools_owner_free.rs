@@ -337,19 +337,21 @@ fn direct_queue_controls_record_the_signed_agent_and_keep_owner_work_held_on_sto
         )
         .unwrap();
     let by = format!("agent:{from}");
-    let recorded: Vec<_> = log
+    let mut recorded: Vec<_> = log
         .read_after(0, Kinds::only(kind::AGENT_EVENT), 100)
         .unwrap()
         .iter()
         .filter_map(|item| {
             let event = serde_json::from_slice::<AgentEvent>(&item.body).unwrap();
             match event {
-                AgentEvent::SentNow { by: actor, .. } if actor == by => Some("sent"),
+                AgentEvent::SentNow {
+                    turn, by: actor, ..
+                } if actor == by => Some(("sent", Some(turn))),
                 AgentEvent::Paused {
                     by: actor,
                     verified: true,
                     ..
-                } if actor == by => Some("stop"),
+                } if actor == by => Some(("stop", None)),
                 AgentEvent::Turn {
                     change:
                         TurnEvent::Settled {
@@ -357,13 +359,23 @@ fn direct_queue_controls_record_the_signed_agent_and_keep_owner_work_held_on_sto
                             ..
                         },
                     ..
-                } if actor == by => Some("withdraw"),
-                AgentEvent::Resumed { by: actor, .. } if actor == by => Some("resume"),
+                } if actor == by => Some(("withdraw", None)),
+                AgentEvent::Resumed { by: actor, .. } if actor == by => Some(("resume", None)),
                 _ => None,
             }
         })
         .collect();
-    assert_eq!(recorded, ["sent", "stop", "withdraw", "sent", "resume"]);
+    // A takeover can record the same selection when it cuts the old turn and when its
+    // replacement starts. Both records carry the same signed caller and queued turn.
+    recorded.dedup();
+    assert_eq!(
+        recorded
+            .iter()
+            .map(|(action, _)| *action)
+            .collect::<Vec<_>>(),
+        ["sent", "stop", "withdraw", "sent", "resume"]
+    );
+    assert_ne!(recorded[0].1, recorded[3].1);
 }
 
 #[test]
