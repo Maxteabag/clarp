@@ -2,7 +2,7 @@
 #![allow(clippy::unwrap_used)]
 use clarp_kernel::janitors::{
     book::{Agent, Book, Config, World},
-    fallbacks::{self, Pick},
+    fallbacks::{self, Pick, Policy},
 };
 use serde_json::{Value, json};
 struct Host;
@@ -26,7 +26,7 @@ impl World for Host {
         unreachable!()
     }
     fn backend(&self, id: &str) -> bool {
-        matches!(id, "claude" | "codex")
+        matches!(id, "claude" | "codex" | "agy" | "agy-acp")
     }
     fn model(&self, _: &str, model: &str) -> bool {
         model != "invalid"
@@ -49,6 +49,61 @@ impl World for Host {
     fn face(&self, _: &str) -> String {
         unreachable!()
     }
+}
+
+#[test]
+fn antigravity_aliases_are_one_model_at_save_and_retry() {
+    let chain = json!([
+        {"provider":"agy", "model":"gemini-4-neon-medium"},
+        {"provider":"agy-acp", "model":"gemini-4-neon-medium"},
+        {"provider":"agy-acp", "model":"gemini-4-carbon-medium"},
+        {"provider":"agy", "model":"gemini-4-carbon-medium"},
+        {"provider":"codex", "model":"gpt-6-sol"},
+    ]);
+    let mut book = Book::default();
+    let refused = book
+        .model_policy
+        .configure(
+            &json!({"model_chain":chain}),
+            &json!(0),
+            &Host,
+            &book.configs,
+        )
+        .unwrap_err();
+    assert_eq!(
+        (refused.status, refused.message.as_str()),
+        (400, "Duplicate model")
+    );
+    assert_eq!(book.model_policy, Policy::default());
+
+    let distinct = json!([chain[0], chain[2], chain[4]]);
+    let saved = book
+        .model_policy
+        .configure(
+            &json!({"model_chain":distinct}),
+            &json!(0),
+            &Host,
+            &book.configs,
+        )
+        .unwrap();
+    assert_eq!(saved["model_chain"], distinct);
+
+    // An already saved policy retains its original rows and receipt positions.
+    let old: Policy =
+        serde_json::from_value(json!({"model_chain":chain,"inherit_sessions":["keeper"]})).unwrap();
+    let effective = old.effective("keeper", &Agent::default(), &Config::default());
+    let (first, tail) = fallbacks::choices(Pick::default(), &effective);
+    assert_eq!(
+        json!(first),
+        json!({"backend":"agy","model":"gemini-4-neon-medium","effort":""})
+    );
+    assert_eq!(
+        json!(tail),
+        json!([
+            [1,{"backend":"agy-acp","model":"gemini-4-carbon-medium","effort":""}],
+            [3,{"backend":"codex","model":"gpt-6-sol","effort":""}],
+        ])
+    );
 }
 
 #[test]
