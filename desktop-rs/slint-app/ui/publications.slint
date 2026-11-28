@@ -279,8 +279,8 @@ export component PublicationsPanel inherits Rectangle {
                 padding-right: 12px;
                 spacing: 6px;
                 alignment: start;
-                // i18n: publications panel, key hint beside J/K at the bottom (verb): move up and down the list
-                KeyHint { y: (parent.height - self.height) / 2; key: "J/K"; label: @tr("Move"); }
+                // i18n: publications panel, key hint beside J/K at the bottom (verb): move the selection up and down the list
+                KeyHint { y: (parent.height - self.height) / 2; key: "J/K"; label: @tr("verb" => "Move"); }
                 // i18n: publications panel, key hint beside Enter (verb): open the selected publication
                 KeyHint { y: (parent.height - self.height) / 2; key: "Enter"; label: @tr("Open"); clicked => { PublicationsBridge.activate(PublicationsBridge.selected); } }
                 // i18n: publications panel, key hint beside 0-7 (noun): the number keys pick which kind of publication to list

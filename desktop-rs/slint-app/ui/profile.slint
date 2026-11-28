@@ -468,7 +468,7 @@ export component AgentProfile inherits Modal {
                         HorizontalLayout {
                             spacing: 8px;
                             // i18n: agent profile, This chat section, row label (noun) beside a drop-down: how the agent's tool steps (commands, file reads) are shown in this chat
-                            Text { text: @tr("Tool activity"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
+                            Text { text: @tr("Tool activity"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 210 * Look.unit; wrap: word-wrap; vertical-alignment: center; }
                             ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.tool-activity-choices;
@@ -929,7 +929,7 @@ export component ProfileLayers inherits Rectangle {
         // i18n: agent profile, compact-context confirmation, explanation under the title: what compacting does
         message: @tr("Summarizes older messages.");
         // i18n: agent profile, compact-context confirmation, tooltip of the icon button that confirms (verb: compact the context)
-        yes-tip: @tr("Compact");
+        yes-tip: @tr("verb" => "Compact");
         accepted => { ProfileBridge.compact(); }
     }
     if ProfileBridge.confirm == "release": Confirm {
@@ -940,7 +940,7 @@ export component ProfileLayers inherits Rectangle {
         // i18n: agent profile, release-chat confirmation, explanation under the title: releasing keeps the chat's history and files
         message: @tr("History and files are kept.");
         // i18n: agent profile, release-chat confirmation, tooltip of the icon button that confirms (verb: release the chat)
-        yes-tip: @tr("Release");
+        yes-tip: @tr("verb" => "Release");
         accepted => { ProfileBridge.release(); }
     }
 }

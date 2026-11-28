@@ -78,7 +78,7 @@ export component Teams inherits Rectangle {
             Button {
                 text: root.grouped
                     // i18n: Teams page, header button showing the current layout of the team list: teams nested under their parent team (adjective); clicking switches to Flat
-                    ? @tr("Grouped")
+                    ? @tr("team layout" => "Grouped")
                     // i18n: Teams page, header button showing the current layout of the team list: all teams in one plain list (adjective); clicking switches to Grouped
                     : @tr("Flat");
                 // i18n: Teams page, accessibility label of the Grouped/Flat button (an action: switch between nested and flat team list)
@@ -362,12 +362,12 @@ export component TeamEditDialog inherits Modal {
         // i18n: Edit team dialog, accessibility label of the team colour field (noun)
         colour := Field { placeholder-text: "#8f96bc"; accessible-label: @tr("Color"); accepted => { root.save(name.text, colour.text, root.leader-index); } }
         // i18n: Edit team dialog, label above the picker of the team's leader (noun: the member agent who leads the team)
-        Text { text: @tr("Leader"); color: Palette.muted; font-size: 12 * Look.unit; }
+        Text { text: @tr("team" => "Leader"); color: Palette.muted; font-size: 12 * Look.unit; }
         ComboBox {
             model: root.leaders;
             current-index <=> root.leader-index;
             // i18n: Edit team dialog, accessibility label of the leader picker (noun)
-            accessible-label: @tr("Leader");
+            accessible-label: @tr("team" => "Leader");
         }
         Rectangle { vertical-stretch: 1; }
         HorizontalLayout {

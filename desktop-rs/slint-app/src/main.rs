@@ -57,6 +57,7 @@ mod agent_dialogs_view;
 mod launch_view;
 // ---- profile and overview
 mod artifacts_view;
+mod block_view;
 mod form_chart;
 mod form_view;
 mod form_server;
@@ -111,6 +112,7 @@ pub struct App {
     pub switcher: RefCell<SwitcherState>,
     /// The dialog over the window ("" for none).
     pub overlay: RefCell<String>,
+    auto_connection_page: std::cell::Cell<bool>,
     /// An agent the launch asked for, until the window starts it.
     pub launch: RefCell<Option<launch::Request>>,
     /// The artifact card the keyboard is on (J/K in the chat), "" for none.
@@ -525,9 +527,10 @@ impl App {
         let host_down_page = engine.host_down(engine.base_url()).is_some();
         let close_connection = overlay == "connection" && !window.get_choosing_host() &&
             if peer_dialog { changes.iter().any(|c| matches!(c, Change::PeerRepaired(url) if url == repair_target.as_str())) }
-            else { state == "live" && !empty && changes.contains(&Change::Roster) };
+            else { self.auto_connection_page.get() && state == "live" && !empty && changes.contains(&Change::Roster) };
         if overlay.is_empty() && empty && !host_down_page && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
             commands::open_overlay(self, &window, "connection");
+            self.auto_connection_page.set(true);
             window.invoke_open_connection_page();
         }
         window.set_muted(engine.muted());
@@ -858,6 +861,7 @@ fn main() {
         prefs: RefCell::new(prefs),
         switcher: RefCell::new(SwitcherState::default()),
         overlay: RefCell::new(String::new()),
+        auto_connection_page: std::cell::Cell::new(false),
         launch: RefCell::new(None),
         artifact_cursor: RefCell::new(String::new()),
         artifact_choices: RefCell::default(),
@@ -1270,6 +1274,7 @@ fn main() {
     }));
     window.on_team_action(|action, argument| with_window(|app, window| teams_view::action(app, window, &action, &argument)));
     artifacts_view::bind(&window);
+    block_view::bind(&window);
     form_view::bind(&window);
     window.on_team_created(|name| with_window(|app, window| teams_view::created(app, window, &name)));
     window.on_team_saved(|name, colour, leader| with_window(|app, window| teams_view::saved(app, window, &name, &colour, leader)));

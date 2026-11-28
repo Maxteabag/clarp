@@ -79,6 +79,8 @@ mod customize_checks;
 // ---- the chat's own zoom
 #[path = "zoom_checks.rs"]
 mod zoom_checks;
+#[path = "codeblock_checks.rs"]
+mod codeblock_checks;
 // ---- chats from all paired Hosts
 #[path = "all_hosts_checks.rs"]
 mod all_hosts_checks;
@@ -357,6 +359,7 @@ pub fn start_shot(path: String, session: String) {
     let started = Instant::now();
     let chosen = Cell::new(false);
     let command = Cell::new(std::env::var("CLARP_SHOT_COMMAND").ok().filter(|c| !c.is_empty()));
+    let expected_page = std::env::var("CLARP_SHOT_COMMAND").unwrap_or_default();
     let settled: Cell<Option<Instant>> = Cell::new(None);
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
         let Some(app) = crate::app() else { return };
@@ -380,7 +383,11 @@ pub fn start_shot(path: String, session: String) {
             return;
         }
         if let (Some(name), Some(window)) = (command.take(), crate::window()) {
-            check(crate::commands::run(&app, &window, &name), &format!("ran {name} before the shot"));
+            if name == "language-picker" {
+                crate::commands::open_picker(&app, &window, "language");
+            } else {
+                check(crate::commands::run(&app, &window, &name), &format!("ran {name} before the shot"));
+            }
             settled.set(Some(Instant::now()));
             return;
         }
@@ -388,6 +395,13 @@ pub fn start_shot(path: String, session: String) {
         settled.set(Some(since));
         if since.elapsed() < Duration::from_millis(600) {
             return;
+        }
+        if let Some(window) = crate::window() {
+            match expected_page.as_str() {
+                "connection" => check(window.get_overlay() == "connection", "connection page visible at capture"),
+                "language-picker" => check(window.get_switcher_open() && window.get_switcher_rows().row_count() >= 7, "language choices visible at capture"),
+                _ => {}
+            }
         }
         shot_to(&path);
         TIMER.with(|t| t.borrow_mut().take());
@@ -631,6 +645,7 @@ pub fn start_check(name: &str, out: String) {
         "layout-warning" => banner_checks::layout_warning_check(out),
         "themes" => theme_checks::themes_check(out),
         "narrow" => narrow_checks::narrow_check(out),
+        "codeblocks" => codeblock_checks::codeblocks_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
         "host-down" => host_down_checks::host_down_check(out),

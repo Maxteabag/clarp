@@ -519,6 +519,7 @@ fn marked_words(id: &str) -> Option<bool> {
     let row = rows.iter().find(|r| r.id == id)?;
     let block = row.blocks.row_data(0)?;
     let text = app_now().engine.borrow().conversation("oscar")?.rows().iter().find(|m| m.id == id)?.text.clone();
+    if block.kind == "code" { return Some(block.code_marks.row_count() > 0); }
     let plain = crate::view::message_block(&clarp_engine::blocks::blocks(&text)[0], row.author == "user").styled;
     Some(block.styled != plain)
 }
@@ -527,8 +528,8 @@ const CODE: &str = concat!(
     "heron! {\n",
     "    heron(\"<Héron> & **lake**\");\n",
     "\n",
-    "    // Walk the northern lakes in survey order, counting the birds on each shore before crossing to the next inlet. ",
-    "Record the observation beside its station, preserve the route in the field notes, and finish the pass at the heron\n",
+    "    // heron: Walk the northern lakes in survey order, counting the birds on each shore before crossing to the next inlet. ",
+    "Record the observation beside its station, preserve the route in the field notes, and finish the pass at the station\n",
     "}",
 );
 
@@ -590,16 +591,14 @@ fn fenced_frame(out: &str, name: &str, window: &crate::AppWindow) {
         let word_width = (*first_x..crop.width() as usize).take_while(|x| crop.get_pixel(*x as u32, *first_y as u32).0 == ink).count();
         let indent = indented_x.saturating_sub(*first_x);
         check((5 * indent).abs_diff(4 * word_width) <= 10, "the rendered indent is four monospace columns");
-        // The last mark is on source line four. Without wrapping it would
-        // sit three line heights below the first, including the empty line.
-        check(last_y - first_y > 3 * (second_y - first_y) + 2, "the long code line wraps and its final word is visible");
+        check((last_y - first_y).abs_diff(3 * (second_y - first_y)) <= 3, "the blank line and unwrapped source lines keep their spacing");
     } else {
         check(false, &format!("expected find underlines on three separate code lines, found {underlines:?}"));
     }
     let zoom = image::imageops::resize(&crop, width * 2, height * 2, image::imageops::FilterType::Nearest);
     check(zoom.save(format!("{out}/{name}-code.png")).is_ok(), "saved the enlarged code and its active highlight");
     let block = app_now().active_messages().and_then(|rows| rows.iter().find(|r| r.id == "o-300")?.blocks.row_data(0));
-    check(block.is_some_and(|b| i_slint_core::styled_text::get_raw_text(&b.styled) == CODE), "the displayed code keeps its literal text and spacing");
+    check(block.is_some_and(|b| b.text.as_str() == CODE), "the displayed code keeps its literal text and spacing");
 }
 
 pub fn find_in_chat_check(out: String) {

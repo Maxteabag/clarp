@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # A headless screenshot of the Slint app against the fake Host (no display,
 # private bus, scratch config): slint-app/tests/shot.sh OUT.png SESSION [THEME]
+# CLARP_FAKE_HOST_ARGS adds options to the fake Host ("--roster 12 --rich").
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 out=$(realpath -m "$1"); session=${2:-rachel}; theme=${3:-terminal}
@@ -9,10 +10,16 @@ trap 'kill "$host" 2>/dev/null; wait "$host" 2>/dev/null; rm -rf "$scratch"' EXI
 # The "microphone": a second of tone, never the user's device.
 /usr/bin/python3 -c "import math,struct,wave,sys; w=wave.open(sys.argv[1],'wb'); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(b''.join(struct.pack('<h',int(8000*math.sin(i/8))) for i in range(16000))); w.close()" "$scratch/voice.wav"
 mkdir -p "$scratch/home" && mkdir -m 700 "$scratch/run"
-/usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" &
+# shellcheck disable=SC2086 # the extra options are words
+/usr/bin/python3 tests/fake_host.py --port-file "$scratch/port" --log "$scratch/host.log" ${CLARP_FAKE_HOST_ARGS:-} &
 host=$!
 for _ in $(seq 50); do [ -s "$scratch/port" ] && break; sleep 0.1; done
-env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS=off \
+settings=off
+if [ "${CLARP_SHOT_NARROW_LIST:-}" = 1 ]; then
+    settings="$scratch/settings.json"
+    printf '%s\n' '{"layout/explorerWidth":240}' > "$settings"
+fi
+env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
     HOME="$scratch/home" XDG_RUNTIME_DIR="$scratch/run" \
     XDG_CONFIG_HOME="$scratch/c" XDG_CACHE_HOME="$scratch/k" XDG_DATA_HOME="$scratch/d" XDG_STATE_HOME="$scratch/s" \
     CLARP_AUDIO_OUTPUT=null CLARP_AUDIO_INPUT="file:$scratch/voice.wav" CLARP_KEYRING=off \

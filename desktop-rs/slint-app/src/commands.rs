@@ -1385,6 +1385,7 @@ fn apply_setting(app: &App, window: &AppWindow, action: &str) {
 // ---- dialogs -----------------------------------------------------------------
 
 pub fn open_overlay(app: &App, window: &AppWindow, name: &str) {
+    app.auto_connection_page.set(false);
     let previous = std::mem::replace(&mut *app.overlay.borrow_mut(), name.to_owned());
     if previous == "connection" && !window.get_repair_target().is_empty() {
         app.engine.borrow_mut().cancel_peer_repair(&window.get_repair_target());

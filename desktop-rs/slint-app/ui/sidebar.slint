@@ -1,4 +1,4 @@
-import { ListView } from "std-widgets.slint";
+import { ListView, ScrollView } from "std-widgets.slint";
 import { Field, Editor } from "fields.slint";
 import { Palette, Focus, FocusRing, Frame, PaneFrame, Look, ChatLook, ChromeText, RevealText, Motion } from "theme.slint";
 import { CompactWork, ProcessIndicator } from "processes.slint";
@@ -127,10 +127,13 @@ component Row inherits Rectangle {
     callback restore();
     // The avatar's line: room for the avatar size chosen.
     property <length> top-height: root.compact ? Math.max(40px, AvatarArt.compact + 8px) : Math.max(58px, AvatarArt.row + 16px);
+    // At narrow explorer widths give a busy duration its own full-width line.
+    property <bool> separate-stamp: !root.compact && root.chat.busy && root.width < 300px && root.chat.stamp != "";
+    property <length> stamp-line: separate-stamp ? stamp-footer.preferred-height + 4px : 0px;
     // Settings → Density pads it above and below.
     height: (root.compact
         ? root.top-height
-        : root.top-height + (root.chat.activity != "" ? 14px : 0px) + (root.chat.done-count > 0 ? 22px : 0px)) + 2 * Look.density-pad;
+        : root.top-height + (root.chat.activity != "" ? 14px : 0px) + (root.chat.done-count > 0 ? 22px : 0px)) + root.stamp-line + 2 * Look.density-pad;
     opacity: root.chat.archived ? 0.65 : 1;
     background: root.cursor ? Focus.cursor : root.chat.selected ? Palette.control : touch.has-hover ? Palette.hover : transparent;
     accessible-role: list-item;
@@ -140,7 +143,18 @@ component Row inherits Rectangle {
         ? @tr("{0} on {1}", root.chat.name, root.chat.host)
         : root.chat.name;
     touch := TouchArea { clicked => { root.clicked(); } }
+    stamp-footer := Text {
+        visible: root.separate-stamp;
+        x: 10px;
+        y: root.height - root.stamp-line;
+        width: root.width - 20px;
+        text: root.chat.stamp;
+        font-size: 11 * Look.unit;
+        color: Palette.faint;
+        overflow: elide;
+    }
     HorizontalLayout {
+        height: root.height - root.stamp-line;
         padding-left: 10px + root.chat.depth * 18px;
         padding-right: 10px;
         spacing: 10px;
@@ -271,7 +285,7 @@ component Row inherits Rectangle {
                         font-size: 11 * Look.unit;
                     }
                 }
-                if !root.compact: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
+                if !root.compact && !root.separate-stamp: Text { text: root.chat.stamp; color: Palette.faint; font-size: 11 * Look.unit; }
             }
             if !root.compact: HorizontalLayout {
                 spacing: 6px;
@@ -498,11 +512,12 @@ export component Sidebar inherits Rectangle {
         // Triage: Working, Needs you and Done split the fleet by where each
         // chat stands; Snoozed lists the chats put off (triage.rs). A row
         // wider than the explorer scrolls sideways.
-        if !root.minimal: scopes := Flickable {
+        if !root.minimal: scopes := ScrollView {
             vertical-stretch: 0;
-            height: 24px;
-            content-width: Math.max(self.width, chips.preferred-width + 20px);
-            content-height: self.height;
+            height: chips.preferred-width + 20px > self.width ? 40px : 24px;
+            vertical-scrollbar-policy: always-off;
+            content-width: Math.max(self.visible-width, chips.preferred-width + 20px);
+            content-height: 24px;
             accessible-role: AccessibleRole.list;
             accessible-id: "explorer-scopes";
             chips := HorizontalLayout {
