@@ -494,9 +494,8 @@ pub fn store_of(id: &str) -> Option<&'static str> {
     by_id(id).map(|backend| backend.runs_through().unwrap_or(backend.id()))
 }
 
-/// Whether a move between two backends keeps the tool's own conversation and carries nothing:
-/// only between `agy` and `agy-acp`, one program with one store. Other cards that run through
-/// one program (`deepseek` through `opencode`) move as any two tools do, with the Host's record.
+/// The retirement of a legacy Antigravity agent keeps the native conversation
+/// when ACP uses the same profile. Across profiles, Transit carries the Host's record.
 pub fn same_store(from: &str, to: &str) -> bool {
     matches!((from, to), (LEGACY_AGY, agy_acp::ID)) && clarp_acp::agy::profile().is_none()
 }

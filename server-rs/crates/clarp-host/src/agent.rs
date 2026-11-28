@@ -3372,6 +3372,22 @@ impl Worker {
             let _ = answer.send(Err(unavailable(&why)));
             return Ok(());
         }
+        if actor.backend_id() != change.from {
+            let refused = crate::agent_transit::Refused::Failed {
+                stage: "switching",
+                why: "the agent already changed backend".into(),
+            };
+            let _ = answer.send(Ok(Err(refused)));
+            return Ok(());
+        }
+        let current = change.preserve_selection.then(|| {
+            let mut current = change.clone();
+            current.model.clone_from(&self.setup.record.model);
+            current.effort.clone_from(&self.setup.record.effort);
+            current.shown_as.1 = non_empty(&current.model).unwrap_or_else(|| "default".into());
+            current
+        });
+        let change = current.as_ref().unwrap_or(change);
         let Some(backend) = clarp_backend::by_id(&change.backend) else {
             let refused = crate::agent_transit::Refused::Failed {
                 stage: "switch",
