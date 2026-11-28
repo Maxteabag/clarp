@@ -486,8 +486,30 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             {"name":"film-fork","task":"fixture","cwd":unrelated}
         ]}),
     );
-    for (index, backend) in ["claude", "codex", "claude"].iter().enumerate() {
-        assert_eq!(forked["children"][index]["backend"], *backend, "{forked}");
+    let roster = host.get("/agents/snapshot");
+    for (index, (backend, model)) in [
+        ("claude", Some("claude-opus-5-5")),
+        ("codex", Some("gpt-6.2-astra")),
+        ("claude", None),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let child = &forked["children"][index];
+        assert_eq!(child["backend"], backend, "{forked}");
+        let row = roster["agents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["session"] == child["session"])
+            .unwrap();
+        assert_eq!(row["backend"], backend);
+        if let Some(model) = model {
+            assert_eq!(row["model"], model);
+        }
+        if index == 1 {
+            assert_eq!(row["effort"], "medium");
+        }
     }
     // The restart rig creates a top-level agent for the backend under test.
     // The soak later starts that same agent again in place using its backend.
@@ -504,12 +526,13 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             "/agents",
             json!({"name":session,"replace_sid":session,"backend":backend}),
         );
-        for result in [&made, &again] {
-            assert_eq!(result["agent"]["backend"], backend, "{result}");
-            assert_ne!(result["agent"]["model"], selection["model"], "{result}");
-            assert_ne!(result["agent"]["effort"], selection["effort"], "{result}");
+        assert_eq!(made["agent"]["backend"], backend);
+        for field in ["agent_id", "backend", "model", "effort"] {
+            assert_eq!(
+                again["agent"][field], made["agent"][field],
+                "{session} {field}"
+            );
         }
-        assert_eq!(made["agent"]["agent_id"], again["agent"]["agent_id"]);
         assert!(
             host.get(&format!("/agent-helper-state?session={session}"))["helper_defaults"]
                 .is_null()
@@ -523,13 +546,18 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     );
     assert_ne!(fixture["agent"]["model"], selection["model"]);
     assert!(host.get("/agent-helper-state?session=rig")["helper_defaults"].is_null());
-    for (name, parent) in [("child", "lead"), ("nested", "child"), ("control", "other")] {
+    for (name, parent) in [
+        ("child", "lead"),
+        ("nested", "child"),
+        ("control", "other"),
+        ("rig-child", "rig"),
+    ] {
         let made = host.post(
             "/agents",
             json!({"name":name,"role":"helper","parent":parent,"cwd":unrelated}),
         );
         let row = &made["agent"];
-        if name == "control" {
+        if name == "control" || name == "rig-child" {
             assert_eq!(row["backend"], "claude", "{made}");
         } else {
             for key in ["backend", "model", "effort"] {
