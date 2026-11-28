@@ -82,10 +82,11 @@ An app that does not know the feature keeps showing `text` as today.
 | `provider_down` | the model's provider is unavailable | error | retry, switch_model, copy_details |
 | `invalid_request` | the provider rejected the request as malformed (bad tool or call ids, an empty tool result, invalid payload, 400). Trying the same session again replays the same history, so the first action starts a fresh one | error | fresh_retry, switch_model, copy_details |
 | `refused` | the model refused (a safety filter blocked the answer) | warning | switch_model, copy_details |
-| `prompt_too_long` | the conversation no longer fits the model | warning | compact_retry, switch_model |
+| `prompt_too_long` | the conversation no longer fits the model | warning | compact_retry on Claude, fresh_retry elsewhere; switch_model |
 | `timeout` | the backend stopped responding | error | retry, copy_details |
 | `runner_exit` | the backend's process ended unexpectedly | error | retry, copy_details |
 | `ended_from_outside` | a signal from outside the Host ended the turn | info | retry |
+| `interrupted` | the turn was cut off before it finished (a restart, a process that went without a word) | info | retry |
 | `not_started` | the Host could not start the turn | error | retry, copy_details |
 | `folder_missing` | the agent's folder is gone | error | copy_details |
 | `provider_mismatch` | the agent ran on another provider than it is bound to | error | copy_details |
@@ -99,7 +100,7 @@ An app that does not know the feature keeps showing `text` as today.
 |---|---|
 | `retry` | `POST /turn-retry {"session", "message_id"}`: the Host sends the same message again (text and attachments) as a new turn. |
 | `retry_at` | `POST /turn-retry {"session", "message_id", "at_ms"}`: the Host sends it again at that time. The card then reads the label's time as scheduled. |
-| `fresh_retry` | `POST /turn-retry {"session", "message_id", "fresh": true}`: the Host writes the conversation into a new session of the same backend and model (the way a backend change carries it), then sends the message again. For a session whose history the provider rejects. |
+| `fresh_retry` | `POST /turn-retry {"session", "message_id", "fresh": true}`. The turn after one whose history the provider rejected (`invalid_request`), or one too long on a tool that cannot compact (`prompt_too_long` off Claude), begins a new session by itself that opens with the Host's record of the conversation, so this is a try again whose turn is fresh. Any new message of the user's is fresh the same way. |
 | `compact_retry` | `POST /turn-retry {"session", "message_id", "compact": true}`: the Host compacts the conversation, then sends the message again. |
 | `switch_model` | Open the app's model/backend picker for this agent. |
 | `sign_in` | Open the app's sign-in for `backend` (the action carries `"backend"`). Leave it out if the app has none. |
@@ -119,3 +120,18 @@ when the message is not in the agent's conversation, 409 when it has a newer ans
   the network or an account show on the working line ("Reconnecting", "Waiting for an account
   until 18:27"), never as a card.
 - A Stop is not an error: it stays the quiet "Stopped." line.
+- `retry_at` whose `at_ms` has passed is drawn as `retry` ("Try again"), since the window has
+  reset; a card cached since then must not offer a time in the past.
+
+## What the Host recovers from by itself
+
+- A dropped connection or a timeout: tried again after 2, 4, 8, 16 and 30 s; with the network
+  gone, it waits up to 15 minutes for it.
+- A provider that is overloaded or rate limited: tried again after 30 and 60 s.
+- A usage limit or an expired sign-in, where the Host is set to choose accounts: another account
+  takes the turn.
+- A session held by another process (`session_locked`): tried twice more, 5 and 10 s later.
+- A session whose history the provider rejected (`invalid_request`): the next turn opens a fresh
+  session with the Host's record of the conversation.
+
+Only when these are used up does the user see a card.
