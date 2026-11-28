@@ -1,4 +1,12 @@
 {
   "settings.language.title": "Language",
-  "settings.language.system": "System"
+  "settings.language.system": "System",
+  "chat.code.copy": "Copy code",
+  "chat.table.copy": "Copy table",
+  "chat.copied": "Copied",
+  "chat.table.expand": "Full screen",
+  "viewer.close": "Close",
+  "viewer.wrap": "Wrap lines",
+  "viewer.code": "Code",
+  "viewer.table": "Table"
 }

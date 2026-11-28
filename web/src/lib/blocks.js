@@ -12,18 +12,22 @@
 
 import { escapeAttr, escapeHTML } from '@core/html.js';
 import { openBlockViewer } from './block-viewer.svelte.js';
+import { t } from '../stores/i18n.svelte.js';
 
-// User-visible and accessibility strings of this feature, in one place.
-export const STRINGS = {
-  copyCode: 'Copy code',
-  copyTable: 'Copy table',
-  copied: 'Copied',
-  expandTable: 'Full screen',
-  close: 'Close',
-  wrap: 'Wrap lines',
-  codeViewer: 'Code',
-  tableViewer: 'Table',
+// User-visible and accessibility strings of this feature, read from the
+// language catalog (lib/i18n/en.json) each time they are shown.
+const KEYS = {
+  copyCode: 'chat.code.copy',
+  copyTable: 'chat.table.copy',
+  copied: 'chat.copied',
+  expandTable: 'chat.table.expand',
+  close: 'viewer.close',
+  wrap: 'viewer.wrap',
+  codeViewer: 'viewer.code',
+  tableViewer: 'viewer.table',
 };
+export const STRINGS = Object.defineProperties({}, Object.fromEntries(
+  Object.entries(KEYS).map(([name, key]) => [name, { get: () => t(key), enumerable: true }])));
 
 const svg = (body) =>
   `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ` +
@@ -49,7 +53,7 @@ export function codeBlockHtml(code, info) {
   return `<div class="code-block">` +
     `<div class="blk-head">` +
     (lang ? `<span class="blk-lang">${escapeHTML(lang)}</span>` : '<span></span>') +
-    `<button type="button" class="blk-btn blk-copy" aria-label="${STRINGS.copyCode}" title="${STRINGS.copyCode}">${ICONS.copy}</button>` +
+    `<button type="button" class="blk-btn blk-copy" aria-label="${escapeAttr(STRINGS.copyCode)}" title="${escapeAttr(STRINGS.copyCode)}">${ICONS.copy}</button>` +
     `</div>` +
     `<pre><code${cls}>${escapeHTML(String(code).replace(/\n$/, ''))}</code></pre>` +
     `</div>`;
@@ -59,7 +63,7 @@ export function codeBlockHtml(code, info) {
 export function tableBlockHtml(tableHtml, md) {
   return `<div class="table-block" data-md="${escapeAttr(String(md || '').trim())}">` +
     `<div class="blk-head"><span></span>` +
-    `<button type="button" class="blk-btn blk-expand" aria-label="${STRINGS.expandTable}" title="${STRINGS.expandTable}">${ICONS.expand}</button>` +
+    `<button type="button" class="blk-btn blk-expand" aria-label="${escapeAttr(STRINGS.expandTable)}" title="${escapeAttr(STRINGS.expandTable)}">${ICONS.expand}</button>` +
     `</div>` +
     `<div class="table-wrap">${tableHtml}</div>` +
     `</div>`;

@@ -1,4 +1,12 @@
 {
   "settings.language.title": "Settings: label of the Language picker.",
-  "settings.language.system": "Settings > Language: the first option, follow the device's language."
+  "settings.language.system": "Settings > Language: the first option, follow the device's language.",
+  "chat.code.copy": "Chat: icon button above a code block that copies the code.",
+  "chat.table.copy": "Full screen table: icon button that copies the table as Markdown text.",
+  "chat.copied": "Chat: label the copy icon takes for a moment after copying (shown as a checkmark).",
+  "chat.table.expand": "Chat: icon button above a wide table that opens it full screen.",
+  "viewer.close": "Full screen code or table view: icon button that closes it.",
+  "viewer.wrap": "Full screen code view: toggle icon, long lines wrap or scroll sideways.",
+  "viewer.code": "Full screen code view: its name for screen readers when the code names no language.",
+  "viewer.table": "Full screen table view: its name for screen readers."
 }
