@@ -5,51 +5,7 @@
 
 use super::*;
 
-/// A Claude Code stand-in, as `queue_steer.rs` has it: its turn on "work" takes nothing on its
-/// input until the file `go` exists, then reads one more message, says it read it, and answers
-/// both. Anything else is answered at once.
-const CLAUDE: &str = r#"#!/usr/bin/env python3
-import json, pathlib, sys, time
-
-if "--version" in sys.argv:
-    print("2.1.321 (Claude Code)")
-    raise SystemExit(0)
-
-root = pathlib.Path(__file__).resolve().parent
-flag = "--resume" if "--resume" in sys.argv else "--session-id"
-session = sys.argv[sys.argv.index(flag) + 1]
-
-def say(kind, **fields):
-    print(json.dumps({"type": kind, "session_id": session, **fields}), flush=True)
-
-def prompt():
-    record = json.loads(sys.stdin.readline())
-    return record["uuid"], record["message"]["content"][0]["text"]
-
-def answer(text, *uids):
-    say("assistant", message={"id": "msg_" + uids[-1], "role": "assistant",
-        "content": [{"type": "text", "text": text}]})
-    say("result", subtype="success", is_error=False, result=text, user_message_uuids=list(uids))
-
-uid, text = prompt()
-if "work" not in text:
-    say("system", subtype="init")
-    say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
-    answer("answered: " + text.strip().splitlines()[-1], uid)
-    raise SystemExit(0)
-print("warming up", file=sys.stderr, flush=True)
-(root / "started").touch()
-while not (root / "go").exists():
-    time.sleep(0.05)
-say("system", subtype="init")
-say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
-say("assistant", message={"id": "msg_work", "role": "assistant",
-    "content": [{"type": "text", "text": "working"}]})
-(root / "working").touch()
-steered, words = prompt()
-say("user", isReplay=True, uuid=steered, message={"role": "user", "content": []})
-answer("answered both", uid, steered)
-"#;
+use super::queue_steer::CLAUDE;
 
 fn rows_saying(host: &Host, session: &str, role: &str, text: &str) -> usize {
     host.turns(session)
@@ -74,7 +30,7 @@ fn send_while_busy(host: &Host, session: &str, text: &str, id: &str, mode: &str)
 }
 
 /// Claude Code's stand-in, on a Host of its own, with one agent of it.
-fn claude_place(name: &str) -> (Place, Host, String) {
+pub(super) fn claude_place(name: &str) -> (Place, Host, String) {
     let place = Place::new(name);
     let claude = place.root.join("claude");
     program(&claude, CLAUDE);

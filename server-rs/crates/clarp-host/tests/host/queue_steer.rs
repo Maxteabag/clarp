@@ -9,8 +9,8 @@ use super::*;
 /// on its input, says it read it, and answers both. Anything else is answered at once. While it
 /// waits it has printed a line on its stderr, so its turn is not a quiet one a waiting message takes over in
 /// the tool's own way (`Actor::takeover_quiet`): the message waits until it is steered.
-const CLAUDE: &str = r#"#!/usr/bin/env python3
-import json, pathlib, sys, time
+pub(super) const CLAUDE: &str = r#"#!/usr/bin/env python3
+import json, pathlib, select, sys, time
 
 if "--version" in sys.argv:
     print("2.1.321 (Claude Code)")
@@ -46,8 +46,12 @@ say("system", subtype="init")
 say("user", isReplay=True, uuid=uid, message={"role": "user", "content": []})
 say("assistant", message={"id": "msg_work", "role": "assistant",
     "content": [{"type": "text", "text": "working"}]})
-(root / "working").touch()
+(root / "working").write_text(text)
+while not select.select([sys.stdin], [], [], 0.05)[0]:
+    if (root / "probe").exists():
+        (root / "still-waiting").touch()
 steered, words = prompt()
+(root / "read-words").write_text(words)
 say("user", isReplay=True, uuid=steered, message={"role": "user", "content": []})
 answer("answered both", uid, steered)
 "#;
@@ -143,6 +147,12 @@ fn only_the_owners_waiting_message_takes_over() {
         json!({ "session": session, "text": "scheduled", "client_msg_id": "sched",
                 "origin": "schedule", "queue_if_busy": true }),
     );
+    let guard = json!({"expected_turn":{"server_id":"foreign","agent_id":"foreign","turn_id":1}});
+    for action in ["take-over", "steer"] {
+        let (status, refused) =
+            host.ask("POST", &format!("/turn-queue/sched/{action}"), Some(&guard));
+        assert_eq!((status, &refused["code"]), (409, &json!("not_the_owners")));
+    }
     let (status, refused) = host.ask("POST", "/turn-queue/sched/take-over", None);
     assert_eq!(
         (status, &refused["code"]),
@@ -227,4 +237,144 @@ fn a_waiting_message_is_read_into_the_running_turn_once_it_can_take_it() {
     });
     wait_for("the agent at rest", || host.state(&session) == "done");
     assert_eq!(steerable(&host, &session).0, false, "no turn runs");
+}
+
+#[test]
+fn queue_actions_bind_to_the_displayed_journal_turn_across_replacement() {
+    let (place, host, session) = super::send_while_busy::claude_place("queue-action-binding");
+    let session = session.as_str();
+    assert_eq!(
+        host.get("/server-info")["contract"]["features"]["queue_action_expected_turn"],
+        221
+    );
+    let live =
+        || host.get(&format!("/live?session={session}"))["turn"]["queue_action_binding"].clone();
+    let queue = || host.get(&format!("/turn-queue?session={session}"));
+    host.send(session, "work A", "a");
+    wait_for("A warming up", || place.root.join("started").exists());
+    let a = live();
+    assert!(
+        a["turn_id"].is_u64() && a["server_id"].is_string() && a["agent_id"].is_string(),
+        "{a}"
+    );
+    let other = host.new_agent("Other");
+    host.send(&other, "sleep 60", "another-first-turn");
+    wait_for("the other agent working", || {
+        host.state(&other) == "thinking"
+    });
+    let other_binding =
+        host.get(&format!("/live?session={other}"))["turn"]["queue_action_binding"].clone();
+    assert_eq!(a["turn_id"], other_binding["turn_id"]);
+    assert_ne!(a["agent_id"], other_binding["agent_id"]);
+    for (id, words) in [
+        ("older", "older words"),
+        ("q", "selected words"),
+        ("b", "work B"),
+    ] {
+        assert_eq!(host.send(session, words, id)["queued"], true);
+    }
+    for action in ["steer", "take-over"] {
+        let before = queue();
+        for bad in [
+            Value::Null,
+            json!(false),
+            json!({}),
+            json!(["host", "agent", 1]),
+            json!({"server_id":"x","agent_id":"y","turn_id":"1"}),
+        ] {
+            assert_eq!(
+                host.ask(
+                    "POST",
+                    &format!("/turn-queue/q/{action}"),
+                    Some(&json!({"expected_turn":bad}))
+                )
+                .0,
+                400
+            );
+        }
+        let mut other_host = a.clone();
+        other_host["server_id"] = json!("somewhere-else");
+        for wrong in [&other_binding, &other_host] {
+            let (status, refused) = host.ask(
+                "POST",
+                &format!("/turn-queue/q/{action}"),
+                Some(&json!({"expected_turn":wrong})),
+            );
+            assert_eq!((status, &refused["code"]), (409, &json!("stale_turn")));
+        }
+        assert_eq!(queue(), before);
+    }
+    let (status, taken) = host.ask(
+        "POST",
+        "/turn-queue/b/take-over",
+        Some(&json!({"expected_turn":a})),
+    );
+    assert_eq!(status, 202, "{taken}");
+    std::fs::write(place.root.join("go"), "").unwrap();
+    wait_for("B ready for a steer", || {
+        std::fs::read_to_string(place.root.join("working"))
+            .is_ok_and(|words| words.contains("work B"))
+            && live()["turn_id"].is_u64()
+            && live() != a
+            && queue()["steerable"] == true
+    });
+    let b = live();
+    assert_eq!(b["agent_id"], a["agent_id"]);
+    assert_ne!(b["turn_id"], a["turn_id"]);
+    let before = queue();
+    let ids: Vec<_> = before["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| &item["id"])
+        .collect();
+    assert_eq!(ids, vec![&json!("older"), &json!("q")]);
+    for action in ["steer", "take-over"] {
+        let (status, refused) = host.ask(
+            "POST",
+            &format!("/turn-queue/q/{action}"),
+            Some(&json!({"expected_turn":a})),
+        );
+        assert_eq!(
+            (status, &refused["code"]),
+            (409, &json!("stale_turn")),
+            "{refused}"
+        );
+        assert_eq!(queue(), before);
+        assert_eq!(live(), b);
+    }
+    std::fs::write(place.root.join("probe"), "").unwrap();
+    wait_for("B's provider still waiting for its first input", || {
+        place.root.join("still-waiting").exists()
+    });
+    assert!(!place.root.join("read-words").exists());
+    assert_eq!(host.ask("DELETE", "/turn-queue/older", None).0, 200);
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/turn-queue/q/steer",
+            Some(&json!({"expected_turn":b}))
+        )
+        .0,
+        202
+    );
+    wait_for("the selected answer", || {
+        rows_saying(&host, session, "assistant", "answered both") == 1
+    });
+    assert_eq!(rows_saying(&host, session, "user", "selected words"), 1);
+    assert!(
+        std::fs::read_to_string(place.root.join("read-words"))
+            .unwrap()
+            .contains("selected words")
+    );
+    wait_for("the binding cleared at turn end", || live().is_null());
+    assert_eq!(
+        host.ask(
+            "POST",
+            "/turn-queue/q/steer",
+            Some(&json!({"expected_turn":b}))
+        )
+        .0,
+        404
+    );
 }

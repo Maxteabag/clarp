@@ -500,6 +500,8 @@ pub enum ByHand {
 /// What became of a waiting message its user had take over the running turn (issue 867).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TakenOver {
+    /// The displayed turn has ended or belongs elsewhere.
+    StaleTurn,
     /// The running turn was told to stop for it, and it runs next.
     Done,
     /// It does not wait: it ran, was taken back, never was, or is being read into the turn.
@@ -515,6 +517,8 @@ pub enum TakenOver {
 /// What became of a waiting message its user had read into the running turn (issue 867).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Steered {
+    /// The displayed turn has ended or belongs elsewhere.
+    StaleTurn,
     /// It is given to the running turn's tool now, after the user's older waiting words.
     Done,
     /// It does not wait: it ran, was taken back, never was, or is being read in already.
@@ -2020,8 +2024,17 @@ impl Actor {
             return whole;
         }
         match self.shown.snapshot(now_ms) {
-            Some((snapshot, events)) => {
+            Some((mut snapshot, events)) => {
                 self.shown_events.extend(events);
+                if let Some((turn, _)) = self.shown_turn.as_ref()
+                    && self.live_turn() == Some(*turn)
+                    && self.shown.has_open_turn()
+                {
+                    snapshot["turn"]["queue_action_binding"] = serde_json::json!({
+                        "agent_id": self.profile.agent_id,
+                        "turn_id": turn.0,
+                    });
+                }
                 snapshot
             }
             None => {

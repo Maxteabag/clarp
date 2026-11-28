@@ -51,7 +51,7 @@ use serde_json::{Value, json};
 use tokio::sync::broadcast::error::RecvError;
 
 use crate::VERSION;
-use crate::agent::Unavailable;
+use crate::agent::{ExpectedTurn, Unavailable};
 use crate::config::Config;
 use crate::fleet::{AgentRecord, Directory, FleetHandle, Member, NotMade};
 use crate::hub::{Hub, Published};
@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 220;
+pub const HOST_CONTRACT: u64 = 221;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -111,6 +111,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("turn_error_explained", 220),
     // `POST /turn-retry`: the message of a failed turn sent again, now, at a time, or after
     // the conversation was made shorter.
+    ("queue_action_expected_turn", 221),
     ("turn_retry", 220),
     ("artifact_summary_v1", 73),
     // `GET /agents/snapshot` and `GET /artifacts` carry a weak `ETag` per caller, and
@@ -4922,6 +4923,9 @@ async fn shown(
         .anyone(session.trim())
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown session"))?;
     let mut whole = member.agent.shown().await?;
+    if let Some(binding) = whole.pointer_mut("/turn/queue_action_binding") {
+        binding["server_id"] = json!(app.server_id);
+    }
     whole["tool_explanations"] = apps::explanations_told(&app);
     Ok(Json(whole))
 }
@@ -5140,6 +5144,76 @@ fn not_the_owners() -> ApiError {
     )
 }
 
+/// A supplied guard must be a complete object. In particular, JSON null is not omission.
+fn expected_queue_turn(
+    body: &[u8],
+    app: &App,
+    member: &Member,
+    waiting: &clarp_actor::Waiting,
+) -> Result<ExpectedTurn, ApiError> {
+    use std::num::NonZeroU64;
+    #[derive(Deserialize)]
+    struct Binding {
+        server_id: String,
+        agent_id: String,
+        turn_id: NonZeroU64,
+    }
+    #[derive(Deserialize)]
+    struct Request {
+        #[serde(default, deserialize_with = "supplied")]
+        expected_turn: Option<Binding>,
+    }
+    fn supplied<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Binding>, D::Error> {
+        struct Object;
+        impl<'de> serde::de::Visitor<'de> for Object {
+            type Value = Binding;
+
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a queue action binding object")
+            }
+
+            fn visit_map<M: serde::de::MapAccess<'de>>(self, map: M) -> Result<Binding, M::Error> {
+                Binding::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+            }
+        }
+        d.deserialize_map(Object).map(Some)
+    }
+
+    if body.is_empty() {
+        return Ok(ExpectedTurn::Omitted);
+    }
+    let invalid = || ApiError::new(StatusCode::BAD_REQUEST, "invalid expected_turn");
+    if body.iter().find(|b| !b.is_ascii_whitespace()) != Some(&b'{') {
+        return Err(invalid());
+    }
+    let request: Request = serde_json::from_slice(body).map_err(|_| invalid())?;
+    let Some(binding) = request.expected_turn else {
+        return Ok(ExpectedTurn::Omitted);
+    };
+    if binding.agent_id.trim().is_empty() || binding.server_id.trim().is_empty() {
+        return Err(invalid());
+    }
+    // Origin belongs to the immutable journal entry addressed by waiting.turn.
+    if !waiting.origin.is_user_send() {
+        return Err(not_the_owners());
+    }
+    Ok(
+        if binding.server_id == app.server_id && binding.agent_id == member.record.agent_id {
+            ExpectedTurn::Here(clarp_kernel::turn::TurnId(binding.turn_id.get()))
+        } else {
+            ExpectedTurn::OtherScope
+        },
+    )
+}
+
+fn stale_turn() -> ApiError {
+    queue_refusal(
+        StatusCode::CONFLICT,
+        "stale_turn",
+        "the displayed turn is no longer running",
+    )
+}
+
 /// `POST /turn-queue/<id>/steer`: its user has one waiting message of theirs read into the
 /// running turn now (issue 867), as a send of it would be: the user's older waiting messages
 /// go in first, oldest first. Its `/log` row then carries `read_into` with `at: steer`. Where
@@ -5150,12 +5224,15 @@ async fn steer_waiting(
     Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting_coded());
     };
-    match member.agent.steer(waiting.turn).await? {
+    let expected = expected_queue_turn(&body, &app, &member, &waiting)?;
+    match member.agent.steer(waiting.turn, expected).await? {
+        Steered::StaleTurn => Err(stale_turn()),
         Steered::Done => {
             let answer = json!({
                 "ok": true,
@@ -5190,12 +5267,19 @@ async fn take_over(
     Extension(principal): Extension<Principal>,
     headers: HeaderMap,
     Path(id): Path<String>,
+    body: axum::body::Bytes,
 ) -> Result<Response, ApiError> {
     let by = crate::controls::MutationCaller::from_request(&app, &principal, &headers).await?;
     let Some((member, waiting)) = waiting_named(&app, &id, &by).await? else {
         return Err(not_waiting_coded());
     };
-    match member.agent.take_over(waiting.turn, by.actor).await? {
+    let expected = expected_queue_turn(&body, &app, &member, &waiting)?;
+    match member
+        .agent
+        .take_over(waiting.turn, by.actor, expected)
+        .await?
+    {
+        TakenOver::StaleTurn => Err(stale_turn()),
         TakenOver::Done => {
             let answer = json!({
                 "ok": true,
