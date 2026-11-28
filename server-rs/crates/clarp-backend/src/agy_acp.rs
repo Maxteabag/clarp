@@ -222,11 +222,7 @@ impl Backend for AgyAcp {
     }
 
     fn answered(&self, printed: &str) -> Result<String, String> {
-        let answer = printed
-            .lines()
-            .rev()
-            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-            .find(|line| line["type"] == "result")
+        let answer = question_result(printed)
             .ok_or_else(|| "Antigravity ACP returned no result".to_string())?;
         let text = text_of(&answer["result"]).trim();
         if answer["is_error"] == true {
@@ -257,6 +253,21 @@ impl Backend for AgyAcp {
     fn own_home(&self) -> Option<OwnHome> {
         Some(agy::OWN_HOME)
     }
+}
+
+fn question_result(printed: &str) -> Option<Value> {
+    printed
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+        .find(|line| line["type"] == "result")
+}
+
+/// The provider's words when an ACP one-off process exits unsuccessfully.
+pub fn question_failure(printed: &str) -> Option<String> {
+    let result = question_result(printed)?;
+    let text = text_of(&result["result"]).trim();
+    (result["is_error"] == true && !text.is_empty()).then(|| text.to_string())
 }
 
 impl AgyAcp {

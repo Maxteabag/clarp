@@ -15117,6 +15117,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
     );
     let error = newest["error"].as_str().unwrap_or_default();
     assert!(error.contains("out of quota"), "{newest}");
+    assert!(!error.contains("workspace discovery warning"), "{newest}");
 }
 
 #[test]
