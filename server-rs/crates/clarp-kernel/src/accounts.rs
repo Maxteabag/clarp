@@ -802,6 +802,11 @@ impl Pool {
         if self.pass.is_some() || self.parked_now().is_empty() {
             return Vec::new();
         }
+        // A retry on the same login already contradicted the last qualification.
+        // Another positive quota reading of that login cannot cancel relapse backoff.
+        if !switched && self.relapses > 0 && now < self.next_check_ms {
+            return Vec::new();
+        }
         self.next_check_ms = now;
         self.fired(Timer::Recovery, now)
     }
@@ -1456,6 +1461,29 @@ mod tests {
         assert!(effects.contains(&Effect::End { agent: "c".into() }));
         assert!(!effects.contains(&resume("c")) && !effects.contains(&resume("d")));
         assert!(pool.recheck_available(true, 9).is_empty());
+    }
+
+    #[test]
+    fn a_resumed_turn_refused_again_waits_for_requalification() {
+        let mut pool = Pool::new();
+        pool.carry_turn(starting("a", "1"), 0, false, None, 1);
+        let asking = pool.fired(Timer::Recovery, 2);
+        assert_eq!(pool.answered(Verdict::All, 3), [resume("a")]);
+        assert!(!pool.register(starting("a", "1"), 4).0);
+        assert!(pool.request("a", "1", true, false, 5).0);
+        pool.fired(Timer::Recovery, 5);
+        pool.stopped("a", 6);
+        assert!(pool.recheck_available(false, 7).is_empty());
+        assert_eq!(pool.recheck_available(true, 8), asking);
+        let again = pool.answered(Verdict::All, 9);
+        assert_eq!(
+            again,
+            [Effect::Resume {
+                agent: "a".into(),
+                relapsed: true
+            }]
+        );
+        assert!(pool.answered(Verdict::All, 10).is_empty());
     }
 
     #[test]
