@@ -36,8 +36,16 @@ export component Switcher inherits Rectangle {
     property <string> on-text: @tr("On");
     // i18n: quick switcher, value pill on a row: this is the one in use now (adjective)
     property <string> current-text: @tr("Current");
-    // Under the results: what message search searched.
+    // Under the results: a short note (a Host still indexing).
     in property <string> note;
+    // The search page's tabs: what All, Chats and Messages count (numbers
+    // formatted for the language in use), whether
+    // more messages can be loaded (their count then reads "20+"), and the
+    // one shown.
+    in property <[string]> tabs;
+    in property <bool> tabs-more;
+    in property <int> tab;
+    callback tab-chosen(int);
     out property <string> query: search.text;
     property <length> row-height: 46px;
     callback edited(string);
@@ -119,7 +127,46 @@ export component Switcher inherits Rectangle {
                     placeholder-text: root.placeholder;
                     edited(text) => { root.edited(text); }
                 }
-                if root.rows.length == 0: Text {
+                if root.tabs.length > 0: HorizontalLayout {
+                    height: 28px;
+                    spacing: 4px;
+                    alignment: start;
+                    for count[index] in root.tabs: Rectangle {
+                        property <bool> more: root.tabs-more && index != 1;
+                        // i18n: search page, the All tab; {0} is how many chats and messages match (a number)
+                        property <string> all: @tr("search.tab.all" => "All {0}", count);
+                        // i18n: search page, the All tab while more messages can be loaded; {0} is how many match so far (reads "20+")
+                        property <string> all-more: @tr("search.tab.all_more" => "All {0}+", count);
+                        // i18n: search page, the Chats tab (chats whose name matches); {0} is how many
+                        property <string> chats: @tr("search.tab.chats" => "Chats {0}", count);
+                        // i18n: search page, the Messages tab (messages holding the words); {0} is how many
+                        property <string> messages: @tr("search.tab.messages" => "Messages {0}", count);
+                        // i18n: search page, the Messages tab while more can be loaded; {0} is how many so far (reads "20+")
+                        property <string> messages-more: @tr("search.tab.messages_more" => "Messages {0}+", count);
+                        property <string> label: index == 0 ? (self.more ? self.all-more : self.all) : index == 1 ? self.chats : (self.more ? self.messages-more : self.messages);
+                        width: tab-text.preferred-width + 20px;
+                        border-radius: 3px;
+                        background: index == root.tab ? Palette.control : tab-touch.has-hover ? Palette.hover : transparent;
+                        accessible-role: AccessibleRole.tab;
+                        accessible-id: "search-tab:" + index;
+                        accessible-label: self.label;
+                        accessible-action-default => { root.tab-chosen(index); }
+                        tab-text := Text {
+                            text: parent.label;
+                            color: index == root.tab ? Palette.text : Palette.muted;
+                            font-size: 12 * Look.unit;
+                            font-weight: index == root.tab ? 700 : 400;
+                            vertical-alignment: center;
+                        }
+                        Rectangle {
+                            y: parent.height - 2px;
+                            height: 2px;
+                            background: index == root.tab ? Palette.accent : transparent;
+                        }
+                        tab-touch := TouchArea { mouse-cursor: pointer; clicked => { root.tab-chosen(index); } }
+                    }
+                }
+                if root.rows.length == 0 && root.empty-text != "": Text {
                     text: root.empty-text;
                     color: Palette.faint;
                     font-size: 12 * Look.unit;

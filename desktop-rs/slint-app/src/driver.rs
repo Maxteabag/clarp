@@ -645,6 +645,7 @@ pub fn start_check(name: &str, out: String) {
         "observe" => observe_checks::observe_check(out),
         "message-search" => search_checks::message_search_check(out),
         "host-search" => search_checks::host_search_check(out),
+        "find-in-chat" => search_checks::find_in_chat_check(out),
         "mention" => search_checks::mention_check(out),
         "processes" => processes_checks::processes_check(out),
         "stop-receipt" => stop_checks::stop_receipt_check(out),

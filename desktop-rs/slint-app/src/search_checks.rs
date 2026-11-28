@@ -18,6 +18,16 @@
 //! next page; Enter opens a chat never loaded at the hit, loading the page
 //! that holds it.
 //!
+//! `--check find-in-chat`: Ctrl+F in an open chat opens the find bar at
+//! the top right of the chat; the words typed show the newest match, marked
+//! and in view, with "4/4"; Enter and Up go to older matches and Shift+Enter
+//! to newer ones, reading older pages (500 rows each) to reach one not
+//! loaded, with no wrap at the ends; the matching rows have their words
+//! marked; words found nowhere say 0/0; Escape closes it, takes the marks
+//! away and leaves the chat where it is; the chat's ⋯ menu opens it too
+//! (Search in chat); a hit chosen in message search
+//! (Ctrl+Shift+F) opens its chat with the bar filled in at that match.
+//!
 //! `--check mention`: `@` in the composer lists the agents, the arrows move
 //! through them, Tab completes the name, the route chip says where Enter
 //! sends, the message goes to that agent's chat (`/send` to its session),
@@ -108,16 +118,16 @@ pub fn message_search_check(out: String) {
             if app.engine.borrow().selected_session() != "rachel" || !super::report().composer_focused || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         ("search open", Box::new(|_, window, elapsed| {
             if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            check(window.get_switcher_placeholder() == "Search messages in every chat", "Ctrl+F opens message search");
+            check(window.get_switcher_placeholder() == crate::search_view::placeholder(), "Ctrl+F opens message search");
             let note = window.get_switcher_note().to_string();
-            check(note.contains("on this computer") && note.contains("no message search"), &format!("it says it searches only this computer's chats: {note}"));
+            check(note.is_empty() && window.get_switcher_hint().is_empty(), &format!("the page explains nothing: {note:?} {:?}", window.get_switcher_hint()));
             headless::type_text("pelican report");
             true
         })),
@@ -157,14 +167,14 @@ pub fn message_search_check(out: String) {
             }
             let kinds: Vec<String> = window.get_switcher_rows().iter().map(|r| r.kind.to_string()).collect();
             check(!kinds.iter().any(|k| k == "message"), &format!("Ctrl+K lists no messages: {kinds:?}"));
-            check(window.get_switcher_note().contains("Ctrl+F"), "and points to message search");
+            check(window.get_switcher_note().contains("Ctrl+Shift+F"), "and points to message search");
             shot(&out3, "message-search-03-ctrl-k");
             // Ctrl+F there, as its note says: message search, same words.
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         ("ctrl f in ctrl k", Box::new(|_, window, elapsed| {
-            if window.get_switcher_placeholder() != "Search messages in every chat" || elapsed < Duration::from_millis(300) {
+            if window.get_switcher_placeholder() != crate::search_view::placeholder() || elapsed < Duration::from_millis(300) {
                 return false;
             }
             check(window.get_switcher_open(), "Ctrl+F in the switcher keeps it open, as message search");
@@ -184,7 +194,7 @@ pub fn message_search_check(out: String) {
             if window.get_switcher_open() || elapsed < Duration::from_millis(200) {
                 return false;
             }
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         ("walrus", Box::new(|_, window, elapsed| {
@@ -208,7 +218,7 @@ pub fn message_search_check(out: String) {
                 return false;
             }
             check(true, "the cached chat opens with its message marked");
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         // Nothing matches: the switcher says what it looked in.
@@ -225,7 +235,7 @@ pub fn message_search_check(out: String) {
             }
             let messages = window.get_switcher_rows().iter().filter(|r| r.kind == "message").count();
             check(messages == 0, "nothing matches");
-            check(window.get_switcher_empty() == crate::search_view::EMPTY, &format!("it says what it searched: {:?}", window.get_switcher_empty()));
+            check(window.get_switcher_empty() == crate::search_view::no_results(), &format!("it says what it searched: {:?}", window.get_switcher_empty()));
             shot(&out4, "message-search-04-no-match");
             headless::press(Key::Escape);
             true
@@ -258,14 +268,14 @@ pub fn message_search_check(out: String) {
             if window.get_switcher_open() || elapsed < Duration::from_millis(300) {
                 return false;
             }
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         ("search over updates", Box::new(|_, window, elapsed| {
             if !window.get_switcher_open() && elapsed < Duration::from_secs(2) {
                 return false;
             }
-            check(window.get_switcher_open() && window.get_switcher_placeholder() == "Search messages in every chat", "Ctrl+F opens message search over Updates, after the switcher closed there");
+            check(window.get_switcher_open() && window.get_switcher_placeholder() == crate::search_view::placeholder(), "Ctrl+F opens message search over Updates, after the switcher closed there");
             if !window.get_switcher_open() {
                 return true;
             }
@@ -292,7 +302,7 @@ pub fn message_search_check(out: String) {
             if window.get_surface() != "chats" || elapsed < Duration::from_millis(500) {
                 return false;
             }
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             true
         })),
         ("search over the chats", Box::new(|_, window, elapsed| {
@@ -329,7 +339,7 @@ pub fn message_search_check(out: String) {
                 return false;
             }
             check(window.get_sidebar_focused(), "Ctrl+E gives the chat list the keyboard");
-            headless::press_with(&[Key::Control], "f");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
             headless::type_text("walrus");
             true
         })),
@@ -382,7 +392,7 @@ fn magnifier() -> Option<(f32, f32)> {
     use i_slint_backend_testing::ElementQuery;
     let window = crate::window()?;
     ElementQuery::from_root(&window)
-        .match_predicate(|e| e.accessible_label().is_some_and(|l| l == "Search messages (Ctrl+F)") && e.size().width > 0.0)
+        .match_predicate(|e| e.accessible_label().is_some_and(|l| l == "Search messages (Ctrl+Shift+F)") && e.size().width > 0.0)
         .find_first()
         .map(|e| (e.absolute_position().x + e.size().width / 2.0, e.absolute_position().y + e.size().height / 2.0))
 }
@@ -433,7 +443,7 @@ pub fn host_search_check(out: String) {
             if !window.get_switcher_open() && elapsed < Duration::from_secs(2) {
                 return false;
             }
-            check(window.get_switcher_open() && window.get_switcher_placeholder() == "Search messages in every chat", "the rail's magnifier opens message search");
+            check(window.get_switcher_open() && window.get_switcher_placeholder() == crate::search_view::placeholder(), "the rail's magnifier opens message search");
             headless::type_text("heron");
             true
         })),
@@ -449,7 +459,9 @@ pub fn host_search_check(out: String) {
             let snippet = window.get_switcher_rows().row_data(0).map(|r| r.detail.to_string()).unwrap_or_default();
             check(snippet.contains("**heron**"), &format!("the snippet marks the match: {snippet}"));
             let note = window.get_switcher_note().to_string();
-            check(note.contains("still being indexed") && !note.contains("on this computer"), &format!("it says, quietly, that older history is still being indexed: {note}"));
+            check(note == crate::search_view::indexing(), &format!("it says, quietly, that older history is still being indexed: {note}"));
+            let tabs: Vec<String> = window.get_switcher_tabs().iter().map(|t| t.to_string()).collect();
+            check(tabs == ["2", "0", "2"] && window.get_switcher_tabs_more(), &format!("the tabs count what they hold, more to load: {tabs:?}"));
             let last = window.get_switcher_rows().iter().last().map(|r| r.label.to_string()).unwrap_or_default();
             check(last == "Load more messages", &format!("a row loads more: {last}"));
             shot(&out1, "host-search-01-results");
@@ -481,6 +493,272 @@ pub fn host_search_check(out: String) {
             }
             check(true, "Enter opens a chat never loaded at the hit, its older page loaded, the message marked and in view");
             shot(&out3, "host-search-03-jumped");
+            true
+        })),
+    ];
+    run_stages(stages);
+}
+
+/// The find bar: open, its count ("4/4", "0/0", "…", ""), its note's
+/// code, and whether up and down go on.
+fn find_bar(window: &crate::AppWindow) -> (bool, String, String, bool, bool) {
+    use slint::ComponentHandle;
+    let bridge = window.global::<crate::FindBridge>();
+    let count = match bridge.get_phase().as_str() {
+        "" => String::new(),
+        "answered" => format!("{}/{}", bridge.get_number(), bridge.get_total()),
+        _ => "…".to_owned(),
+    };
+    (bridge.get_open(), count, bridge.get_note().to_string(), bridge.get_can_older(), bridge.get_can_newer())
+}
+
+/// Row `id` of the active chat has its words marked (its text differs from
+/// the same text built without the find bar's words).
+fn marked_words(id: &str) -> Option<bool> {
+    let rows = app_now().active_messages()?;
+    let row = rows.iter().find(|r| r.id == id)?;
+    let block = row.blocks.row_data(0)?;
+    let text = app_now().engine.borrow().conversation("oscar")?.rows().iter().find(|m| m.id == id)?.text.clone();
+    let plain = crate::view::message_block(&clarp_engine::blocks::blocks(&text)[0], row.author == "user").styled;
+    Some(block.styled != plain)
+}
+
+pub fn find_in_chat_check(out: String) {
+    use slint::platform::Key;
+    let (out1, out2, out3, out3b, out4, out5) = (out.clone(), out.clone(), out.clone(), out.clone(), out.clone(), out);
+    // Oscar's long chat: four rows hold "heron", the oldest far above what
+    // opening the chat loads.
+    const MATCHES: [usize; 4] = [5, 300, 640, 690];
+    let id = |i: usize| format!("o-{i}");
+    let stages: Vec<Stage> = vec![
+        ("live", Box::new(move |app, _, _| {
+            let open = app.engine.borrow().conversation("rachel").is_some_and(|c| !c.loading() && !c.rows().is_empty());
+            if !open {
+                return false;
+            }
+            let turns: Vec<Value> = (0..700)
+                .map(|i| {
+                    let role = if i % 2 == 0 { "user" } else { "assistant" };
+                    let at = format!("2026-11-20T{:02}:{:02}:{:02}Z", 8 + i / 3600, (i / 60) % 60, i % 60);
+                    let text = if MATCHES.contains(&i) { format!("Row {i}: the heron survey of the northern lakes.") } else { format!("Row {i}: a routine note about the build.") };
+                    json!({"id": id(i), "role": role, "text": text, "timestamp": at})
+                })
+                .collect();
+            check(control("/__control/add-agent", &json!({"session": "oscar", "persona": "Oscar"})).is_ok(), "the Host adds Oscar");
+            check(control("/__control/turns", &json!({"session": "oscar", "turns": turns})).is_ok(), "the Host holds Oscar's long chat");
+            check(control("/__control/message-search", &json!({"on": true, "positions": true})).is_ok(), "the Host offers message_search and search_positions");
+            app.engine.borrow_mut().reconnect();
+            true
+        })),
+        ("open oscar", Box::new(|app, window, elapsed| {
+            let ready = app.engine.borrow().host_search_offered() && app.engine.borrow().roster().find("oscar").is_some();
+            if !ready || elapsed < Duration::from_millis(300) {
+                return false;
+            }
+            window.invoke_chat_chosen("oscar".into());
+            true
+        })),
+        ("ctrl f", Box::new(move |app, _, elapsed| {
+            let loaded = app.engine.borrow().conversation("oscar").is_some_and(|c| !c.loading() && c.index_of("o-699").is_some());
+            if !loaded || elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            check(app.engine.borrow().conversation("oscar").is_some_and(|c| c.index_of("o-5").is_none()), "the oldest match is not loaded yet");
+            headless::press_with(&[Key::Control], "f");
+            true
+        })),
+        ("bar open", Box::new(|_, window, elapsed| {
+            let (open, ..) = find_bar(window);
+            if !open || elapsed < Duration::from_millis(200) {
+                check(elapsed < Duration::from_secs(3), "Ctrl+F in a chat opens the find bar");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(!window.get_switcher_open(), "not message search");
+            let (bar, chat) = (drawn("find-bar"), drawn(&format!("chat:{}", app_now().active_id())));
+            check(bar.zip(chat).is_some_and(|(b, c)| b.0 >= c.0 && b.1 < c.0 + (c.1 - c.0) / 3.0), &format!("the bar sits at the top of the chat: {bar:?} {chat:?}"));
+            headless::type_text("heron");
+            true
+        })),
+        ("newest", Box::new(move |_, window, elapsed| {
+            let (_, count, ..) = find_bar(window);
+            let done = count == "4/4" && app_now().marked_row() == "o-690" && in_view("o-690");
+            if !done {
+                check(elapsed < Duration::from_secs(5), &format!("the newest match shows, 4/4: {count:?} {:?}", app_now().marked_row()));
+                return elapsed >= Duration::from_secs(5);
+            }
+            let (_, _, _, older, newer) = find_bar(window);
+            check(older && !newer, "up goes on, down is off at the newest");
+            check(marked_words("o-690") == Some(true) && marked_words("o-640") == Some(true), "the matching rows have their words marked");
+            check(marked_words("o-689") == Some(false), "a row without them is as it was");
+            check(searches().iter().filter(|q| *q == "heron").count() == 1, &format!("asked once, after the typing paused: {:?}", searches()));
+            let asked = super::requests("GET", "/search");
+            check(asked.last().is_some_and(|r| r["query"]["positions"] == "1" && r["query"]["session"] == "oscar"), &format!("the chat's positions are asked: {asked:?}"));
+            shot(&out1, "find-in-chat-01-newest");
+            headless::press(Key::Return);
+            true
+        })),
+        ("older", Box::new(|_, window, elapsed| {
+            let (_, count, ..) = find_bar(window);
+            if !(count == "3/4" && app_now().marked_row() == "o-640" && in_view("o-640")) {
+                check(elapsed < Duration::from_secs(5), &format!("Enter goes to the older match, 3/4: {count:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            headless::press(Key::UpArrow);
+            headless::press(Key::UpArrow);
+            true
+        })),
+        ("oldest", Box::new(move |_, window, elapsed| {
+            let (_, count, note, older, newer) = find_bar(window);
+            if !(count == "1/4" && app_now().marked_row() == "o-5" && in_view("o-5")) {
+                check(elapsed < Duration::from_secs(20), &format!("up reaches the oldest match, not loaded before: {count:?} {note:?}"));
+                return elapsed >= Duration::from_secs(20);
+            }
+            check(!older && newer, "at the oldest, up is off");
+            let pages = super::requests("GET", "/log");
+            check(pages.iter().any(|r| r["query"]["limit"] == "500" && r["query"]["before"].is_string()), "older pages of 500 rows were read");
+            check(note.is_empty(), &format!("no note once there: {note:?}"));
+            shot(&out2, "find-in-chat-02-oldest");
+            headless::press(Key::Return);
+            true
+        })),
+        ("no wrap", Box::new(|_, window, elapsed| {
+            if elapsed < Duration::from_millis(400) {
+                return false;
+            }
+            let (_, count, ..) = find_bar(window);
+            check(count == "1/4" && app_now().marked_row() == "o-5", &format!("no wrap past the oldest: {count:?}"));
+            headless::press_with(&[Key::Shift], Key::Return);
+            true
+        })),
+        ("newer", Box::new(|_, window, elapsed| {
+            let (_, count, ..) = find_bar(window);
+            if !(count == "2/4" && app_now().marked_row() == "o-300") {
+                check(elapsed < Duration::from_secs(5), &format!("Shift+Enter goes to the newer match, 2/4: {count:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            headless::type_text(" zebra");
+            true
+        })),
+        ("none", Box::new(move |_, window, elapsed| {
+            let (_, count, note, older, newer) = find_bar(window);
+            if count != "0/0" {
+                check(elapsed < Duration::from_secs(5), &format!("words found nowhere: 0/0 {count:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(note == "no-results" && !older && !newer, &format!("it says so, both arrows off: {note:?}"));
+            shot(&out3, "find-in-chat-03-none");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed", Box::new(|_, window, elapsed| {
+            let (open, ..) = find_bar(window);
+            if open || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(3), "Escape closes the bar");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(app_now().marked_row().is_empty(), "no row is marked any more");
+            check(marked_words("o-300") == Some(false), "and no words");
+            check(!super::report().at_end, "the chat stays where it was");
+            use slint::ComponentHandle;
+            window.global::<crate::ChatMenu>().invoke_opened(app_now().active_id());
+            true
+        })),
+        ("chat menu", Box::new(move |_, window, elapsed| {
+            use slint::ComponentHandle;
+            if drawn("chat-menu-search").is_none() || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(3), "the chat's ⋯ menu lists Search in chat");
+                return elapsed >= Duration::from_secs(3);
+            }
+            shot(&out3b, "find-in-chat-03b-chat-menu");
+            window.global::<crate::ChatMenu>().invoke_search_in_chat();
+            true
+        })),
+        ("from the menu", Box::new(|_, window, elapsed| {
+            use slint::ComponentHandle;
+            let (open, ..) = find_bar(window);
+            if !open || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(3), "Search in chat opens the find bar");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(window.global::<crate::ChatMenu>().get_open().is_empty(), "and the menu closes");
+            check(crate::find_view::focused(window), "the bar's field has the keyboard");
+            headless::press(Key::Escape);
+            true
+        })),
+        ("closed again", Box::new(|_, window, elapsed| {
+            let (open, ..) = find_bar(window);
+            if open && elapsed < Duration::from_secs(3) {
+                return false;
+            }
+            check(!open, "Escape closes it");
+            headless::press_with(&[Key::Control, Key::Shift], "f");
+            true
+        })),
+        ("search every chat", Box::new(|_, window, elapsed| {
+            if !window.get_switcher_open() || elapsed < Duration::from_millis(200) {
+                check(elapsed < Duration::from_secs(3), "Ctrl+Shift+F opens message search");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(window.get_switcher_placeholder() == crate::search_view::placeholder(), "Ctrl+Shift+F searches every chat");
+            headless::type_text("osc");
+            true
+        })),
+        ("chats tab", Box::new(move |_, window, elapsed| {
+            let tabs: Vec<String> = window.get_switcher_tabs().iter().map(|t| t.to_string()).collect();
+            if tabs.get(1).is_none_or(|t| t != "1") || elapsed < Duration::from_millis(400) {
+                check(elapsed < Duration::from_secs(5), &format!("a chat whose name matches counts under Chats: {tabs:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            let first = window.get_switcher_rows().row_data(0).map(|r| (r.kind.to_string(), r.label.to_string())).unwrap_or_default();
+            check(first == ("agent".to_owned(), "Oscar".to_owned()), &format!("All shows the chat first: {first:?}"));
+            headless::press_with(&[Key::Control], "2");
+            true
+        })),
+        ("chats only", Box::new(|_, window, elapsed| {
+            if window.get_switcher_tab() != 1 || elapsed < Duration::from_millis(200) {
+                check(elapsed < Duration::from_secs(3), "Ctrl+2 shows the Chats tab");
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(window.get_switcher_rows().iter().all(|r| r.kind == "agent"), "the Chats tab lists chats only");
+            for _ in 0..3 {
+                headless::press(Key::Backspace);
+            }
+            headless::type_text("heron");
+            true
+        })),
+        ("hits", Box::new(move |_, window, elapsed| {
+            let tabs: Vec<String> = window.get_switcher_tabs().iter().map(|t| t.to_string()).collect();
+            if tabs.get(2).is_none_or(|t| t != "4") {
+                check(elapsed < Duration::from_secs(5), &format!("the Host's hits are counted: {tabs:?}"));
+                return elapsed >= Duration::from_secs(5);
+            }
+            check(window.get_switcher_tab() == 1 && window.get_switcher_rows().row_count() == 0, "the tab chosen stays while the page is open");
+            headless::press(Key::Tab);
+            true
+        })),
+        ("messages tab", Box::new(move |_, window, elapsed| {
+            let rows: Vec<String> = window.get_switcher_rows().iter().filter(|r| r.kind == "message").map(|r| r.label.to_string()).collect();
+            if window.get_switcher_tab() != 2 || rows.len() < 4 || elapsed < Duration::from_millis(300) {
+                check(elapsed < Duration::from_secs(3), &format!("Tab steps to the Messages tab: {rows:?}"));
+                return elapsed >= Duration::from_secs(3);
+            }
+            check(window.get_switcher_note().is_empty() && window.get_switcher_hint().is_empty(), "the page says nothing more");
+            shot(&out4, "find-in-chat-04-search-page");
+            // Newest first: the third is o-300.
+            window.invoke_switcher_chosen(2);
+            true
+        })),
+        ("opened at the hit", Box::new(move |_, window, elapsed| {
+            use slint::ComponentHandle;
+            let (open, count, ..) = find_bar(window);
+            let done = open && count == "2/4" && app_now().marked_row() == "o-300" && in_view("o-300");
+            if !done {
+                check(elapsed < Duration::from_secs(8), &format!("the hit opens with the bar at it: {open} {count:?} {:?}", app_now().marked_row()));
+                return elapsed >= Duration::from_secs(8);
+            }
+            check(window.global::<crate::FindBridge>().get_text() == "heron", "the bar holds the words searched");
+            check(marked_words("o-300") == Some(true), "and the words are marked");
+            shot(&out5, "find-in-chat-05-from-search");
             true
         })),
     ];

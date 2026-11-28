@@ -176,6 +176,13 @@ pub fn wire(window: &AppWindow) {
             artifacts(&app, &window);
         }
     });
+    menu.on_search_in_chat(|| {
+        if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
+            let pane = window.global::<ChatMenu>().get_open().to_string();
+            close(&window);
+            crate::find_view::open_in(&app, &window, &pane);
+        }
+    });
     menu.on_pick(|submenu, value| {
         if let (Some(app), Some(window)) = (crate::app(), crate::window()) {
             pick(&app, &window, &submenu, &value);

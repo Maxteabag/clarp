@@ -17,6 +17,11 @@ use serde_json::Value;
 use crate::{Change, Engine, Message};
 use clarp_core::tr;
 
+/// More pages were left unread.
+fn page_more(object: &clarp_core::json::Object) -> bool {
+    object.get("next_before").and_then(Value::as_str).is_some_and(|s| !s.is_empty())
+}
+
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 enum CacheRead {
     #[default]
@@ -36,6 +41,54 @@ pub(crate) struct SearchState {
     base_url: String,
     /// This engine's Host's own search (`GET /search`).
     host: HostSearch,
+    /// The find bar's search of one chat on this Host.
+    find: ChatFind,
+}
+
+/// Rows a page of the find bar's search asks for, where the Host lists no
+/// positions, and how many such pages it reads.
+pub const FIND_PAGE: usize = 100;
+pub const FIND_PAGES: usize = 10;
+
+/// The find bar's search of one chat on this Host.
+#[derive(Debug, Default)]
+struct ChatFind {
+    /// The Host searches messages (`message_search`), as the find was asked.
+    offered: bool,
+    /// The Host lists every matching row of a chat (`search_positions`).
+    positions: bool,
+    query: String,
+    /// Its session on this Host.
+    session: String,
+    /// Bumped by every new search: older answers are dropped.
+    generation: u64,
+    /// Matching row ids, oldest first once answered (newest first while
+    /// pages come in).
+    ids: Vec<String>,
+    total: usize,
+    truncated: bool,
+    pending: bool,
+    answered: bool,
+    pages: usize,
+    error: String,
+}
+
+/// What the find bar's search of a chat found.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ChatFindResults {
+    /// The words asked (trimmed).
+    pub query: String,
+    /// Matching row ids, oldest first.
+    pub ids: Vec<String>,
+    /// How many rows match (more than `ids` when only the newest are listed).
+    pub total: usize,
+    pub truncated: bool,
+    pub pending: bool,
+    /// The Host answered these words (or the loaded rows were searched).
+    pub answered: bool,
+    pub error: String,
+    /// Searched over the loaded rows only: the Host cannot search.
+    pub local: bool,
 }
 
 /// Hits a page of the Host's search asks for.
@@ -201,6 +254,168 @@ impl Engine {
         if offered != self.search.host.offered {
             self.search.host = HostSearch { offered, ..HostSearch::default() };
             self.changes.push(Change::Search);
+        }
+        let positions = info
+            .get("capabilities")
+            .and_then(|c| c.get("features"))
+            .and_then(Value::as_array)
+            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(clarp_core::chat_find::FEATURE)));
+        // What the Host offers changed: the find bar's words are asked again
+        // the new way (an answer under the old one would be stale).
+        let was = (self.search.find.offered, self.search.find.positions);
+        if was != (offered, positions) {
+            self.search.find.offered = offered;
+            self.search.find.positions = positions;
+            let (session, query) = (self.search.find.session.clone(), self.search.find.query.clone());
+            if !query.is_empty() {
+                self.find_in_chat(&session, &query);
+            }
+            self.changes.push(Change::Search);
+        }
+    }
+
+    // ---- the find bar: one chat's matching rows ----------------------------
+
+    /// Asks the Host holding `session` which rows of it hold `query`'s
+    /// words (empty words clear the search). A Host without message search
+    /// is not asked: `chat_find_results` searches the loaded rows.
+    pub fn find_in_chat(&mut self, session: &str, query: &str) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.find_in_chat(local, query));
+        let query = query.trim();
+        let find = &mut self.search.find;
+        find.generation += 1;
+        find.query = query.to_owned();
+        find.session = session.to_owned();
+        find.ids.clear();
+        find.total = 0;
+        find.truncated = false;
+        find.pages = 0;
+        find.error.clear();
+        let ask = self.search.host.offered && !query.is_empty() && !session.is_empty();
+        find.pending = ask;
+        find.answered = !ask;
+        if ask {
+            self.ask_chat_find(None);
+        }
+        self.changes.push(Change::Search);
+    }
+
+    fn ask_chat_find(&self, before: Option<&str>) {
+        let find = &self.search.find;
+        let limit = if find.positions { "1".to_owned() } else { FIND_PAGE.to_string() };
+        let mut query: Vec<(&str, &str)> = vec![("q", find.query.as_str()), ("session", find.session.as_str()), ("limit", limit.as_str())];
+        if find.positions {
+            query.push(("positions", "1"));
+        }
+        if let Some(before) = before {
+            query.push(("before", before));
+        }
+        self.api.get(&format!("mfind:{}", find.generation), "/search", &query);
+    }
+
+    fn chat_find_tag(&self, tag: &str) -> Option<bool> {
+        let generation = tag.strip_prefix("mfind:")?;
+        Some(generation.parse::<u64>().ok() == Some(self.search.find.generation))
+    }
+
+    pub(crate) fn chat_find_json(&mut self, tag: &str, object: &clarp_core::json::Object) -> bool {
+        match self.chat_find_tag(tag) {
+            None => return false,
+            Some(false) => return true,
+            Some(true) => {}
+        }
+        let positions = clarp_core::chat_find::Positions::from_json(object);
+        let find = &mut self.search.find;
+        if let Some(positions) = positions {
+            find.ids = positions.ids;
+            find.total = positions.total;
+            find.truncated = positions.truncated;
+        } else {
+            // Pages of hits, newest first: read on, then put in chat order.
+            let page = HostPage::from_json(object);
+            for hit in page.hits {
+                if !find.ids.contains(&hit.message_id) {
+                    find.ids.push(hit.message_id);
+                }
+            }
+            find.pages += 1;
+            if let Some(before) = page.next_before.filter(|_| find.pages < FIND_PAGES) {
+                self.ask_chat_find(Some(&before));
+                return true;
+            }
+            // Stopped at the last page read with more left.
+            find.truncated = page_more(object);
+            find.ids.reverse();
+            // The Host's count of the chat's matches, where it sends one.
+            find.total = object.get("total").and_then(Value::as_u64).map_or(0, |t| t as usize).max(find.ids.len());
+        }
+        find.pending = false;
+        find.answered = true;
+        self.changes.push(Change::Search);
+        true
+    }
+
+    pub(crate) fn chat_find_failure(&mut self, tag: &str, message: &str, status: u16) -> bool {
+        match self.chat_find_tag(tag) {
+            None => return false,
+            Some(false) => return true,
+            Some(true) => {}
+        }
+        let find = &mut self.search.find;
+        find.pending = false;
+        find.answered = true;
+        find.ids.clear();
+        find.error = if status == 0 {
+            // i18n: find bar, after "Not searched:": the chat's Host did not answer; {} is the network's reason
+            clarp_core::tr!("search.unreachable_host" => "could not be reached ({})", message)
+        } else {
+            message.to_owned()
+        };
+        self.changes.push(Change::Search);
+        true
+    }
+
+    /// What the find bar's search of `session` found: the Host's answer
+    /// to `query`, or on a Host without message search the loaded rows
+    /// holding its words.
+    pub fn chat_find_results(&self, session: &str, query: &str) -> ChatFindResults {
+        let query = query.trim();
+        let (engine, local) = match self.peer_ref(session) {
+            Some(Some((engine, local))) => (engine, local),
+            Some(None) => {
+                // i18n: find bar, after "Not searched:": the paired Host holding this chat is not connected
+                let error = clarp_core::tr!("search.host_not_read" => "this chat's Host is not read");
+                return ChatFindResults { query: query.to_owned(), answered: true, error, ..ChatFindResults::default() };
+            }
+            None => (self, session),
+        };
+        if !engine.search.host.offered {
+            let terms = clarp_core::chat_find::terms(query);
+            let ids: Vec<String> = self
+                .conversation(session)
+                .map(|c| {
+                    c.rows()
+                        .iter()
+                        .filter(|m| clarp_core::message_search::searchable(m).is_some_and(|text| clarp_core::chat_find::matches(text, &terms)))
+                        .map(|m| m.id.clone())
+                        .collect()
+                })
+                .unwrap_or_default();
+            return ChatFindResults { query: query.to_owned(), total: ids.len(), ids, answered: true, local: true, ..ChatFindResults::default() };
+        }
+        let find = &engine.search.find;
+        if find.query != query || find.session != local {
+            return ChatFindResults { query: query.to_owned(), pending: !query.is_empty(), answered: query.is_empty(), ..ChatFindResults::default() };
+        }
+        ChatFindResults {
+            query: find.query.clone(),
+            ids: if find.pending { Vec::new() } else { find.ids.clone() },
+            total: if find.pending { 0 } else { find.total },
+            truncated: find.truncated,
+            pending: find.pending,
+            answered: find.answered,
+            error: find.error.clone(),
+            local: false,
         }
     }
 

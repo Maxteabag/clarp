@@ -37,7 +37,7 @@ export component NavRail inherits Rectangle {
     in property <bool> muted;
     in property <string> server-initial;
     callback select-surface(string);
-    // The magnifier: message search across chats (Ctrl+F).
+    // The magnifier: message search across chats (Ctrl+Shift+F).
     callback open-message-search();
     callback toggle-muted();
     callback open-connection();
@@ -52,8 +52,8 @@ export component NavRail inherits Rectangle {
         RailButton { icon: @image-url("icons/rail-chats.svg"); tip: @tr("Chats"); selected: root.surface == "chats"; clicked => { root.select-surface("chats"); } }
         // i18n: navigation rail, tooltip of the button that shows every agent at once (the overview)
         RailButton { icon: @image-url("icons/rail-overview.svg"); tip: @tr("All agents"); selected: root.surface == "overview"; clicked => { root.select-surface("overview"); } }
-        // i18n: navigation rail, tooltip of the search button (verb phrase); Ctrl+F is its shortcut, key names left as is
-        RailButton { icon: @image-url("icons/rail-search.svg"); tip: @tr("Search messages (Ctrl+F)"); clicked => { root.open-message-search(); } }
+        // i18n: navigation rail, tooltip of the search button (verb phrase): searches every chat; Ctrl+Shift+F is its shortcut, key names left as is
+        RailButton { icon: @image-url("icons/rail-search.svg"); tip: @tr("Search messages (Ctrl+Shift+F)"); clicked => { root.open-message-search(); } }
         // i18n: navigation rail, tooltip of the button that shows the updates page (noun, plural: new things that need the user)
         RailButton { icon: @image-url("icons/rail-updates.svg"); tip: @tr("Updates"); badge: root.attention; selected: root.surface == "updates"; clicked => { root.select-surface("updates"); } }
         // i18n: navigation rail, tooltip of the button that shows the teams page (noun, plural: groups of agents)

@@ -6,6 +6,7 @@ import { Attachment, MentionRow, MentionBridge, ComposerKeys, WaitingTurn, SendC
 export { MentionRow, MentionBridge, ComposerKeys, WaitingTurn, SendChoice, SendOption }
 import { MessageRow, ErrorCard, ErrorAction, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, MeasureRow, ScrollBook } from "transcript.slint";
 import { Workspace, PaneView, SplitView, WorkspaceTab, DraftMirror, ChatMenu, ChatChoice } from "workspace.slint";
+import { FindBridge } from "find_bar.slint";
 import { Switcher, SwitcherRow } from "switcher.slint";
 import { Settings, SettingRow } from "settings.slint";
 import { KeymapEditor, KeymapRow, ConnectionPage, SavedHostRow, SelectTextPage } from "dialogs.slint";
@@ -44,7 +45,7 @@ import { PrefEditorDialog, PrefConfirmDialog, PrefEditor, Swatch } from "prefs.s
 export { PrefEditor, Swatch }
 export { ProfileBridge, ProfileInfo, PlanItem, PromptItem, NamedItem, NotifyChoice, ProfileArtifact, TransitChoice, MediaItem, OverviewBridge, OverviewCard, OverviewSchedule, OverviewArchived, OverviewContact, VoiceBridge, VoiceItem, OrchestratorBridge, DisplayCell, CellLine, ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow }
 
-export { ScrollBook, MeasureRow, VimBridge, DraftMirror, ChatMenu, ChatChoice }
+export { ScrollBook, MeasureRow, VimBridge, DraftMirror, ChatMenu, ChatChoice, FindBridge }
 export { Palette, Focus, ChatLook, Motion, SendFlight, Look, ChatRow, MessageRow, ErrorCard, ErrorAction, ReceiptRow, MessageBlock, MessageImage, TableRow, ToolRow, WidgetPalette, Attachment, PaneView, SplitView, WorkspaceTab, SwitcherRow, SettingRow , PreviewWindow, PreviewVersion}
 // ---- updates and teams
 export { AttentionView, JobView, ArtifactView, TeamView, TeamMessageView, TeamMemberView, ProcessJob, ProcessHelper }
@@ -457,6 +458,12 @@ export component AppWindow inherits Window {
     in property <[SwitcherRow]> switcher-rows;
     // What message search searched (it holds only this computer's chats).
     in property <string> switcher-note;
+    // The search page's tabs: what All, Chats and Messages count (none
+    // elsewhere), whether more messages can be loaded, and the one shown.
+    in property <[string]> switcher-tabs;
+    in property <bool> switcher-tabs-more;
+    in property <int> switcher-tab;
+    callback switcher-tab-chosen(int);
     in property <int> switcher-current;
     out property <string> switcher-query: switcher.query;
     callback switcher-edited(string);
@@ -1024,6 +1031,10 @@ export component AppWindow inherits Window {
             empty-text: root.switcher-empty;
             hint: root.switcher-hint;
             note: root.switcher-note;
+            tabs: root.switcher-tabs;
+            tabs-more: root.switcher-tabs-more;
+            tab: root.switcher-tab;
+            tab-chosen(index) => { root.switcher-tab-chosen(index); }
             width: parent.width;
             height: parent.height;
             rows: root.switcher-rows;

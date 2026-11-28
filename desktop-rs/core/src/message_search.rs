@@ -71,7 +71,9 @@ fn collapse(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn searchable(message: &Message) -> Option<&str> {
+/// The text of a row message search looks in: a user's or agent's words,
+/// not activity or a live item.
+pub fn searchable(message: &Message) -> Option<&str> {
     if message.activity || message.kind == "live" || !matches!(message.role.as_str(), "user" | "assistant") {
         return None;
     }

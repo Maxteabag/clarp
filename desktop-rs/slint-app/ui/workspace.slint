@@ -6,6 +6,7 @@ import { TypingIndicator } from "cells.slint";
 import { ProfileBridge } from "profile.slint";
 import { AgentAvatar } from "avatar.slint";
 import { KeyHint } from "artifacts.slint";
+import { FindBridge, FindBar } from "find_bar.slint";
 
 // Typing in one pane shows in the others on the same chat: the text goes
 // here (bumping `set`) for each pane on `session` but `except`, so a key
@@ -53,11 +54,15 @@ export global ChatMenu {
     callback pick(string, string);
     // Opens the chat's agent's artifacts (its profile's Artifacts).
     callback artifacts();
+    // Opens the find bar in the menu's pane (find_bar.slint).
+    callback search-in-chat();
 }
 
 component ChatMenuItem inherits Rectangle {
     in property <string> text;
     in property <string> value;
+    // A key that does the same (no submenu: no arrow).
+    in property <string> key;
     in property <string> id;
     in property <image> icon;
     callback clicked();
@@ -75,6 +80,7 @@ component ChatMenuItem inherits Rectangle {
         if root.icon.width > 0: Image { source: root.icon; width: 12 * Look.unit; height: 12 * Look.unit; colorize: Palette.muted; y: (parent.height - self.height) / 2; }
         Text { text: root.text; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; horizontal-stretch: 1; }
         if root.value != "": Text { text: root.value + "  ›"; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
+        if root.key != "": Text { text: root.key; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
     touch := TouchArea { clicked => { root.clicked(); } }
 }
@@ -621,6 +627,11 @@ export component Pane inherits Rectangle {
               accessible-label: root.header-info;
             }
           }
+          // The find bar, at the top right of the chat (under its header).
+          if FindBridge.open && FindBridge.pane == root.pane.id: FindBar {
+            x: parent.width - Frame.side - 8px - self.width;
+            y: Frame.top + root.header-height + 6px;
+          }
           // In the composer letters type: Ctrl+H is the way back to the chat.
           // The frame's title carries the keyboard region; an agent's name
           // and line are in its header above, a pair room's or an empty
@@ -719,6 +730,14 @@ export component Pane inherits Rectangle {
             TouchArea { }
             menu-list := VerticalLayout {
                 padding: 3px;
+                // Words in this chat: the find bar (Ctrl+F).
+                if ChatMenu.submenu == "": ChatMenuItem {
+                    id: "chat-menu-search";
+                    // i18n: the chat's ⋯ menu, item (an action) that opens the find bar to search this chat's messages
+                    text: @tr("search.in_chat" => "Search in chat");
+                    key: "Ctrl+F";
+                    clicked => { ChatMenu.search-in-chat(); }
+                }
                 if ChatMenu.submenu == "" && ChatMenu.coordination-shown: ChatMenuItem {
                     id: "chat-menu-coordination";
                     // i18n: chat's ⋯ menu, item that opens the choice of how messages between agents show in this chat (noun phrase)

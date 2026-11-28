@@ -235,7 +235,9 @@ notification_settings = {
 # 196): off until /__control/message-search turns it on. `partial` answers
 # partial: true (older history still being indexed); `page` caps a page
 # below the limit asked, so a check can page with a few rows.
-message_search = {"on": False, "partial": False, "page": 0}
+# `positions` also offers search_positions: a chat's search (`session`)
+# with `positions=1` lists every matching row of it, oldest first.
+message_search = {"on": False, "partial": False, "page": 0, "positions": False}
 # Steer now and take over for waiting messages (feature queue_steer): off
 # until /__control/queue-steer turns it on. Then GET /turn-queue items carry
 # `steerable` (a `waiting` item of the user's while its agent works).
@@ -888,7 +890,16 @@ def search_answer(query):
                      "message_id": row["id"], "role": row["role"], "timestamp": timestamp, "revision": revision,
                      "snippet": text, "parts": parts})
     following = str(start + limit) if start + limit < len(found) else None
-    return 200, {"q": query.get("q", ""), "hits": hits, "next_before": following, "partial": message_search["partial"]}
+    answer = {"q": query.get("q", ""), "hits": hits, "next_before": following, "partial": message_search["partial"]}
+    if session:
+        answer["total"] = len(found)
+    if query.get("positions") == "1" and message_search["positions"]:
+        if not session:
+            return 400, {"error": "positions needs a session"}
+        oldest_first = list(reversed(found))[-2000:]
+        answer["positions"] = [{"message_id": f[3]["id"], "revision": f[1], "timestamp": f[0]} for f in oldest_first]
+        answer["positions_truncated"] = len(found) > 2000
+    return 200, answer
 
 
 def record(entry):
@@ -1802,6 +1813,8 @@ class Handler(BaseHTTPRequestHandler):
                 features.append("agent_availability")
             if message_search["on"]:
                 features.append("message_search")
+            if message_search["on"] and message_search["positions"]:
+                features.append("search_positions")
             if queue_steer["on"]:
                 features.append("queue_steer")
             if send_while_working["on"]:
@@ -2714,7 +2727,7 @@ class Handler(BaseHTTPRequestHandler):
             # Test control: message search on or off, partial, and a page cap
             # (read from /server-info on connecting).
             message_search.update({"on": bool(body.get("on", True)), "partial": bool(body.get("partial", False)),
-                                   "page": int(body.get("page", 0))})
+                                   "page": int(body.get("page", 0)), "positions": bool(body.get("positions", False))})
             return self.reply(200, {"ok": True})
         if url.path == "/__control/stop-text":
             # Test control: the stop_receipt_text feature on or off (read from

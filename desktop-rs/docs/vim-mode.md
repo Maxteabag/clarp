@@ -65,7 +65,7 @@ After `Space` a panel lists the next keys.
 | `Space s` / `Space k` | Settings / key bindings |
 | `Space t` | New tab |
 | `Space r` / `Space a` | Recent agents / next attention |
-| `Space /` | Search the messages of every chat (Ctrl+F) |
+| `Space /` | Search the messages of every chat (Ctrl+Shift+F; Ctrl+F searches the open chat) |
 | `Space u` / `Space T` / `Space o` | Updates / Teams / Overview |
 | `Space p` / `Space R` / `Space d` | Agent profile / rename / change directory |
 | `Space m` / `Space x` / `Space l` | Mute / stop the agent / open a link |

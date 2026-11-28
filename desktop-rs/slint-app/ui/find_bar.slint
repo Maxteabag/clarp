@@ -1,0 +1,197 @@
+import { Palette, Look } from "theme.slint";
+
+// The find bar (find_view.rs): words found in one open chat. It shows in
+// pane `pane` at the top right of its chat, as an editor's find widget.
+export global FindBridge {
+    in-out property <bool> open;
+    in-out property <string> pane;
+    // The field's words, taken by the field when `text-set` is bumped.
+    in-out property <string> text;
+    in-out property <int> text-set;
+    // Bumped to give the field the keyboard, its words selected; and
+    // whether the bar takes it when it appears.
+    in-out property <int> focus-request;
+    in-out property <bool> focus-on-open;
+    // The count: "" before words are typed, "asking" until they are
+    // answered, then "answered": `number` of `total` matching messages
+    // (1 the oldest; 0 when the one shown is not among them).
+    in-out property <string> phase;
+    in-out property <int> number;
+    in-out property <int> total;
+    // The line under it: "" for none, "no-results", "loading" (older
+    // messages read to reach a match), "unreachable", "loaded-only" (a
+    // Host that cannot search), "error" (with `error`, the Host's words).
+    in-out property <string> note;
+    in-out property <string> error;
+    in-out property <bool> can-older;
+    in-out property <bool> can-newer;
+    callback edited(string);
+    callback older();
+    callback newer();
+    callback close();
+    callback focus-changed(bool);
+}
+
+// The words the bar shows, from the bridge's state.
+global FindText {
+    // i18n: find bar in a chat, the count: {0} is which matching message shows (1 the oldest), {1} how many match
+    property <string> counter: @tr("search.counter" => "{0}/{1}", FindBridge.number, FindBridge.total);
+    // i18n: find bar in a chat, the count while the message shown is not among the matches; {0} is how many match
+    property <string> unplaced: @tr("search.counter_unplaced" => "–/{0}", FindBridge.total);
+    out property <string> count: FindBridge.phase == "" ? "" : FindBridge.phase == "asking" ? "…" : FindBridge.number > 0 || FindBridge.total == 0 ? self.counter : self.unplaced;
+    // i18n: find bar in a chat, line under the field when no message of the chat holds the words
+    property <string> no-results: @tr("search.no_results" => "No results");
+    // i18n: find bar in a chat, line under the field while older messages are read to reach a match
+    property <string> loading: @tr("search.loading" => "Loading older messages…");
+    // i18n: find bar in a chat, line under the field when the match could not be reached in the chat's history
+    property <string> unreachable: @tr("search.unreachable" => "Could not reach this message");
+    // i18n: find bar in a chat, line under the field: the Host cannot search, so only the messages loaded here were searched
+    property <string> loaded-only: @tr("search.loaded_only" => "In the loaded messages");
+    // i18n: find bar in a chat, line under the field when the Host's search failed; {0} is why
+    property <string> not-searched: @tr("search.not_searched" => "Not searched: {0}", FindBridge.error);
+    out property <string> note: FindBridge.note == "no-results" ? self.no-results
+        : FindBridge.note == "loading" ? self.loading
+        : FindBridge.note == "unreachable" ? self.unreachable
+        : FindBridge.note == "loaded-only" ? self.loaded-only
+        : FindBridge.note == "error" ? self.not-searched
+        : "";
+    // i18n: find bar in a chat: the field's placeholder and the bar's accessibility label (an action: search this chat)
+    out property <string> title: @tr("search.in_chat" => "Search in chat");
+    // i18n: find bar in a chat, accessibility label of the up arrow: go to the older match
+    out property <string> previous: @tr("search.previous" => "Older match");
+    // i18n: find bar in a chat, accessibility label of the down arrow: go to the newer match
+    out property <string> next: @tr("search.next" => "Newer match");
+    // i18n: find bar in a chat, accessibility label of the × button (a verb: close the bar)
+    out property <string> close: @tr("search.close" => "Close search");
+}
+
+component FindButton inherits Rectangle {
+    in property <image> icon;
+    in property <bool> enabled: true;
+    in property <string> label;
+    in property <string> id;
+    callback clicked();
+    width: 22px;
+    height: 22px;
+    border-radius: 4px;
+    background: touch.has-hover && root.enabled ? Palette.hover : transparent;
+    accessible-role: button;
+    accessible-id: root.id;
+    accessible-label: root.label;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if (root.enabled) { root.clicked(); } }
+    Image {
+        source: root.icon;
+        width: 14px;
+        height: 14px;
+        colorize: root.enabled ? Palette.text : Palette.faint.with-alpha(0.5);
+    }
+    touch := TouchArea {
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { if (root.enabled) { root.clicked(); } }
+    }
+}
+
+export component FindBar inherits Rectangle {
+    property <int> text-set: FindBridge.text-set;
+    property <int> focus-request: FindBridge.focus-request;
+    changed text-set => { field.text = FindBridge.text; }
+    changed focus-request => { field.focus(); field.select-all(); }
+    init => {
+        field.text = FindBridge.text;
+        if (FindBridge.focus-on-open) {
+            field.focus();
+            field.select-all();
+            // Taken as it is made: no change of `typing` says so.
+            FindBridge.focus-changed(true);
+        }
+    }
+    property <bool> typing: field.has-focus;
+    changed typing => { FindBridge.focus-changed(self.typing); }
+    width: 330px;
+    height: FindText.note != "" ? 54px : 34px;
+    background: Palette.raised;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.typing ? Palette.focus : Palette.border;
+    drop-shadow-blur: 8px;
+    drop-shadow-color: #00000040;
+    accessible-role: groupbox;
+    accessible-id: "find-bar";
+    accessible-label: FindText.title;
+    VerticalLayout {
+        padding: 5px;
+        padding-left: 8px;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 4px;
+            height: 24px;
+            Rectangle {
+                horizontal-stretch: 1;
+                clip: true;
+                if field.text == "": Text {
+                    x: 0;
+                    width: parent.width;
+                    height: parent.height;
+                    text: FindText.title;
+                    color: Palette.faint;
+                    font-size: field.font-size;
+                    vertical-alignment: center;
+                }
+                field := TextInput {
+                    width: parent.width;
+                    height: parent.height;
+                    vertical-alignment: center;
+                    color: Palette.text;
+                    selection-background-color: Palette.accent.with-alpha(0.35);
+                    font-size: 13 * Look.unit;
+                    single-line: true;
+                    accessible-role: text-input;
+                    accessible-id: "find-field";
+                    accessible-label: FindText.title;
+                    edited => { FindBridge.edited(self.text); }
+                }
+            }
+            Text {
+                text: FindText.count;
+                color: Palette.muted;
+                font-size: 12 * Look.unit;
+                vertical-alignment: center;
+                horizontal-alignment: right;
+                min-width: 34px;
+                accessible-role: text;
+                accessible-id: "find-count";
+                accessible-label: self.text;
+            }
+            FindButton {
+                icon: @image-url("icons/chevron-up.svg");
+                enabled: FindBridge.can-older;
+                label: FindText.previous;
+                id: "find-older";
+                clicked => { FindBridge.older(); }
+            }
+            FindButton {
+                icon: @image-url("icons/chevron-down.svg");
+                enabled: FindBridge.can-newer;
+                label: FindText.next;
+                id: "find-newer";
+                clicked => { FindBridge.newer(); }
+            }
+            FindButton {
+                icon: @image-url("icons/close.svg");
+                label: FindText.close;
+                id: "find-close";
+                clicked => { FindBridge.close(); }
+            }
+        }
+        if FindText.note != "": Text {
+            text: FindText.note;
+            color: Palette.muted;
+            font-size: 11 * Look.unit;
+            overflow: elide;
+            accessible-role: text;
+            accessible-id: "find-note";
+            accessible-label: self.text;
+        }
+    }
+}

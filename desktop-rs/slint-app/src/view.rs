@@ -351,10 +351,49 @@ pub(crate) fn running_work(chat: &ChatRow, nested: i32) -> (i32, i32) {
 /// words), so a click or a link hint opens them.
 pub(crate) fn styled(markdown: &str, literal: bool) -> slint::StyledText {
     let plain = || slint::StyledText::from_plain_text(markdown);
+    let parse = |m: &str| slint::StyledText::from_markdown(m).ok().map(|s| highlighted(m, &s).unwrap_or(s));
     if literal {
-        return clarp_engine::blocks::literal_with_links(markdown).and_then(|m| slint::StyledText::from_markdown(&m).ok()).unwrap_or_else(plain);
+        // The user's own words as typed; while the find bar marks words,
+        // also when they hold no link.
+        let marking = HIGHLIGHT.with(|h| h.borrow().is_some());
+        let literal = if marking { Some(clarp_engine::blocks::literal_markdown(markdown)) } else { clarp_engine::blocks::literal_with_links(markdown) };
+        return literal.and_then(|m| parse(&m)).unwrap_or_else(plain);
     }
-    slint::StyledText::from_markdown(&clarp_engine::blocks::linkify(markdown)).or_else(|_| slint::StyledText::from_markdown(markdown)).unwrap_or_else(|_| plain())
+    parse(&clarp_engine::blocks::linkify(markdown)).or_else(|| parse(markdown)).unwrap_or_else(plain)
+}
+
+/// The words the find bar marks in the rows being built, and the inline
+/// HTML that marks them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Highlight {
+    pub terms: Vec<String>,
+    pub open: String,
+    pub close: String,
+}
+
+thread_local! {
+    static HIGHLIGHT: std::cell::RefCell<Option<Highlight>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Builds with `highlight`'s words marked in the text `styled` makes.
+pub(crate) fn with_highlight<R>(highlight: Option<&Highlight>, build: impl FnOnce() -> R) -> R {
+    let before = HIGHLIGHT.with(|h| std::mem::replace(&mut *h.borrow_mut(), highlight.cloned()));
+    let built = build();
+    HIGHLIGHT.with(|h| *h.borrow_mut() = before);
+    built
+}
+
+/// `markdown` (parsed as `parsed`) with the find bar's words marked; None
+/// when none are, or when marking would change what the text says.
+fn highlighted(markdown: &str, parsed: &slint::StyledText) -> Option<slint::StyledText> {
+    let highlight = HIGHLIGHT.with(|h| h.borrow().clone())?;
+    let marked = clarp_core::chat_find::highlight_markdown(markdown, &highlight.terms, &highlight.open, &highlight.close);
+    if marked == markdown {
+        return None;
+    }
+    let styled = slint::StyledText::from_markdown(&marked).ok()?;
+    use i_slint_core::styled_text::get_raw_text;
+    (get_raw_text(&styled) == get_raw_text(parsed)).then_some(styled)
 }
 
 pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) -> MessageBlock {
@@ -825,6 +864,8 @@ struct RowSource {
     prompt_open: bool,
     /// Rows with images are built again when a picture lands.
     pictures: Option<u64>,
+    /// The find bar's words marked in it.
+    highlight: Option<Highlight>,
 }
 
 /// Each transcript row as `message_row` built it (Markdown blocks, styled
@@ -869,7 +910,16 @@ impl RowCache {
         self.live.retain(|key, _| keys.contains(key.as_str()));
     }
 
-    pub(crate) fn rows(&mut self, presented: &[PresentedRow], always: bool, expanded: &std::collections::HashSet<String>, session: &str, image_host: Option<&str>) -> Vec<MessageRow> {
+    /// `highlight`: the find bar's words, marked in the rows in its set.
+    pub(crate) fn rows(
+        &mut self,
+        presented: &[PresentedRow],
+        always: bool,
+        expanded: &std::collections::HashSet<String>,
+        session: &str,
+        image_host: Option<&str>,
+        highlight: Option<(&Highlight, &std::collections::HashSet<String>)>,
+    ) -> Vec<MessageRow> {
         if self.image_host.as_deref() != image_host {
             self.rows.clear();
             self.image_host = image_host.map(str::to_owned);
@@ -882,18 +932,20 @@ impl RowCache {
                 let id = row.message.id.clone();
                 let open = expanded.contains(&id);
                 let prompt_open = row.message.origin == "agent" && prompt_open(expanded, &clarp_core::agent_prompt::key(&id));
+                let marked = highlight.filter(|(_, ids)| ids.contains(&id)).map(|(h, _)| h);
                 let reused = self.rows.remove(&id).filter(|(source, _)| {
                     source.always == always
                         && source.open == open
                         && source.prompt_open == prompt_open
                         && source.pictures.is_none_or(|p| p == pictures)
+                        && source.highlight.as_ref() == marked
                         && source.row == *row
                 });
                 let (source, shown) = reused.unwrap_or_else(|| {
                     self.built += 1;
-                    let shown = message_row(row, always, expanded, session, image_host);
+                    let shown = with_highlight(marked, || message_row(row, always, expanded, session, image_host));
                     let images = slint::Model::iter(&shown.blocks).any(|b| b.kind == "images");
-                    (RowSource { row: row.clone(), always, open, prompt_open, pictures: images.then_some(pictures) }, shown)
+                    (RowSource { row: row.clone(), always, open, prompt_open, pictures: images.then_some(pictures), highlight: marked.cloned() }, shown)
                 });
                 let copy = shown.clone();
                 kept.insert(id, (source, shown));
@@ -1046,16 +1098,16 @@ mod tests {
         };
         let expanded = std::collections::HashSet::new();
         let mut cache = super::RowCache::default();
-        let first = cache.rows(&present(&messages), false, &expanded, "", None);
+        let first = cache.rows(&present(&messages), false, &expanded, "", None, None);
         assert_eq!(cache.built, 31);
         messages[30] = message("live", "assistant", "Partial answer, growing", 32);
-        let second = cache.rows(&present(&messages), false, &expanded, "", None);
+        let second = cache.rows(&present(&messages), false, &expanded, "", None, None);
         assert_eq!(cache.built, 32, "one row changed, one row built");
         assert_eq!(second.len(), first.len());
         assert!(first.iter().zip(&second).take(30).all(|(a, b)| a.id == b.id && slint::Model::row_count(&a.blocks) == slint::Model::row_count(&b.blocks)));
         let text = |row: &crate::MessageRow| slint::Model::row_data(&row.blocks, 0).map(|b| b.styled).unwrap_or_default();
         assert_eq!(text(&second[30]), super::styled("Partial answer, growing", false), "the changed row shows its new text");
-        cache.rows(&present(&messages), true, &expanded, "", None);
+        cache.rows(&present(&messages), true, &expanded, "", None, None);
         assert_eq!(cache.built, 63, "a presentation setting builds every row again");
     }
 
@@ -1116,14 +1168,14 @@ mod tests {
         ]);
         let mut cache = super::RowCache::default();
         let mut expanded = std::collections::HashSet::new();
-        assert!(!cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded);
+        assert!(!cache.rows(&rows, false, &expanded, "", None, None)[1].prompt.expanded);
         expanded.insert("a2a:u7".to_owned());
-        let open = cache.rows(&rows, false, &expanded, "", None);
+        let open = cache.rows(&rows, false, &expanded, "", None, None);
         assert!(open[1].prompt.expanded, "opened by its key");
         assert_eq!(cache.built, 3, "only the prompt is built again");
-        assert!(cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded, "and stays open when presented again");
+        assert!(cache.rows(&rows, false, &expanded, "", None, None)[1].prompt.expanded, "and stays open when presented again");
         expanded.remove("a2a:u7");
-        assert!(!cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded, "folds again");
+        assert!(!cache.rows(&rows, false, &expanded, "", None, None)[1].prompt.expanded, "folds again");
     }
 
     /// A live item's row is reused until its entry changes; a streaming

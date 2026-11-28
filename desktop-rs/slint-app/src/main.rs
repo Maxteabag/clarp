@@ -38,6 +38,7 @@ mod language;
 mod look;
 mod switcher;
 mod search_view;
+mod find_view;
 mod select_text;
 mod mention_view;
 mod view;
@@ -152,8 +153,10 @@ pub struct SwitcherState {
     pub recent_only: bool,
     /// The setting whose choices are listed (Enter on a choice), if any.
     pub picker: String,
-    /// Ctrl+F: messages only (message search).
+    /// Ctrl+Shift+F: the search page (message search).
     pub messages_only: bool,
+    /// The search page's tab: 0 All, 1 Chats, 2 Messages.
+    pub tab: usize,
 }
 
 pub fn app() -> Option<Rc<App>> {
@@ -536,6 +539,9 @@ impl App {
         let searching = self.switcher.borrow().open && self.switcher.borrow().messages_only;
         if changes.iter().any(|c| matches!(c, Change::Roster | Change::RosterFreshness | Change::Preferences | Change::Search) || (searching && matches!(c, Change::Conversation(_)))) {
             commands::refresh_switcher(self, &window);
+        }
+        if let Some(app) = app() {
+            find_view::refresh(&app, &window, changes);
         }
         whole.lap("switcher");
         self.voice(changes);
@@ -1114,6 +1120,7 @@ fn main() {
             commands::switcher_chosen(&app, &window, index);
         }
     });
+    window.on_switcher_tab_chosen(|tab| with_window(|app, window| commands::switcher_tab(app, window, tab.max(0) as usize)));
     window.on_switcher_adjusted(|index, delta| with_window(|app, window| commands::switcher_adjusted(app, window, index, delta)));
     window.on_switcher_dismissed(|| {
         if let (Some(app), Some(window)) = (app(), crate::window()) {
@@ -1241,6 +1248,7 @@ fn main() {
     profile_view::wire(&window);
     publications_view::wire(&window);
     chat_menu::wire(&window);
+    find_view::wire(&window);
     overview_view::wire(&window);
     voice_view::wire(&window);
     font_view::wire(&window);

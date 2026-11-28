@@ -55,6 +55,9 @@ pub fn context(app: &App, window: &AppWindow) -> &'static str {
     }
     if window.get_search_focused() {
         "search"
+    } else if crate::find_view::focused(window) && window.get_surface() == "chats" {
+        // The find bar's field: its own keys, then the composer's.
+        "find"
     } else if app.active_report().composer_focused || window.global::<crate::ArtifactBridge>().get_editing() || typing_in_chats(window) {
         // A card's answer field types like the composer.
         "composer"
@@ -238,6 +241,9 @@ pub fn show_hints(app: &App, window: &AppWindow) {
         hints = crate::processes_view::hints();
         actions.clear();
     }
+    if state == "find" {
+        hints = crate::find_view::hints();
+    }
     if state == "publications" {
         hints = crate::publications_view::hints(window);
         actions.clear();
@@ -339,6 +345,18 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
         return false;
     }
     let state = context(&app, &window);
+    if state == "find" {
+        if crate::find_view::key(&app, &window, &chord) {
+            show_hints(&app, &window);
+            return true;
+        }
+    }
+    // The field's own editing keys (copy, paste, select all, undo) stay
+    // the field's; past them it types as the composer does.
+    if state == "find" && ["Ctrl+A", "Ctrl+C", "Ctrl+V", "Ctrl+X", "Ctrl+Z", "Ctrl+Y"].contains(&chord.as_str()) {
+        return false;
+    }
+    let state = if state == "find" { "composer" } else { state };
     // ? again closes the key help, as Escape does.
     if chord == "?" && *app.overlay.borrow() == crate::help_view::OVERLAY {
         close_overlay(&app, &window);
@@ -386,11 +404,27 @@ fn run_shortcut(text: &str, control: bool, alt: bool, shift: bool, meta: bool, r
             return ran;
         }
     }
+    // The search page's tabs: Ctrl+1/2/3, and Tab / Shift+Tab to step.
+    if state == "modal" && app.switcher.borrow().open && app.switcher.borrow().messages_only && app.switcher.borrow().picker.is_empty() {
+        let tab = app.switcher.borrow().tab;
+        let next = match chord.as_str() {
+            "Ctrl+1" => Some(0),
+            "Ctrl+2" => Some(1),
+            "Ctrl+3" => Some(2),
+            "Tab" => Some((tab + 1) % 3),
+            "Shift+Tab" => Some((tab + 2) % 3),
+            _ => None,
+        };
+        if let Some(next) = next {
+            switcher_tab(&app, &window, next);
+            return true;
+        }
+    }
     // The switcher's own key for message search (Ctrl+F, as bound) turns it
     // into message search, with the words already typed: the key is not lost
     // to the text field, and the words are not typed twice.
     if state == "modal" && app.switcher.borrow().open && app.switcher.borrow().picker.is_empty() && !app.switcher.borrow().messages_only {
-        if keymap::action_for("main", &chord, &overrides(&app), facts(&app, &window)) == Some("search-messages") {
+        if matches!(keymap::action_for("main", &chord, &overrides(&app), facts(&app, &window)), Some("search-messages" | "find-in-chat")) {
             let query = app.switcher.borrow().query.clone();
             run(&app, &window, "search-messages");
             if !query.is_empty() {
@@ -499,6 +533,8 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
             let theme = app.engine.borrow().reading_theme();
             app.engine.borrow_mut().set_font_override(&theme, None);
         }
+        // The find bar closes on Escape from the chat it shows in.
+        "escape" if crate::find_view::shown().is_some_and(|(pane, _)| pane == app.active_id().as_str()) && context(app, window) == "pane" => crate::find_view::close(app, window),
         // The composer's mention list closes before the composer is left.
         "escape" if crate::mention_view::is_open(app) => crate::mention_view::dismiss_active(app),
         // V in the chat: the whole loaded chat as plain text to select from.
@@ -518,15 +554,26 @@ pub fn run(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
                 return false;
             }
         }
-        // Ctrl+F: message search, in the switcher.
+        // Ctrl+F in a chat: the find bar (message search where none is open).
+        "find-in-chat" => {
+            if window.get_surface() != "chats" || !crate::find_view::open(app, window) {
+                return run(app, window, "search-messages");
+            }
+        }
+        // Ctrl+Shift+F (Ctrl+F with no chat open): message search, in the
+        // switcher, with the find bar's words when it has the keyboard.
         "search-messages" => {
+            let words = if crate::find_view::focused(window) { window.global::<crate::FindBridge>().get_text().to_string() } else { String::new() };
             open_switcher(app, window);
             app.switcher.borrow_mut().messages_only = true;
-            // i18n: Ctrl+F message search, placeholder of the search field
-            window.set_switcher_placeholder(tr!("Search messages in every chat").into());
-            window.set_switcher_empty(crate::catalogue::local(crate::search_view::EMPTY).into());
-            // i18n: Ctrl+F message search, the key hint line at the bottom; key names stay, the words say what each key does
-            window.set_switcher_hint(tr!("↑↓ move · Enter opens the chat at the message · Esc close").into());
+            app.switcher.borrow_mut().tab = 0;
+            window.set_switcher_placeholder(crate::search_view::placeholder().into());
+            window.set_switcher_empty("".into());
+            window.set_switcher_hint("".into());
+            if !words.trim().is_empty() {
+                app.switcher.borrow_mut().query = words.clone();
+                window.invoke_set_switcher_query(words.into());
+            }
             refresh_switcher(app, window);
         }
         // ---- profile and overview
@@ -956,8 +1003,10 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
         state.recent_only = false;
         state.picker.clear();
         state.messages_only = false;
+        state.tab = 0;
     }
     crate::search_view::forget_asked();
+    window.set_switcher_tabs(ModelRc::default());
     window.set_switcher_note("".into());
     // i18n: Ctrl+K command palette, placeholder of the search field: what it finds
     window.set_switcher_placeholder(tr!("Agent, contact, setting or command").into());
@@ -1058,15 +1107,24 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
         let found = crate::search_view::found(&mut app.engine.borrow_mut(), &query);
         note = found.note;
         window.set_switcher_empty(found.empty.into());
-        found.items
+        // Its tabs: chats whose name matches, and the messages.
+        let chats = if query.trim().is_empty() { Vec::new() } else { switcher::agents(&app.engine.borrow(), &query) };
+        let tab = app.switcher.borrow().tab;
+        let (items, counts) = crate::search_view::tabbed(tab, chats, found.items);
+        window.set_switcher_tabs_more(counts.more);
+        let language = clarp_core::i18n::current();
+        let counts: Vec<slint::SharedString> = [counts.all, counts.chats, counts.messages].into_iter().map(|n| clarp_core::i18n::format::number(language, n as i64).into()).collect();
+        window.set_switcher_tabs(ModelRc::new(VecModel::from(counts)));
+        window.set_switcher_tab(tab as i32);
+        items
     } else if recent_only {
         switcher::recent(&app.engine.borrow(), &app.recent.borrow(), &query)
     } else {
         // Ctrl+K lists agents, contacts, commands and settings, never
         // messages: those are Ctrl+F's.
         if !contacts_only && query.trim().chars().count() >= crate::search_view::HINT_FROM {
-            // i18n: Ctrl+K, a note under the search: message text is searched with Ctrl+F, not here
-            note = tr!("Ctrl+F searches the messages of every chat.");
+            // i18n: command palette (Ctrl+K), note under the results pointing to message search; "Ctrl+Shift+F" is a key name
+            note = clarp_core::tr!("Ctrl+Shift+F searches the messages of every chat.");
         }
         switcher::results(&app.engine.borrow(), &query, toggles, contacts_only, switcher::settings(&settings))
     };
@@ -1122,6 +1180,16 @@ pub fn refresh_switcher(app: &App, window: &AppWindow) {
     drop(state);
     window.set_switcher_rows(ModelRc::new(VecModel::from(rows)));
     window.set_switcher_current(current);
+}
+
+/// The search page shows tab `tab` (0 All, 1 Chats, 2 Messages).
+pub fn switcher_tab(app: &App, window: &AppWindow, tab: usize) {
+    if !app.switcher.borrow().messages_only {
+        return;
+    }
+    app.switcher.borrow_mut().tab = tab.min(crate::search_view::TABS - 1);
+    app.switcher.borrow_mut().selected.clear();
+    refresh_switcher(app, window);
 }
 
 pub fn switcher_moved(app: &App, window: &AppWindow, index: i32) {
@@ -1204,6 +1272,13 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
             refresh_switcher(app, window);
             return;
         }
+        // All's "See all chats": the Chats tab.
+        switcher::Kind::Command if item.target == crate::search_view::SEE_ALL_CHATS => {
+            app.switcher.borrow_mut().open = true;
+            window.set_switcher_open(true);
+            switcher_tab(app, window, 1);
+            return;
+        }
         // So does "Load more": the Hosts' next page comes in under it.
         switcher::Kind::Command if item.target == crate::search_view::LOAD_MORE => {
             app.switcher.borrow_mut().open = true;
@@ -1230,8 +1305,13 @@ pub fn switcher_chosen(app: &Rc<App>, window: &AppWindow, index: i32) {
         }
         // A message: its chat, scrolled to it, the transcript keeping the
         // keyboard to read around it.
+        // The find bar shows there with the words that found it.
         switcher::Kind::Message => {
+            let query = app.switcher.borrow().query.clone();
             crate::search_view::jump(app, &item.target);
+            if let Some((session, id)) = crate::search_view::split(&item.target) {
+                crate::find_view::open_at(app, window, &query, session, id);
+            }
             restore = false;
         }
         // The panel keeps the keyboard.

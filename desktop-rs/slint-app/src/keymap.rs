@@ -190,7 +190,9 @@ fn state(name: &str) -> Vec<Binding> {
             // i18n: Keys (key context “Everywhere”): the name of a key's action (noun), in the shortcut bar, Keys help (?) and the key-binding editor. It lists the agents you opened last, newest first.
             b("recent-agents", &["Ctrl+R"], tr!("keys" => "Recent"), true, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
-            b("search-messages", &["Ctrl+F"], tr!("Search messages"), false, Always, false),
+            b("search-messages", &["Ctrl+Shift+F"], tr!("Search messages"), false, Always, false),
+            // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the find bar of the open chat (where no chat shows, it searches every chat).
+            b("find-in-chat", &["Ctrl+F"], tr!("search.in_chat" => "Search in chat"), false, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action (verb, an action), in the shortcut bar, Keys help (?) and the key-binding editor. It loads the open chat again from the Host.
             b("refresh", &["F5"], tr!("verb" => "Refresh"), false, Always, false),
             // i18n: Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It fetches the agent list from the Host now, also while it is retrying after a failure.
@@ -1580,11 +1582,15 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_searches_messages_from_anywhere_in_the_chats() {
+    fn ctrl_f_finds_in_the_open_chat_and_ctrl_shift_f_in_every_chat() {
         let none = Overrides::new();
         for state in ["composer", "pane", "sidebar"] {
-            assert_eq!(action_for(state, "Ctrl+F", &none, all()), Some("search-messages"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+F", &none, all()), Some("find-in-chat"), "{state}");
+            assert_eq!(action_for(state, "Ctrl+Shift+F", &none, all()), Some("search-messages"), "{state}");
         }
+        // Where no chat shows, the action itself searches every chat.
+        assert_eq!(action_for("settings", "Ctrl+F", &none, all()), Some("find-in-chat"));
+        assert!(clashes(&none).is_empty(), "{:?}", clashes(&none));
         assert_eq!(action_for("sidebar", "/", &none, all()), Some("agent-search"), "/ still filters the explorer");
     }
 

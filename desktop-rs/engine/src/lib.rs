@@ -1443,7 +1443,13 @@ impl Engine {
     }
 
     pub fn load_older(&mut self, session: &str) {
-        on_peer!(self.peer_mut(session), |engine, local| engine.load_older(local));
+        self.load_older_page(session, 100);
+    }
+
+    /// The page of `limit` rows before the oldest loaded (a jump to an
+    /// older message asks for larger pages).
+    pub fn load_older_page(&mut self, session: &str, limit: usize) {
+        on_peer!(self.peer_mut(session), |engine, local| engine.load_older_page(local, limit));
         if session.is_empty() || self.log_in_flight.contains(session) {
             return;
         }
@@ -1454,7 +1460,8 @@ impl Engine {
         };
         self.log_in_flight.insert(session.to_owned());
         self.with_conversation(session, |c| c.set_loading(true));
-        let mut query = vec![("session", session), ("limit", "100"), ("include_automated", "0"), ("before", before.as_str())];
+        let limit = limit.max(1).to_string();
+        let mut query = vec![("session", session), ("limit", limit.as_str()), ("include_automated", "0"), ("before", before.as_str())];
         query.extend(self.coordination_query(session, false));
         self.log_request_sent(session, true);
         self.api.get(&format!("log-older:{session}"), "/log", &query);
@@ -1705,7 +1712,7 @@ impl Engine {
         if self.voice_json(tag, object) || self.narrator_json(tag, object) {
             return;
         }
-        if self.host_status_json(tag, object) || self.stop_json(tag, object) || self.turn_retry_json(tag, object) || self.host_search_json(tag, object) {
+        if self.host_status_json(tag, object) || self.stop_json(tag, object) || self.turn_retry_json(tag, object) || self.host_search_json(tag, object) || self.chat_find_json(tag, object) {
             return;
         }
         if tag.starts_with("tool-details:") {
@@ -1788,7 +1795,7 @@ impl Engine {
         let detail = if status > 0 { format!("{message} (HTTP {status})") } else { message.to_owned() };
         eprintln!("Engine: {tag} failed: {detail}");
         self.stop_failure(tag);
-        if self.turn_retry_failure(tag, message, status) || self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail, status) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) {
+        if self.turn_retry_failure(tag, message, status) || self.form_events_failure(tag, message, status) || self.host_status_failed(tag, &detail) || self.narrator_failure(tag, status) || self.live_failure(tag, &detail, status) || self.lanes_failure(tag, message, status) || self.coordination_failure(tag, &detail) || self.transit_failure(tag, message, status) || self.chat_view_failure(tag) || self.send_while_working_failure(tag, message) || self.roster_rows_failure(tag, status) || self.host_search_failure(tag, message, status) || self.chat_find_failure(tag, message, status) {
             return;
         }
         if tag == "desktop-presence" || tag == "application-activity" || tag == "client-event" {

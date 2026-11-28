@@ -266,6 +266,16 @@ pub fn literal_with_links(text: &str) -> Option<String> {
     if urls.is_empty() {
         return None;
     }
+    Some(literal_markdown_with(text, urls))
+}
+
+/// Literal text as Markdown that shows it as typed (its web addresses as
+/// links), with or without links: the find bar marks words in it.
+pub fn literal_markdown(text: &str) -> String {
+    literal_markdown_with(text, bare_urls(text, &[]))
+}
+
+fn literal_markdown_with(text: &str, urls: Vec<std::ops::Range<usize>>) -> String {
     let escape = |plain: &str, out: &mut String| {
         let mut line_start = out.is_empty() || out.ends_with('\n');
         for c in plain.chars() {
@@ -302,7 +312,7 @@ pub fn literal_with_links(text: &str) -> Option<String> {
         copied = url.end;
     }
     escape(&text[copied..], &mut out);
-    Some(out)
+    out
 }
 
 #[cfg(test)]

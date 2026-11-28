@@ -451,6 +451,11 @@ impl App {
         active.or_else(|| (0..panes.len()).find(|i| has(*i))).map(|i| panes[i].session.clone())
     }
 
+    /// The chat pane `id` shows; None when there is no such pane.
+    pub fn pane_session(&self, id: &str) -> Option<String> {
+        self.pane_state.borrow().iter().find(|p| p.id == id).map(|p| p.session.clone())
+    }
+
     pub fn active_session(&self) -> String {
         self.active_index().map(|i| self.pane_state.borrow()[i].session.clone()).unwrap_or_default()
     }
@@ -554,6 +559,15 @@ impl App {
         pane.view = view.clone();
         self.panes.set_row_data(index, view);
         true
+    }
+
+    /// Pane `id` no longer marks a row (the find bar closed).
+    pub fn clear_marked(&self, id: &str) {
+        self.change_pane(id, |pane| {
+            let had = !pane.marked.1.is_empty();
+            pane.marked = (String::new(), String::new());
+            had
+        });
     }
 
     /// The row message search marked in the active pane (for the checks).
@@ -961,7 +975,20 @@ impl App {
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
         pane.presented_with = Some(self.presentation_key(&pane.session));
         let image_host = self.engine.borrow().transcript_image_host(&pane.session).map(str::to_owned);
-        let built = pane.rows.rows(&presented, always, &expanded, &pane.session, image_host.as_deref());
+        // The find bar's words, marked in the rows holding them all.
+        let highlight = crate::find_view::highlight(&pane.id, &pane.session);
+        let lit: std::collections::HashSet<String> = highlight
+            .as_ref()
+            .map(|h| {
+                presented
+                    .iter()
+                    .filter(|row| crate::find_view::row_matches(&row.message, &h.terms))
+                    .map(|row| row.message.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let built = pane.rows.rows(&presented, always, &expanded, &pane.session, image_host.as_deref(), highlight.as_ref().map(|h| (h, &lit)));
+        let lit_key = highlight.as_ref().map(|h| format!("{}{}", h.terms.join(" "), h.open)).unwrap_or_default();
         let now = std::time::Instant::now();
         let mut unsent = std::collections::HashMap::new();
         let mut kept = std::collections::HashMap::new();
@@ -1096,7 +1123,9 @@ impl App {
             // An unsent message is drawn again when its status becomes due.
             // A failure card is drawn again when its count or buttons change.
             let error = if row.error.id.is_empty() { String::new() } else { crate::turn_error_view::signature(&row.error) };
-            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}|{error}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
+            // A row the find bar marks is drawn again when its words change.
+            let found = if lit.contains(row.id.as_str()) { lit_key.as_str() } else { "" };
+            format!("{cards}|{}|{pictures}|{receipt}|{}|{}|{}:{}|{error}|{found}", explained.join(","), row.prompt.expanded, row.status_due, row.work_key, row.work_open)
         };
         let signatures: Vec<String> = artifacts.iter().zip(&rows).map(|(a, row)| signature(a, row)).collect();
         let mut fresh: Vec<Shown> = presented

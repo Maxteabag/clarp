@@ -1090,6 +1090,15 @@ pub const ENTRIES: &[Entry] = &[
         &["select", "highlight", "copy text", "copy part", "mark text", "visual"],
     ),
     e(
+        "find-in-chat",
+        // i18n: Ctrl+K command palette, a command's name (an action). What it does: opens the find bar of the open chat (Ctrl+F) to find words in its messages.
+        en::tr!("Search in chat"),
+        "view",
+        // i18n: Ctrl+K command palette, the line under the command “Search in chat” saying what it does
+        en::tr!("Finds words in the open chat: every message holding them is marked, the bar says which match of how many shows, and up and down (Enter, Shift+Enter) go to the older and newer one."),
+        &["find", "find in chat", "search this chat", "in this chat", "highlight", "ctrl+f"],
+    ),
+    e(
         "search-messages",
         // i18n: Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Finds words in the messages of every chat (the Host searches them all where it can, else this computer's chats) and jumps to the message.
         en::tr!("Search messages"),
