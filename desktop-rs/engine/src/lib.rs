@@ -952,7 +952,7 @@ impl Engine {
         self.sse.set_endpoint(endpoint.clone(), &self.token);
         self.reset_transient_state();
         // The features are read again from /server-info.
-        self.reset_model_catalog_result();
+        self.reset_launch_capabilities();
         self.reset_live();
         self.reset_lanes();
         self.reset_form_events();
@@ -1723,6 +1723,7 @@ impl Engine {
             self.mutate_roster(|r| r.set_availability_feature(clarp_core::availability::offered_by(object)));
             self.coordination_server_info(object);
             self.lanes_server_info(object);
+            self.launch_server_info(object);
             self.transit_server_info(object);
             self.chat_view_server_info(object);
             self.roster_rows_server_info(object);

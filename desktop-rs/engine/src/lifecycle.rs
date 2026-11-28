@@ -64,6 +64,7 @@ fn terminal_bridge() -> Option<String> {
 pub(crate) struct Launch {
     catalog: Object,
     catalog_result: Option<bool>,
+    acp_offered: bool,
     contacts: Vec<Contact>,
     available_mcp_servers: Vec<Value>,
     starting_contact: String,
@@ -94,6 +95,7 @@ impl Launch {
         Self {
             catalog: Object::new(),
             catalog_result: None,
+            acp_offered: false,
             contacts: Vec::new(),
             available_mcp_servers: Vec::new(),
             starting_contact: String::new(),
@@ -157,6 +159,24 @@ impl Engine {
         self.launch.catalog_result = None;
     }
 
+    pub(crate) fn antigravity_acp_offered(&self) -> bool {
+        self.launch.acp_offered
+    }
+
+    pub(crate) fn launch_server_info(&mut self, info: &Object) {
+        let offered = info.get("contract").and_then(|contract| contract.pointer("/features/backend_agy_acp"))
+            .and_then(Value::as_u64).is_some_and(|introduced| introduced >= 165);
+        if offered != self.launch.acp_offered {
+            self.launch.acp_offered = offered;
+            self.changes.push(Change::Launch);
+        }
+    }
+
+    pub(crate) fn reset_launch_capabilities(&mut self) {
+        self.launch.acp_offered = false;
+        self.reset_model_catalog_result();
+    }
+
     fn load_model_catalog(&mut self) {
         self.reset_model_catalog_result();
         self.api.get("model-catalog", "/agent-model-options", &[]);
@@ -165,7 +185,7 @@ impl Engine {
     /// Installed providers as `{id, label}`.
     pub fn backend_options(&self) -> Vec<Value> {
         let mut options = clarp_core::catalog::backend_options(&self.launch.catalog);
-        if !self.model_catalog_loaded() {
+        if !self.model_catalog_loaded() || !self.antigravity_acp_offered() {
             options.retain(|option| option["id"] != clarp_core::catalog::ANTIGRAVITY_ACP);
         }
         options

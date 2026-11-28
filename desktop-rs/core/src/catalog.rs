@@ -52,7 +52,7 @@ pub fn backend_options(catalog: &Object) -> Vec<Value> {
     sorted
         .into_iter()
         .filter_map(|(_, id, provider)| {
-            if id == LEGACY_ANTIGRAVITY || (id == ANTIGRAVITY_ACP && provider.get("available").and_then(Value::as_bool) == Some(false)) {
+            if id == LEGACY_ANTIGRAVITY || (id == ANTIGRAVITY_ACP && provider.get("available").and_then(Value::as_bool) != Some(true)) {
                 return None;
             }
             let label = antigravity_label(id).map_or_else(|| provider.get("label").and_then(Value::as_str).unwrap_or(id), |label| label);

@@ -31,7 +31,7 @@ fn antigravity_launches_only_with_an_offered_acp_row() {
     assert!(backend_options(&catalog).is_empty());
     assert_eq!(models_for_backend(&catalog, "agy")[1]["label"], "Legacy model");
 
-    for acp in [json!({"available": false}), json!({"hidden": true}), json!({"installed": false})] {
+    for acp in [json!({}), json!({"available": false}), json!({"hidden": true}), json!({"installed": false})] {
         catalog.get_mut("providers").unwrap()["agy-acp"] = acp;
         assert!(backend_options(&catalog).is_empty());
     }

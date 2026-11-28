@@ -1815,11 +1815,12 @@ class Handler(BaseHTTPRequestHandler):
                     features.append("lanes_live")
             info = {"name": host_name, "clarp_version": "9.9.9", "default_cwd": "/tmp", "server_id": server_id,
                     "capabilities": {"version": 1, "features": features}}
+            info["contract"] = {"host": 999, "min_ios": 1, "features": {"backend_agy_acp": 165}}
             if artifact_summary["on"]:
                 features.append("artifact_summary_v1")
                 # contract.features names the contract a feature landed in;
                 # these are test numbers, the real one is booked at landing.
-                info["contract"] = {"host": 999, "min_ios": 1, "features": {"artifact_summary_v1": 990}}
+                info["contract"]["features"]["artifact_summary_v1"] = 990
             return self.reply(200, info)
         if url.path == "/agents/snapshot":
             if snapshot_delay[1] > 0:

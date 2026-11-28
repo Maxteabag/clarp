@@ -152,6 +152,7 @@ where
                 .unwrap_or_else(|| capitalised(id));
             let available = match row.get("available").and_then(Value::as_bool) {
                 Some(explicit) => explicit,
+                None if id == crate::catalog::ANTIGRAVITY_ACP => false,
                 // A Host before the field: installed is available.
                 None => row.get("installed").and_then(Value::as_bool) != Some(false),
             };

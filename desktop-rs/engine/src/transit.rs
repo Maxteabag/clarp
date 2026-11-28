@@ -210,7 +210,10 @@ impl Engine {
     /// Replies for the transit tags; true when it was one.
     pub(crate) fn transit_json(&mut self, tag: &str, object: &Object) -> bool {
         if let Some(session) = tag.strip_prefix(OPTIONS) {
-            let backends = transit::options(object, &chrono::Local::now());
+            let mut backends = transit::options(object, &chrono::Local::now());
+            if !self.antigravity_acp_offered() {
+                backends.retain(|backend| backend.id != clarp_core::catalog::ANTIGRAVITY_ACP);
+            }
             let options = self.transits.options.entry(session.to_owned()).or_default();
             options.loading = false;
             options.error.clear();
