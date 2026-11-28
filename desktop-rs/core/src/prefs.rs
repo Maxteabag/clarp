@@ -383,7 +383,7 @@ pub static SPECS: &[Spec] = &[
         name: "chatzoom",
         key: "conversation/chatZoom",
         label: "Chat zoom",
-        description: "How large everything in the chats is drawn (text, code, cards and spacing), apart from the rest of the window",
+        description: "Scale chat text, cards and spacing.",
         aliases: &["zoom", "zoom in", "zoom out", "magnify", "bigger", "smaller", "text size", "chat size", "message size", "enlarge"],
         section: CHAT,
         kind: number(100.0, 60.0, 250.0, 10.0, "%"),
@@ -1239,7 +1239,7 @@ pub fn import(settings: &mut Settings, file: &Value) -> (usize, Vec<String>) {
 pub fn schema() -> Value {
     let mut properties = Map::new();
     for spec in SPECS {
-        let doc = format!("{} — {} (:set {}; aliases: {})", spec.label, spec.description, spec.name, spec.aliases.join(", "));
+        let doc = format!("{}: {} (:set {}; aliases: {})", spec.label, spec.description, spec.name, spec.aliases.join(", "));
         let theme = reading_theme::default_theme_id();
         let property = match (spec.scope, spec.kind) {
             (Scope::Theme { .. }, _) => continue,
@@ -1269,7 +1269,7 @@ pub fn schema() -> Value {
         .filter_map(|s| match s.kind {
             Kind::Color { role } => Some((
                 role.to_owned(),
-                json!({"type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$", "description": format!("{} — {}", s.label, s.description)}),
+                json!({"type": "string", "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$", "description": format!("{}: {}", s.label, s.description)}),
             )),
             _ => None,
         })
@@ -1284,7 +1284,7 @@ pub fn schema() -> Value {
         json!({"type": "object", "description": "Font per reading theme: {\"terminal\": {\"family\": \"Iosevka\", \"size\": 16}}",
                "additionalProperties": {"type": "object", "properties": {
                    "family": {"type": "string"},
-                   "size": {"type": "number", "minimum": 9, "maximum": 40, "description": "Font size — Size of message text in the chat (:set fontsize)"}}}}),
+                   "size": {"type": "number", "minimum": 9, "maximum": 40, "description": "Font size: Size of message text in the chat (:set fontsize)"}}}}),
     );
     json!({
         "$schema": "http://json-schema.org/draft-07/schema#",

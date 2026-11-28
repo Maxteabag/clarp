@@ -278,7 +278,7 @@ fn new_durable_rows_clear_running_activity() {
     h.log(json!({"conversation_id": "c", "turns": []}), LoadKind::Tail);
     h.model.show_transient_thinking("Rachel");
     h.sync();
-    assert_eq!(h.bodies(), ["Rachel is working"]);
+    assert_eq!(h.bodies(), ["Working"]);
     h.log(json!({"conversation_id": "c", "turns": [turn("m1", 1)]}), LoadKind::Delta);
     assert_eq!(h.ids(), ["m1"]);
 }

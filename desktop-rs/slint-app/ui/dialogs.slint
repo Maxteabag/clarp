@@ -70,15 +70,9 @@ export component KeymapEditor inherits Modal {
             Rectangle { horizontal-stretch: 1; }
             Text { text: "‹ " + root.context + " ›"; color: Palette.accent; font-size: 14 * Look.unit; font-weight: 700; vertical-alignment: center; accessible-label: "Context " + root.context; }
         }
-        HorizontalLayout {
+        if root.filter != "" || root.count != "": HorizontalLayout {
             spacing: 12px;
-            Text {
-                text: "A binding here reaches the contexts inside this one. Typing keys bound further out never reach a text field.";
-                color: Palette.muted;
-                font-size: 11 * Look.unit;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-            }
+            Rectangle { horizontal-stretch: 1; }
             Text { text: root.filter != "" ? root.filter + "  " + root.count : root.count; color: Palette.muted; font-size: 11 * Look.unit; vertical-alignment: center; }
         }
         Rectangle {
@@ -183,12 +177,6 @@ export component ConnectionPage inherits Modal {
         padding: 28px;
         spacing: 14px;
         Text { text: "Connect to Clarp"; color: Palette.text; font-size: 17 * Look.unit; font-weight: 600; }
-        Text {
-            text: "The native client connects directly to the Clarp server. Credentials remain outside the UI after this session.";
-            color: Palette.muted;
-            font-size: 12 * Look.unit;
-            wrap: word-wrap;
-        }
         if root.hosts.length > 0: Text { text: "Saved Hosts"; color: Palette.muted; font-size: 11 * Look.unit; }
         // At most six (the app sends no more); Ctrl+K finds every saved Host.
         for host in root.hosts: HorizontalLayout {
@@ -219,13 +207,13 @@ export component ConnectionPage inherits Modal {
         }
         server := Field { placeholder-text: "http://127.0.0.1:7682"; accessible-label: "Server"; }
         token := Field {
-            placeholder-text: "Device or administrator token";
+            placeholder-text: "Token";
             input-type: password;
             accessible-label: "Token";
             accepted => { root.connect(server.text, token.text); }
         }
         Rectangle { height: 1px; background: Palette.border; }
-        Text { text: "Or pair with a one-time code from clarp-admin pair create"; color: Palette.muted; font-size: 11 * Look.unit; }
+        Text { text: "Or pair with a one-time code"; color: Palette.muted; font-size: 11 * Look.unit; }
         HorizontalLayout {
             spacing: 8px;
             code := Field {
@@ -335,7 +323,7 @@ export component SelectTextPage inherits Modal {
             }
         }
         Text {
-            text: "Drag or Shift+arrows to select · Ctrl+A all · Ctrl+C copy · Esc close";
+            text: "Ctrl+A all · Ctrl+C copy · Esc close";
             color: Palette.muted;
             font-size: 11 * Look.unit;
         }

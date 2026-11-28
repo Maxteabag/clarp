@@ -38,7 +38,7 @@ pub const CLEAN_KEY: &str = "conversation/cleanChat";
 
 pub const TITLE: &str = "Chat view";
 pub const CLEAN_TITLE: &str = "Clean chat";
-pub const CLEAN_DETAIL: &str = "Every chat in Conversation view: only your messages and the replies, one Running… box while an agent works.";
+pub const CLEAN_DETAIL: &str = "Messages and replies only.";
 pub const SHOW_WORK: &str = "Show work";
 pub const HIDE_WORK: &str = "Hide work";
 /// The Tool activity menu's place in Conversation view.
@@ -88,9 +88,9 @@ pub fn menu_label(value: &str) -> &'static str {
 /// The quiet line after a write the Host refused.
 pub fn refused(host: &str) -> String {
     if host.trim().is_empty() {
-        "Not saved on the server. This device keeps the view.".to_owned()
+        "Saved on this device only.".to_owned()
     } else {
-        format!("Not saved on {}. This device keeps the view.", host.trim())
+        format!("Not saved on {}. Kept locally.", host.trim())
     }
 }
 

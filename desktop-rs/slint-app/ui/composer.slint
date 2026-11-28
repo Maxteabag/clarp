@@ -350,7 +350,7 @@ export component Composer inherits FocusScope {
         if root.transcribing > 0: HorizontalLayout {
             spacing: 8px;
             Text {
-                text: root.transcribing == 1 ? "Transcribing voice in background…" : root.transcribing + " voice notes transcribing…";
+                text: root.transcribing == 1 ? "Transcribing…" : root.transcribing + " transcribing…";
                 color: Palette.muted;
                 font-size: 12 * Look.unit;
                 overflow: elide;
@@ -382,8 +382,8 @@ export component Composer inherits FocusScope {
         // queued_shown) and fades in. A paused queue's messages wait until
         // sent: its dialog sends one now (the queue stays paused until empty).
         if root.queued > 0 && !root.strip-shown: RevealText {
-            text: root.queued + (root.queued == 1 ? " message queued" : " messages queued")
-                + (root.queue-paused ? "  ·  paused  ·  click to send one now" : "  ·  Ctrl+Enter queues next");
+            text: root.queued + (root.queued == 1 ? " queued" : " queued")
+                + (root.queue-paused ? " · paused" : "");
             color: Palette.muted;
             font-size: 12 * Look.unit;
             overflow: elide;
@@ -427,7 +427,7 @@ export component Composer inherits FocusScope {
                 HorizontalLayout {
                     padding-left: 9px;
                     padding-right: 9px;
-                    Text { text: "→ " + root.route + "  ·  Enter sends to " + root.route + "'s chat"; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; }
+                    Text { text: "→ " + root.route; color: Palette.text; font-size: 12 * Look.unit; vertical-alignment: center; }
                 }
             }
         }

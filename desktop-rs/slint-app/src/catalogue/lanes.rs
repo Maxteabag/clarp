@@ -67,7 +67,7 @@ fn tool_switch(slot: usize) -> Setting {
             SLOTS[slot],
             "Kept between messages",
             "host",
-            "Keeps this tool running between an agent's messages on the connected Host, so the next message starts sooner.",
+            "Keeps this tool warm between messages.",
             &["kept processes", "lanes", "keep running", "warm", "background process", "tool process", "toggle"],
         ),
         SECTION,
@@ -110,14 +110,14 @@ fn limits_choice() -> Setting {
             "kept-limits",
             "Limits",
             "host",
-            "Auto keeps processes while the connected Host's machine keeps enough memory free; fixed holds to the most and the memory set below.",
+            "Auto follows free memory; fixed uses the limits below.",
             &["auto", "fixed", "limits", "free memory", "dynamic", "kept processes", "lanes", "mode"],
         ),
         SECTION,
         |_| {
             vec![
-                Choice::new(lanes::AUTO, "Auto").about("Follow the machine's free memory"),
-                Choice::new(lanes::FIXED, "Fixed").about("Most kept processes and the memory they may hold"),
+                Choice::new(lanes::AUTO, "Auto").about("Follow free memory"),
+                Choice::new(lanes::FIXED, "Fixed").about("Fixed process and memory cap"),
             ]
         },
         |app| app.engine.borrow().lane_settings().and_then(lanes::limits).unwrap_or_default().to_owned(),
@@ -139,7 +139,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.push(host_number(
         "kept-reserve",
         "Memory kept free",
-        "In auto, how much of the machine's memory the connected Host keeps free: a process is kept only while this much stays free.",
+        "Minimum free memory kept in auto mode.",
         &["reserve", "reserve percent", "free memory", "headroom", "auto", "kept processes"],
         "reserve_percent",
         (5.0, 50.0),
@@ -149,7 +149,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.push(host_number(
         "kept-ceiling",
         "Most kept in auto",
-        "In auto, how many kept processes the connected Host holds at most, however much memory is free.",
+        "Maximum kept processes in auto mode.",
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["ceiling", "cap", "most lanes", "auto", "how many", "kept processes", "maximum"],
         "ceiling",
@@ -161,7 +161,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.push(limit(
         "kept-most",
         "Most kept processes",
-        "How many kept processes the connected Host holds, of every tool together.",
+        "Maximum kept processes across all tools.",
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["lanes", "most lanes", "limit", "how many", "kept processes", "maximum"],
         "most",
@@ -171,8 +171,8 @@ pub(super) fn register() -> Vec<Setting> {
     ));
     all.push(limit(
         "kept-memory",
-        "Memory they may hold",
-        "How much memory the kept processes may hold together on the connected Host.",
+        "Memory limit",
+        "Total memory budget for kept processes.",
         // ui-text: allow (search aliases, never drawn: older words people may still type)
         &["memory", "ram", "lane memory", "budget", "kept processes", "megabytes"],
         "memory_mb",
@@ -182,8 +182,8 @@ pub(super) fn register() -> Vec<Setting> {
     ));
     all.push(limit(
         "kept-idle",
-        "Unused one kept for",
-        "How long a kept process with no message is kept before it leaves.",
+        "Idle timeout",
+        "How long unused processes stay warm.",
         &["idle", "timeout", "idle minutes", "how long", "kept processes", "unused"],
         "idle_minutes",
         (1.0, 240.0),
@@ -215,13 +215,10 @@ pub fn information(app: &App) -> Vec<(String, String)> {
         out.push((group.title, group.summary));
         out.extend(group.lines.into_iter().map(|(label, detail)| (format!("{TOOL_INDENT}{label}"), detail)));
     }
-    if auto {
-        out.push(("Fixed limits".to_owned(), "Most kept processes and Memory they may hold apply when the limits are fixed; setting either switches the Host to fixed.".to_owned()));
-    }
     if !engine.lane_settings_error().is_empty() {
         out.push(("Not changed".to_owned(), engine.lane_settings_error().to_owned()));
     }
-    out.push(("When".to_owned(), "Changes take effect at each agent's next message.".to_owned()));
+    out.push(("When".to_owned(), "Applies on next message.".to_owned()));
     out
 }
 

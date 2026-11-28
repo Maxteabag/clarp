@@ -118,25 +118,21 @@
   <div class="start-dialog">
     <div class="start-card">
       <h3>Orchestrator</h3>
-      <p class="start-hint">
-        Name matching runs first. The routing AI is a fallback for delegations
-        that do not resolve to one agent.
-      </p>
 
       <label class="start-field inline-toggle">
-        <span>Use AI to resolve failed delegations</span>
+        <span>AI routing</span>
         <input type="checkbox" bind:checked={enabled} />
       </label>
       <label class="start-field inline-toggle">
-        <span>Only when name matching can’t decide</span>
+        <span>Fallback only</span>
         <input type="checkbox" bind:checked={fallbackOnly} />
       </label>
       <label class="start-field">
-        <span>Automatic routing confidence</span>
+        <span>Confidence</span>
         <input type="number" min="0.50" max="0.99" step="0.05" bind:value={confidence} />
       </label>
       <label class="start-field">
-        <span>Routing AI provider</span>
+        <span>Provider</span>
         <select bind:value={provider} onchange={() => { model = ''; effort = ''; }}>
           {#each options as o (o.id)}
             <option value={o.id}>{o.label}{o.installed === false ? ' (not installed)' : ''}</option>
@@ -144,16 +140,16 @@
         </select>
       </label>
       <label class="start-field">
-        <span>Routing model</span>
+        <span>Model</span>
         <select bind:value={model} onchange={() => effort = ''}>
-          <option value="">Provider default</option>
+          <option value="">Default</option>
           {#each models as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
         </select>
       </label>
       <label class="start-field">
-        <span>Reasoning effort</span>
+        <span>Effort</span>
         <select bind:value={effort}>
-          <option value="">Provider default</option>
+          <option value="">Default</option>
           {#each efforts as e (e)}
             <option value={e}>{e.charAt(0).toUpperCase() + e.slice(1)}</option>
           {/each}
@@ -161,7 +157,7 @@
       </label>
       <div class="orchestrator-last">{providerHelp}</div>
       <label class="start-field">
-        <span>Timeout ms</span>
+        <span>Timeout (ms)</span>
         <input type="number" min="250" max="60000" step="250" bind:value={timeoutMs} />
       </label>
       <div class="orchestrator-last">{last}</div>
@@ -175,7 +171,7 @@
             </div>
           {/each}
         {:else}
-          <div class="orchestrator-ignored-empty">No ignored dictation yet.</div>
+          <div class="orchestrator-ignored-empty">None</div>
         {/if}
       </div>
 

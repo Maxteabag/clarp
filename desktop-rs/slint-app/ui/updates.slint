@@ -157,9 +157,9 @@ export component Updates inherits Rectangle {
                 letter-spacing: 1.6px;
                 vertical-alignment: center;
             }
-            Text {
-                text: root.attention.length > 0 ? root.attention.length + " need attention" : "All caught up";
-                color: root.attention.length > 0 ? Palette.danger : Palette.muted;
+            if root.attention.length > 0: Text {
+                text: root.attention.length + " need attention";
+                color: Palette.danger;
                 font-size: 11 * Look.unit;
                 vertical-alignment: center;
             }
@@ -261,7 +261,7 @@ export component Updates inherits Rectangle {
                     }
                     IconButton {
                         icon: @image-url("icons/terminal.svg");
-                        label: "Show the job's output (Ctrl+Shift+P lists every job)";
+                        label: "Job output";
                         size: 26px;
                         clicked => { root.job-output(job.id); }
                     }
@@ -283,7 +283,7 @@ export component Updates inherits Rectangle {
                     padding-top: 80px;
                     spacing: 7px;
                     Text { text: "✓"; color: Palette.chrome-text; font-size: 17 * Look.unit; horizontal-alignment: center; }
-                    Text { text: "Nothing needs you right now"; color: Palette.text; font-size: 14 * Look.unit; horizontal-alignment: center; }
+                    Text { text: "No updates"; color: Palette.text; font-size: 14 * Look.unit; horizontal-alignment: center; }
                 }
             }
         }

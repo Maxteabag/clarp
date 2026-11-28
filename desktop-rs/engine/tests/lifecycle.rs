@@ -31,9 +31,9 @@ fn the_catalog_loads_once_live_and_lists_backends_models_and_efforts() {
     assert!(d.changes.contains(&Change::Launch));
     assert_eq!(host.requests("GET", "/agent-model-options").len(), 1);
     assert_eq!(d.engine.backend_options(), vec![json!({"id": "claude", "label": "Claude"}), json!({"id": "codex", "label": "Codex"})]);
-    assert_eq!(d.engine.models_for_backend("claude"), vec![json!({"id": "", "label": "Harness default"}), json!({"id": "opus", "label": "Opus"})]);
+    assert_eq!(d.engine.models_for_backend("claude"), vec![json!({"id": "", "label": "Default"}), json!({"id": "opus", "label": "Opus"})]);
     let efforts: Vec<_> = d.engine.efforts_for_model("claude", "opus").iter().map(|e| e["label"].as_str().unwrap().to_owned()).collect();
-    assert_eq!(efforts, ["Harness default", "Low", "High"]);
+    assert_eq!(efforts, ["Default", "Low", "High"]);
     assert_eq!(d.engine.efforts_for_model("codex", "gpt-5")[1]["id"], "medium", "a model without efforts uses its provider's");
     assert_eq!(d.engine.default_effort_for_model("claude", "opus"), "high");
     assert!(d.engine.backend_supports_resume("claude") && !d.engine.backend_supports_resume("codex"));
@@ -85,7 +85,7 @@ fn a_saved_legacy_antigravity_default_needs_an_explicit_launch_choice() {
     let mut d = Driver::with_settings(&host.base, settings);
     d.connect();
     assert!(!d.engine.quick_start_contact("Paula", "", "", ""));
-    assert!(d.engine.error().contains("choose which tool"));
+    assert!(d.engine.error().contains("Choose a backend"));
     assert_eq!(d.engine.last_backend(), "agy");
     assert!(host.requests("POST", "/agents").is_empty());
 }

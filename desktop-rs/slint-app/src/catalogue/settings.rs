@@ -12,10 +12,10 @@ use super::{Choice, Setting, e, keyed, shown};
 use crate::{App, AppWindow};
 
 const ACTIVITY: [(&str, &str); 4] = [
-    ("Grouped", "Each turn's tool calls and thinking fold into one work row that opens in place."),
-    ("Always visible", "Every tool call shows as its own row."),
-    ("Group old", "Recent tool calls show; older ones fold."),
-    ("Hide when done", "The work row shows while the turn runs and goes when it has finished."),
+    ("Grouped", "One collapsible work row per turn."),
+    ("Always visible", "Every tool call as its own row."),
+    ("Group old", "Recent calls shown; older ones grouped."),
+    ("Hide when done", "Visible only while the turn runs."),
 ];
 /// This device shows the quiet line where agent messages were (#653).
 pub const COORDINATION_LINE: &str = "conversation/coordinationLine";
@@ -67,27 +67,27 @@ fn preference(app: &Rc<App>, key: &str, on: bool, timestamps: bool) {
 fn chats() -> Vec<Setting> {
     vec![
         Setting::toggle(
-            keyed(e("timestamps", "Timestamps", "chats", "Shows the time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
+            keyed(e("timestamps", "Timestamps", "chats", "Time beside each message.", shown!["time", "date", "clock", "message times", "stamps"]), &["setting:timestampsVisible"]),
             "CHATS",
             |app| app.prefs.borrow().timestamps,
             |app, _, on| preference(app, "conversation/timestampsVisible", on, true),
         )
         .default("off"),
         Setting::toggle(
-            e("show-when-ready", "Show when ready", "chats", "Shows a reply once it is complete instead of while it streams in.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
+            e("show-when-ready", "Show when ready", "chats", "Show replies once complete.", &["stream", "streaming", "typing", "live text", "wait for answer", "toggle"]),
             "CHATS",
             |app| app.engine.borrow().show_when_ready(),
             |app, _, on| app.engine.borrow_mut().set_show_when_ready(on),
         ),
         Setting::stored_toggle(
-            e("reduced-motion", "Reduce Motion", "appearance", "Turns off animations and smooth scrolling, the working row's shimmer among them.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"]),
+            e("reduced-motion", "Reduce Motion", "appearance", "Disable animations and shimmer.", &["animations", "animation", "motion", "accessibility", "reduce animations", "toggle", "still", "shimmer"]),
             "CHATS",
             "appearance/reducedMotion",
             false,
         ),
         Setting::choice(
             keyed(
-                e("activity", "Tool activity", "chats", "How an agent's tool calls show in the chat: grouped into one work row, always visible, old ones grouped, or hidden once the turn is done.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"]),
+                e("activity", "Tool activity", "chats", "How tool calls appear in chat.", &["tool calls", "tools", "collapse", "expand", "grouping", "group tools", "activity", "hide tools", "hide when done", "quiet chat", "work row"]),
                 &["tools"],
             ),
             "CHATS",
@@ -133,7 +133,7 @@ fn chats() -> Vec<Setting> {
         // Coordination between agents (`hidden_coordination`, #653): the
         // Host's own setting, written only when the reader flips it.
         Setting::toggle(
-            e("agent-messages", clarp_core::coordination::SETTING, "chats", "Shows the messages agents send each other in every chat (the Host's setting). Off, they are left out; each chat's profile can still show them.", &["coordination", "between agents", "agent to agent", "a2a", "hide agent messages", "quiet chat", "toggle"]),
+            e("agent-messages", clarp_core::coordination::SETTING, "chats", "Show inter-agent messages (Host setting).", &["coordination", "between agents", "agent to agent", "a2a", "hide agent messages", "quiet chat", "toggle"]),
             "CHATS",
             |app| app.engine.borrow().coordination_shown(),
             |app, _, on| app.engine.borrow_mut().set_coordination_shown(on),
@@ -142,7 +142,7 @@ fn chats() -> Vec<Setting> {
         // This device's choice, next to it: the quiet "N messages between
         // agents" line, or nothing at all.
         Setting::toggle(
-            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Applies wherever messages between agents are hidden, in every chat.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
+            e("agent-messages-line", clarp_core::coordination::LINE_SETTING, "chats", "Show marker where agent messages are hidden.", &["agent messages line", "messages between agents", "hidden messages", "count line", "quiet chat", "toggle"]),
             "CHATS",
             |app| app.engine.borrow().settings().boolean(COORDINATION_LINE, true),
             |app, _, on| {
@@ -161,7 +161,7 @@ fn chats() -> Vec<Setting> {
                 "live-status-line",
                 "Live status line",
                 "chats",
-                "Shows the line between the chat and the composer with the agent's current step, how long it has run and the Ctrl+. stop key. Off, the working row shimmers in the chat and the shortcut bar names Stop.",
+                "Show current step and Stop above the composer.",
                 &["status line", "stop hint", "activity bar under chat", "working indicator", "live status", "current tool", "progress line", "elapsed time"],
             ),
             "CHATS",
@@ -174,7 +174,7 @@ fn chats() -> Vec<Setting> {
                     "show-queue",
                     "Show the queue",
                     "chats",
-                    "Shows one line above the composer that says how many messages wait behind the running turn, with Steer now. Off, only the composer's count says how many wait.",
+                    "Show waiting messages strip above composer.",
                     &["queue", "queue strip", "waiting messages", "messages waiting", "send now", "hide queue", "show queue", "toggle"],
                 ),
                 &["toggle-queue"],
@@ -189,7 +189,7 @@ fn chats() -> Vec<Setting> {
                 "send-animation",
                 "Send animation",
                 "appearance",
-                "A sent message lifts out of the composer and flies to its place at the end of the chat while the composer shrinks. With Reduce Motion it fades in instead.",
+                "Animate sent messages into the chat.",
                 &["send", "sending", "message animation", "fly", "flight", "telegram", "bubble", "composer", "toggle"],
             ),
             "CHATS",
@@ -203,7 +203,7 @@ fn chats() -> Vec<Setting> {
                 "all-hosts",
                 "Show chats from all Hosts",
                 "chats",
-                "Lists the chats of every Host this desktop is paired with; opening one talks to its own Host. New chats and Host settings stay on the connected Host.",
+                "List chats from all paired Hosts.",
                 &["hosts", "all hosts", "paired hosts", "other hosts", "every host", "merge hosts", "servers", "multiple hosts", "combined list"],
             ),
             "CHATS",
@@ -219,7 +219,7 @@ fn chats() -> Vec<Setting> {
                 "host-badges",
                 "Show the Host on each chat",
                 "chats",
-                "Names the Host each chat lives on, in its row and header, when this desktop is paired with more than one Host.",
+                "Show Host badge on rows and headers.",
                 &["host badge", "host name", "which host", "badges", "host label", "server name", "where it lives"],
             ),
             "CHATS",
@@ -262,7 +262,7 @@ fn experiments() -> Vec<Setting> {
                 "scroll-dashcam",
                 "Scroll dashcam",
                 "diagnostics",
-                "Keeps the chat's last few seconds of scroll positions and reports a frame that jumps away and back (a flash) to the Host, for finding scroll bugs. Off records nothing.",
+                "Record recent scroll positions to report jump bugs.",
                 &["dashcam", "scroll", "flash", "jump", "diagnostics", "debug", "recorder", "jitter"],
             ),
             "DIAGNOSTICS",
@@ -270,13 +270,13 @@ fn experiments() -> Vec<Setting> {
             false,
         ),
         Setting::toggle(
-            keyed(e("narration", "Plain-English tools", "experiment", "Describes tool calls in plain English with Spark (uses extra AI).", &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"]), &["tool-narration"]),
+            keyed(e("narration", "Plain-English tools", "experiment", "Explain tool calls in plain English (uses AI).", &["narration", "narrator", "spark", "explain tools", "plain english", "toggle"]), &["tool-narration"]),
             "EXPERIMENTS",
             |app| app.engine.borrow().narrator_enabled(),
             |app, _, on| app.engine.borrow_mut().set_narrator_enabled(on),
         ),
         Setting::choice(
-            e("tool-detail", "Tool detail", "experiment", "How much the plain-English tool descriptions say; opens a list of levels.", &["detail level", "explanation", "verbosity", "narration", "audience", "explanations"]),
+            e("tool-detail", "Tool detail", "experiment", "Explanation detail level.", &["detail level", "explanation", "verbosity", "narration", "audience", "explanations"]),
             "EXPERIMENTS",
             |_| {
                 clarp_engine::Engine::narrator_detail_levels()
