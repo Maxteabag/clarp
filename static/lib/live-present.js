@@ -237,7 +237,7 @@ function turnError(turn, tr) {
 }
 
 /** The Host's explanation of a failed turn (docs/turn-errors.md, contract
- * 217): the error object when it carries a sentence, else null (an older
+ * 220): the error object when it carries a sentence, else null (an older
  * Host), and the notice reads as before. */
 export function explainedError(e) {
   const text = e && typeof e === 'object' && e.text;
@@ -323,7 +323,7 @@ export function planTurnErrors(turns, live = null) {
  */
 export function systemNotice(row) {
   if (!row || row.role === 'user') return null;
-  // The Host's explanation (contract 217), also on a turn-interrupted notice.
+  // The Host's explanation (contract 220), also on a turn-interrupted notice.
   const explained = explainedError(row.error);
   if (!explained && (row.role !== 'assistant' || row.origin !== 'system')) return null;
   const text = String(row.text || '').trim();

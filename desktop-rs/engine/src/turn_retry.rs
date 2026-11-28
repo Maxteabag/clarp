@@ -1,5 +1,5 @@
 //! A failure card's retries (`POST /turn-retry`, docs/turn-errors.md, Rust
-//! Host contract 217): the Host sends the failed turn's message again, at
+//! Host contract 220): the Host sends the failed turn's message again, at
 //! once, at a time, in a fresh session or after compacting. Each button's
 //! request is kept by chat, message and action so the card shows it going,
 //! done or refused until the chat moves on.

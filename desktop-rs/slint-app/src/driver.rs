@@ -95,7 +95,7 @@ mod stop_checks;
 // ---- a stalled turn: the working indicator says so and offers Stop (#249)
 #[path = "stall_checks.rs"]
 mod stall_checks;
-// ---- a failed turn explained: one card, repeats as one (contract 217)
+// ---- a failed turn explained: one card, repeats as one (contract 220)
 #[path = "turn_error_checks.rs"]
 mod turn_error_checks;
 // ---- why an agent cannot answer now: one line in the row and the header (#918)

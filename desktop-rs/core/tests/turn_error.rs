@@ -1,4 +1,4 @@
-//! The Host's turn errors (docs/turn-errors.md, contract 217) against the
+//! The Host's turn errors (docs/turn-errors.md, contract 220) against the
 //! contract fixture (`tests/fixtures/turn-errors.json`, a copy of
 //! `contract/fixtures/turn-errors.json`): decoding, the language, the
 //! retry bodies and the collapse of repeats.

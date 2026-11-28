@@ -1,4 +1,4 @@
-//! A failed turn's card (docs/turn-errors.md, Rust Host contract 217): the
+//! A failed turn's card (docs/turn-errors.md, Rust Host contract 220): the
 //! sentence from the catalog by the Host's key (`clarp_core::turn_error_text`)
 //! in the app's language, the buttons that fit, a count for repeats and a
 //! closed Details. `clarp_core::turn_error` decides what shows; this fills the

@@ -1,4 +1,4 @@
-// The Host's turn errors (docs/turn-errors.md, contract 217) in the web app,
+// The Host's turn errors (docs/turn-errors.md, contract 220) in the web app,
 // against the contract fixture (tests/fixtures/turn-errors.json, a copy of
 // contract/fixtures/turn-errors.json): decoding, language, retry bodies and
 // the collapse of repeats.
