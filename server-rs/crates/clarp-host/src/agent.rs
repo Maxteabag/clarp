@@ -2988,8 +2988,7 @@ impl Worker {
             .open(&self.setup.profile.dir, self.setup.codecs.clone())
             .map_err(|error| error.to_string())?;
         let telling = self.setup.telling.clone();
-        let doing_transit = self.setup.record.backend == clarp_backend::LEGACY_AGY
-            || crate::agent_transit::holds_mailbox(&self.setup.record.agent_id);
+        let legacy_agy = self.setup.record.backend == clarp_backend::LEGACY_AGY;
         let (mut actor, mut out) = Actor::open_with_teams(
             self.setup.profile.clone(),
             self.setup.backend.clone(),
@@ -3006,7 +3005,7 @@ impl Worker {
             } else {
                 None
             },
-            doing_transit,
+            legacy_agy,
         )
         .map_err(|error| error.to_string())?;
         // The agent's log changed its tool, and its record still says the tool it changed
@@ -3036,6 +3035,8 @@ impl Worker {
         }
         // A re-open in this process must keep an active Transit fenced. Otherwise the
         // journal's waiting messages can safely go on using the recorded backend.
+        let doing_transit =
+            legacy_agy || crate::agent_transit::holds_mailbox(&self.setup.record.agent_id);
         out.absorb(
             actor
                 .hold_for_transit(doing_transit, self.now_ms())

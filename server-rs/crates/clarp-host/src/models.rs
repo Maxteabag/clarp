@@ -264,33 +264,29 @@ impl Shelf {
     }
 
     pub fn policy_model_error(&self, tool: &str, model: &str) -> Option<String> {
-        let tool = clarp_backend::canonical_id(tool);
-        if !matches!(tool, "codex" | "agy-acp") {
+        // ACP validates the selected model and its thinking level against the
+        // session's options. The picker need not have been opened first.
+        if tool != "codex" {
             return None;
         }
         let kept = self
             .kept
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let observed = kept
+        let row = kept
             .as_ref()
             .map(|k| &k.told["providers"][tool])
-            .filter(|r| r["source"]["kind"] == "cli_probe");
-        let bundled = catalogue::declared(tool);
-        let row = observed.or_else(|| (tool == "agy-acp").then_some(&bundled))?;
+            .filter(|r| r["source"]["kind"] == "cli_probe")?;
         let mut ids: Vec<_> = row["models"]
             .as_array()
             .into_iter()
             .flatten()
             .filter_map(|item| item["id"].as_str())
             .collect();
-        if ids.contains(&model.trim()) || (ids.is_empty() && tool == "codex") {
+        if ids.contains(&model.trim()) || ids.is_empty() {
             return None;
         }
         let reason = "Invalid provider model identifier";
-        if tool == "agy-acp" {
-            return Some(reason.into());
-        }
         ids.sort_unstable();
         Some(format!(
             "{reason}: {tool} has no model '{model}'; it offers {}",
