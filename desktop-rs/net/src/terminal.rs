@@ -28,6 +28,9 @@ use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::{Message, Role};
 use url::Url;
+use clarp_core::tr;
+
+// i18n-screen: agent terminal
 
 /// The longest answer head or refusal read; a Host's sentence is far shorter.
 const LONGEST_ANSWER: usize = 64 * 1024;
@@ -71,19 +74,24 @@ impl Ended {
 /// The WebSocket address of `session`'s terminal on the Host at `base`
 /// (`http` becomes `ws`, `https` `wss`; a path prefix is kept).
 pub fn terminal_url(base: &str, session: &str) -> Result<Url, String> {
-    let mut url = Url::parse(base.trim()).map_err(|error| format!("{base} is not a Host address: {error}"))?;
+    // i18n: agent terminal window, error: the saved Host address cannot be read; {0} is the address, {1} the technical reason
+    let mut url = Url::parse(base.trim()).map_err(|error| tr!("{0} is not a Host address: {1}", base, error))?;
     let scheme = match url.scheme() {
         "http" => "ws",
         "https" => "wss",
-        other => return Err(format!("{base} is not a Host address (it is {other}, not http or https)")),
+        // i18n: agent terminal window, error: {0} is the address, {1} its scheme (http and https stay as they are)
+        other => return Err(tr!("{0} is not a Host address (it is {1}, not http or https)", base, other)),
     };
     if url.host_str().is_none_or(str::is_empty) {
-        return Err(format!("{base} is not a Host address (it names no machine)"));
+        // i18n: agent terminal window, error: {} is the address
+        return Err(tr!("{} is not a Host address (it names no machine)", base));
     }
-    url.set_scheme(scheme).map_err(|()| format!("{base} is not a Host address"))?;
+    // i18n: agent terminal window, error: {} is the saved Host address
+    url.set_scheme(scheme).map_err(|()| tr!("{} is not a Host address", base))?;
     url.set_query(None);
     url.set_fragment(None);
-    url.path_segments_mut().map_err(|()| format!("{base} is not a Host address"))?.pop_if_empty().push("terminal").push(session);
+    // i18n: agent terminal window, error: {} is the saved Host address
+    url.path_segments_mut().map_err(|()| tr!("{} is not a Host address", base))?.pop_if_empty().push("terminal").push(session);
     Ok(url)
 }
 
@@ -119,9 +127,11 @@ pub fn refusal_sentence(status: u16, reason: &str, body: &[u8]) -> String {
     }
     let reason = reason.trim();
     if reason.is_empty() {
-        format!("The Host refused the terminal ({status}).")
+        // i18n: agent terminal window, error: the Host would not open the terminal; {} is its HTTP status number
+        tr!("The Host refused the terminal ({}).", status)
     } else {
-        format!("The Host refused the terminal ({status} {reason}).")
+        // i18n: agent terminal window, error: {0} is the HTTP status number, {1} its reason phrase (English, from the Host)
+        tr!("The Host refused the terminal ({0} {1}).", status, reason)
     }
 }
 
@@ -148,7 +158,8 @@ pub fn parse_head(head: &[u8]) -> Result<Head, String> {
     let version = parts.next().unwrap_or_default();
     let status = parts.next().and_then(|code| code.parse::<u16>().ok());
     let (true, Some(status)) = (version.starts_with("HTTP/"), status) else {
-        return Err(format!("The Host's answer was not HTTP: {}", first.chars().take(80).collect::<String>()));
+        // i18n: agent terminal window, error: {} is the start of the answer as received
+        return Err(tr!("The Host's answer was not HTTP: {}", first.chars().take(80).collect::<String>()));
     };
     let reason = parts.next().unwrap_or_default().trim().to_owned();
     let headers = lines
@@ -182,13 +193,15 @@ pub async fn open(base: &str, session: &str, token: &str) -> Result<Terminal, St
     let url = terminal_url(base, session)?;
     match tokio::time::timeout(ANSWER_TIMEOUT, upgrade(&url, token)).await {
         Ok(opened) => opened,
-        Err(_) => Err(format!("The Host at {base} did not answer within {} seconds.", ANSWER_TIMEOUT.as_secs())),
+        // i18n: agent terminal window, error: {0} is the Host's address, {1} a number of seconds
+        Err(_) => Err(tr!("The Host at {0} did not answer within {1} seconds.", base, ANSWER_TIMEOUT.as_secs())),
     }
 }
 
 async fn upgrade(url: &Url, token: &str) -> Result<Terminal, String> {
     if token.contains(['\r', '\n']) {
-        return Err("The device token for this Host is not usable.".into());
+        // i18n: agent terminal window, error: this computer's saved sign-in key for the Host is damaged
+        return Err(tr!("The device token for this Host is not usable."));
     }
     let named = url.host_str().unwrap_or_default().to_owned();
     // The machine to connect to: an IPv6 address without its brackets.
@@ -197,7 +210,8 @@ async fn upgrade(url: &Url, token: &str) -> Result<Terminal, String> {
         _ => named.clone(),
     };
     let port = url.port_or_known_default().unwrap_or(80);
-    let tcp = TcpStream::connect((machine.as_str(), port)).await.map_err(|error| format!("Could not reach the Host at {named}:{port}: {error}."))?;
+    // i18n: agent terminal window, error: {0} is the Host's machine name, {1} its port number, {2} the technical reason
+    let tcp = TcpStream::connect((machine.as_str(), port)).await.map_err(|error| tr!("Could not reach the Host at {0}:{1}: {2}.", named, port, error))?;
     let _ = tcp.set_nodelay(true);
     let mut stream: Box<dyn Io> = if url.scheme() == "wss" { Box::new(secured(&machine, tcp).await?) } else { Box::new(tcp) };
 
@@ -217,7 +231,8 @@ async fn upgrade(url: &Url, token: &str) -> Result<Terminal, String> {
         request.push_str(&format!("Authorization: Bearer {token}\r\n"));
     }
     request.push_str("\r\n");
-    let lost = |error: std::io::Error| format!("The connection to the Host was lost: {error}.");
+    // i18n: agent terminal window, error: {} is the technical reason
+    let lost = |error: std::io::Error| tr!("The connection to the Host was lost: {}.", error);
     stream.write_all(request.as_bytes()).await.map_err(lost)?;
     stream.flush().await.map_err(lost)?;
 
@@ -226,7 +241,8 @@ async fn upgrade(url: &Url, token: &str) -> Result<Terminal, String> {
     if head.status == 101 {
         let accepted = head.header("sec-websocket-accept").is_some_and(|accept| accept == derive_accept_key(key.as_bytes()));
         if !accepted {
-            return Err("The Host's answer to the terminal was not a WebSocket.".into());
+            // i18n: agent terminal window, error (WebSocket is a technical term, usually kept)
+            return Err(tr!("The Host's answer to the terminal was not a WebSocket."));
         }
         return Ok(WebSocketStream::from_partially_read(stream, rest, Role::Client, None).await);
     }
@@ -239,14 +255,17 @@ async fn secured(machine: &str, tcp: TcpStream) -> Result<tokio_rustls::client::
     roots.extend(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
     let config = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
         .with_safe_default_protocol_versions()
-        .map_err(|error| format!("No secure connection is possible: {error}."))?
+        // i18n: agent terminal window, error: {} is the technical reason
+        .map_err(|error| tr!("No secure connection is possible: {}.", error))?
         .with_root_certificates(roots)
         .with_no_client_auth();
-    let name = rustls::pki_types::ServerName::try_from(machine.to_owned()).map_err(|error| format!("{machine} is not a Host name: {error}."))?;
+    // i18n: agent terminal window, error: {0} is the machine name, {1} the technical reason
+    let name = rustls::pki_types::ServerName::try_from(machine.to_owned()).map_err(|error| tr!("{0} is not a Host name: {1}.", machine, error))?;
     tokio_rustls::TlsConnector::from(Arc::new(config))
         .connect(name, tcp)
         .await
-        .map_err(|error| format!("Could not open a secure connection to {machine}: {error}."))
+        // i18n: agent terminal window, error: {0} is the machine name, {1} the technical reason
+        .map_err(|error| tr!("Could not open a secure connection to {0}: {1}.", machine, error))
 }
 
 /// The answer's head (up to its blank line) and what came after it.
@@ -260,12 +279,15 @@ async fn read_head(stream: &mut Box<dyn Io>) -> Result<(Vec<u8>, Vec<u8>), Strin
             return Ok((buffer, rest));
         }
         if buffer.len() > LONGEST_ANSWER {
-            return Err("The Host's answer to the terminal was too long.".into());
+            // i18n: agent terminal window, error
+            return Err(tr!("The Host's answer to the terminal was too long."));
         }
         match stream.read(&mut chunk).await {
-            Ok(0) => return Err("The Host closed the connection without answering.".into()),
+            // i18n: agent terminal window, error
+            Ok(0) => return Err(tr!("The Host closed the connection without answering.")),
             Ok(read) => buffer.extend_from_slice(&chunk[..read]),
-            Err(error) => return Err(format!("The connection to the Host was lost: {error}.")),
+            // i18n: agent terminal window, error: {} is the technical reason
+            Err(error) => return Err(tr!("The connection to the Host was lost: {}.", error)),
         }
     }
 }
@@ -326,7 +348,8 @@ pub async fn carry<W: AsyncWrite + Unpin>(
     mut sizes: UnboundedReceiver<(u16, u16)>,
 ) -> Ended {
     let (mut to_host, mut from_host) = terminal.split();
-    let lost = |error: &dyn std::fmt::Display| Ended::Lost(format!("The connection to the Host was lost: {error}."));
+    // i18n: agent terminal window, error: {} is the technical reason
+    let lost = |error: &dyn std::fmt::Display| Ended::Lost(tr!("The connection to the Host was lost: {}.", error));
     if let Err(error) = to_host.send(Message::text(resize_frame(size.0, size.1))).await {
         return lost(&error);
     }
@@ -352,18 +375,21 @@ pub async fn carry<W: AsyncWrite + Unpin>(
             message = from_host.next() => match message {
                 Some(Ok(Message::Binary(bytes))) => {
                     if let Err(error) = shown(output, &bytes).await {
-                        return Ended::Lost(format!("The terminal could not be written: {error}."));
+                        // i18n: agent terminal window, error: typing could not be sent; {} is the technical reason
+                        return Ended::Lost(tr!("The terminal could not be written: {}.", error));
                     }
                 }
                 Some(Ok(Message::Text(text))) => {
                     if let Err(error) = shown(output, text.as_bytes()).await {
-                        return Ended::Lost(format!("The terminal could not be written: {error}."));
+                        // i18n: agent terminal window, error: typing could not be sent; {} is the technical reason
+                        return Ended::Lost(tr!("The terminal could not be written: {}.", error));
                     }
                 }
                 Some(Ok(Message::Close(frame))) => return closed(frame.map(|frame| (frame.code, frame.reason.as_str().to_owned()))),
                 Some(Ok(_)) => {}
                 Some(Err(error)) => return lost(&error),
-                None => return Ended::Lost("The Host closed the connection.".into()),
+                // i18n: agent terminal window, closing line
+                None => return Ended::Lost(tr!("The Host closed the connection.")),
             },
         }
     }
@@ -379,8 +405,10 @@ async fn shown<W: AsyncWrite + Unpin>(output: &mut W, bytes: &[u8]) -> std::io::
 fn closed(frame: Option<(CloseCode, String)>) -> Ended {
     match frame {
         Some((_, reason)) if !reason.trim().is_empty() => Ended::Refused(reason.trim().to_owned()),
-        None | Some((CloseCode::Normal, _)) => Ended::Closed("The agent's terminal closed.".into()),
-        Some((code, _)) => Ended::Lost(format!("The Host closed the terminal ({}).", u16::from(code))),
+        // i18n: agent terminal window, closing line when the terminal ended normally
+        None | Some((CloseCode::Normal, _)) => Ended::Closed(tr!("The agent's terminal closed.")),
+        // i18n: agent terminal window, closing line; {} is the WebSocket close code number
+        Some((code, _)) => Ended::Lost(tr!("The Host closed the terminal ({}).", u16::from(code))),
     }
 }
 
