@@ -1,11 +1,12 @@
 use super::*;
 
 /// The fields of an agent's snapshot row a chat's preview carries.
-const PREVIEW_FIELDS: [&str; 9] = [
+const PREVIEW_FIELDS: [&str; 10] = [
     "conversation_id",
     "head_revision",
     "last_message_id",
     "last_message",
+    "last_message_preview",
     "busy",
     "latest_state",
     "latest_state_ts",
