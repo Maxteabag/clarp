@@ -161,8 +161,17 @@ pub fn notify_daemon_check(_out: String) {
             }
             window.invoke_chat_chosen("mike".into());
             // Two replies of one chat before the daemon has answered the first.
-            send(reply("q-1", "First reply"));
-            send(reply("q-2", "Second reply"));
+            let mut first = reply("q-1", "First reply");
+            first["order_epoch"] = "one".into();
+            first["event_at_ms"] = 1.into();
+            first["event_seq"] = 1.into();
+            let mut second = reply("q-2", "Second reply");
+            second["order_epoch"] = "one".into();
+            second["event_at_ms"] = 1.into();
+            second["event_seq"] = 2.into();
+            send(first);
+            send(second);
+            send(json!({"type":"chat-read","session":"rachel","order_epoch":"one","read_through_ms":1,"read_through_seq":1}));
             true
         })),
         ("chained", Box::new(|_, _window, elapsed| {
@@ -175,8 +184,21 @@ pub fn notify_daemon_check(_out: String) {
                   &format!("the second replaces the first's popup, by the id the daemon gave it: {notified:?}"));
             check(notified[1]["body"] == "Second reply", "and shows the newer reply");
             // A reply, then the chat read on another device before the daemon answers.
-            send(reply("q-3", "Third reply"));
-            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "at_ms": 1})).is_ok(), "the chat is read elsewhere");
+            send(json!({"type":"agent-focus","session":"rachel","order_epoch":"one","read_through_ms":1,"read_through_seq":1}));
+            true
+        })),
+        ("stale focus read", Box::new(|app, _, elapsed| {
+            if !app.engine.borrow().roster().find("rachel").is_some_and(|a| a.focused) || elapsed < DELAY {
+                return false;
+            }
+            check(visible().iter().any(|body| body == "Second reply"), "the later reply stays visible after the stale focus read");
+            check(app.engine.borrow().roster().find("rachel").is_some_and(|a| a.unread), "the later reply stays unread");
+            let mut third = reply("q-3", "Third reply");
+            third["order_epoch"] = "one".into();
+            third["event_at_ms"] = 1.into();
+            third["event_seq"] = 3.into();
+            send(third);
+            check(control("/__control/event", &json!({"type": "chat-read", "session": "rachel", "agent_id": "a1", "order_epoch":"one","read_through_ms":1,"read_through_seq":3})).is_ok(), "the chat is read elsewhere");
             true
         })),
         ("read meanwhile", Box::new(|_, _window, elapsed| {
@@ -331,4 +353,193 @@ fn approval_key(body: &str) -> Option<String> {
         let (_, action) = key.split_once(':')?;
         (action == "choice:accepted").then(|| key.to_owned())
     })
+}
+
+/// Two real UI processes share the Host, data directory, notification daemon
+/// and session bus. Only their normal SSE receiver drives notification state.
+pub fn restart_check() {
+    fn journal() -> Vec<Value> {
+        let path = std::env::var("CLARP_RESTART_LOG").unwrap();
+        std::fs::read_to_string(path).unwrap_or_default().lines().map(|s| serde_json::from_str(s).unwrap()).collect()
+    }
+    fn press_fixture(key: &str) {
+        let path = std::path::PathBuf::from(std::env::var_os("CLARP_RESTART_LOG").unwrap());
+        std::fs::write(path.with_extension(key), []).unwrap();
+    }
+    fn ordered(text: &str, seq: u64) -> Value {
+        json!({"type":"user-notification","session":"mike","alert":true,"unread":true,
+               "preview":text,"notification_id":text,"decision_id":text,"order_epoch":"one","event_at_ms":51,"event_seq":seq})
+    }
+    fn read(seq: u64) -> Value {
+        json!({"type":"chat-read","session":"mike","order_epoch":"one","read_through_ms":51,"read_through_seq":seq})
+    }
+    // Synthetic SSE/HTTP wire example from the Host source at ff6eebd3.
+    fn vera_alert(body: &str, seq: u64, id: &str) -> Value {
+        json!({"type":"user-notification","session":"vera","unread":true,"alert":true,"preview":body,
+               "notification_id":id,"order_epoch":"E","event_at_ms":1000,"event_seq":seq})
+    }
+    fn vera_read(kind: &str, seq: u64) -> Value {
+        json!({"type":kind,"session":"vera","agent_id":"vera-id","at_ms":1000,
+               "order_epoch":"E","read_through_ms":1000,"read_through_seq":seq})
+    }
+    fn vera_visible(rows: &[Value]) -> bool {
+        let Some(b) = rows.iter().rposition(|r| r["body"] == "Vera B") else { return false };
+        let id = &rows[b]["ident"];
+        !rows[b + 1..].iter().any(|r| &r["ident"] == id)
+    }
+    let first = std::env::var("CLARP_CHECK_PASS").as_deref() == Ok("first");
+    let mut stages: Vec<Stage> = vec![("connected", Box::new(move |app, window, _| {
+        if app.engine.borrow().connection_state() != "live" || app.engine.borrow().server_id().is_empty() || app.engine.borrow().roster().find("mike").is_none() {
+            return false;
+        }
+        window.invoke_chat_chosen("rachel".into());
+        if first {
+            send(ordered("covered first", 2));
+        } else {
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "the larger sequence is still unread on restart");
+            send(vera_alert("Vera replay after restart", 1, "fresh-delivery-after-restart"));
+            send(ordered("covered first", 2));
+            send(read(2));
+            send(read(1));
+            let mut wrong = read(9);
+            wrong["order_epoch"] = "other".into();
+            send(wrong);
+            let mut foreign = read(9);
+            foreign["session"] = "rachel".into();
+            send(foreign);
+            send(json!({"type":"agent-focus","session":"mike"}));
+        }
+        true
+    }))];
+    if first {
+        stages.push(("first alert delivered", Box::new(|_, _, _| {
+            if !journal().iter().any(|r| r["body"] == "covered first") { return false; }
+            send(read(2));
+            send(ordered("before restart", 3));
+            true
+        })));
+        stages.push(("daemon displayed", Box::new(|_, _, _| journal().iter().any(|r| r["body"] == "before restart"))));
+        stages.push(("ordered Host and chat ready", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("vera").is_none() { return false; }
+            check(app.engine.borrow().server_id() == "host-1", "Vera belongs to the authenticated Host");
+            send(vera_alert("Vera A", 1, "a"));
+            true
+        })));
+        stages.push(("mark A read", Box::new(|_, _, _| {
+            if !journal().iter().any(|r| r["body"] == "Vera A") { return false; }
+            check(control("/__control/chat-read-receipt", &json!({"hold":true,"at_ms":1000,
+                  "order_epoch":"E","read_through_ms":1000,"read_through_seq":2})).is_ok(), "hold the POST receipt through sequence 2");
+            press_fixture("pinned");
+            true
+        })));
+        stages.push(("POST pending", Box::new(|_, _, _| {
+            if !super::posts("/chat-read").iter().any(|r| r["body"] == json!({"session":"vera"})) { return false; }
+            send(vera_alert("Vera B", 3, "b"));
+            true
+        })));
+        stages.push(("B delivered first", Box::new(|_, _, _| {
+            if !vera_visible(&journal()) { return false; }
+            check(control("/__control/release-chat-read", &json!({})).is_ok(), "deliver the earlier HTTP receipt after B is shown");
+            true
+        })));
+        stages.push(("HTTP receipt processed", Box::new(|app, _, _| {
+            // Synchronize with receipt consumption before supplying the SSE echo.
+            let root = std::path::PathBuf::from(std::env::var_os("CLARP_TRANSCRIPT_CACHE").unwrap());
+            let cache = clarp_core::transcript_cache::TranscriptCache::new(root.join("notification-reads"));
+            let saved = cache.load("host-1", "reads");
+            if !saved.get("boundaries").and_then(Value::as_array).is_some_and(|bs| bs.contains(&json!(["host-1","vera","E",[1000,2]]))) {
+                return false;
+            }
+            check(vera_visible(&journal()) && app.engine.borrow().roster().find("vera").unwrap().unread, "HTTP through 2 preserves visible, unread B at 3");
+            // A fresh delivery ID forces order-based suppression independent of deduplication.
+            send(vera_alert("Vera replay before echo", 1, "fresh-delivery"));
+            send(vera_read("chat-read", 2));
+            send(json!({"type":"chat-read","session":"vera","decision_id":"d1"}));
+            send(json!({"type":"agent-focus","session":"vera"}));
+            true
+        })));
+        stages.push(("SSE echo processed", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            let vera = engine.roster().find("vera").unwrap();
+            if !vera.focused { return false; }
+            check(vera_visible(&journal()) && vera.unread, "the identical SSE echo and targeted d1 clear preserve B");
+            send(vera_read("agent-focus", 4));
+            true
+        })));
+        stages.push(("focus covers B", Box::new(|app, _, _| {
+            let rows = journal();
+            if !rows.iter().any(|r| r["close"] == "Vera B") { return false; }
+            check(!app.engine.borrow().roster().find("vera").unwrap().unread, "focus through 4 clears B");
+            check(rows.iter().all(|r| r["body"] != "Vera replay before echo"), "the delayed POST alone suppresses replayed A");
+            true
+        })));
+    } else {
+        stages.push(("replayed events processed", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            let mike = engine.roster().find("mike").unwrap();
+            if !mike.focused { return false; }
+            check(mike.unread, "stale, foreign and missing-order reads preserve unread");
+            send(json!({"type":"chat-read","session":"mike","decision_id":"before restart"}));
+            true
+        })));
+        stages.push(("restored decision cleared", Box::new(|app, _, _| {
+            if app.engine.borrow().roster().find("mike").unwrap().unread { return false; }
+            send(ordered("after restart", 4));
+            true
+        })));
+        stages.push(("daemon reused ID", Box::new(|app, _, elapsed| {
+            let rows = journal();
+            if !rows.iter().any(|r| r["body"] == "after restart") || elapsed < Duration::from_millis(500) { return false; }
+            check(rows.iter().all(|r| r["body"] != "Vera replay after restart"), "the restarted receiver suppresses replayed A");
+            check(rows.iter().filter(|r| r["body"] == "covered first").count() == 1, "the covered alert never displays again");
+            check(rows.iter().all(|r| r.get("close").is_none() || r["close"] == "covered first" || r["close"] == "Vera B"), "no close by a saved daemon ID");
+            check(rows.iter().find(|r| r["body"] == "after restart").unwrap()["replaces"] == 0, "the new app requests a fresh popup");
+            press_fixture("stale");
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "the later alert keeps its unread mark");
+            true
+        })));
+        stages.push(("old native action delivered", Box::new(|app, _, elapsed| {
+            if !journal().iter().any(|r| r["pressed"] == "stale") || elapsed < Duration::from_millis(500) { return false; }
+            check(!super::posts("/chat-read").iter().any(|r| r["body"]["session"] == "mike") && app.engine.borrow().roster().find("mike").unwrap().unread,
+                  "the old action cannot act on the reused ID");
+            check(control("/__control/chat-read-receipt", &json!({"server_instance_id":"other-host",
+                  "order_epoch":"one","read_through_ms":51,"read_through_seq":99})).is_ok(), "return an explicitly conflicting HTTP receipt");
+            press_fixture("current");
+            true
+        })));
+        stages.push(("conflicting POST", Box::new(|app, _, _| {
+            if !super::posts("/chat-read").iter().any(|r| r["body"]["session"] == "mike") { return false; }
+            check(app.engine.borrow().roster().find("mike").unwrap().unread, "a conflicting receipt preserves unread");
+            check(!journal().iter().any(|r| r["close"] == "after restart"), "a conflicting receipt preserves the popup");
+            check(control("/__control/chat-read-receipt", &json!({"order_epoch":"one","read_through_ms":51,"read_through_seq":4})).is_ok(),
+                  "the Host will return its boundary before the SSE echo");
+            press_fixture("current");
+            true
+        })));
+        stages.push(("current popup read", Box::new(|app, _, _| {
+            if !journal().iter().any(|r| r["close"] == "after restart") { return false; }
+            check(!app.engine.borrow().roster().find("mike").unwrap().unread, "the covering read clears the current evidence");
+            check(super::posts("/chat-read").iter().filter(|r| r["body"] == json!({"session":"mike"})).count() == 2, "both native actions posted only the session");
+            let root = std::path::PathBuf::from(std::env::var_os("CLARP_TRANSCRIPT_CACHE").unwrap());
+            let cache = clarp_core::transcript_cache::TranscriptCache::new(root.join("notification-reads"));
+            let saved = cache.load("host-1", "reads");
+            let boundaries = saved.get("boundaries").and_then(Value::as_array).unwrap();
+            check(boundaries.contains(&json!(["host-1","mike","one",[51,4]])) &&
+                  !boundaries.iter().any(|b| b[0] == "other-host"),
+                  "only the valid POST advances a watermark, on the authenticated Host");
+            send(read(4));
+            send(json!({"type":"chat-unread","session":"mike","unread":true,"preview":"quiet failure"}));
+            send(read(99));
+            send(json!({"type":"agent-focus","session":"rachel"}));
+            true
+        })));
+        stages.push(("unordered evidence survives", Box::new(|app, _, _| {
+            let engine = app.engine.borrow();
+            if !engine.roster().find("rachel").is_some_and(|a| a.focused) { return false; }
+            check(engine.roster().find("mike").unwrap().unread, "chat-unread survives a read without comparable order");
+            check(journal().iter().all(|r| r["body"] != "quiet failure"), "chat-unread never pops up");
+            true
+        })));
+    }
+    run_stages(stages);
 }

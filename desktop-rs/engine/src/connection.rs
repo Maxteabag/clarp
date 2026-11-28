@@ -42,6 +42,7 @@ impl Engine {
         self.reset_live();
         self.base_url = normalized.clone();
         self.cache_key = normalized.clone();
+        self.notifications = Default::default();
         self.server_name.clear();
         self.server_version.clear();
         self.server_contract = None;
@@ -201,6 +202,7 @@ impl Engine {
         if let Some(cache) = &self.transcript_cache {
             cache.forget_host(&self.base_url);
         }
+        self.forget_notification_reads();
         self.token.clear();
         self.sse.stop();
         self.changes.push(Change::Endpoint);

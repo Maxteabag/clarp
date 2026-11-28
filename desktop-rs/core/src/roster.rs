@@ -684,7 +684,11 @@ impl Roster {
         if event.get("unread").and_then(Value::as_bool) == Some(false) {
             return;
         }
-        let Some(row) = self.index_of_session(&json::string(event, "session")) else { return };
+        self.mark_unread(&json::string(event, "session"));
+    }
+
+    pub fn mark_unread(&mut self, session: &str) {
+        let Some(row) = self.index_of_session(session) else { return };
         if self.agents[row].unread || self.agents[row].quiet {
             return;
         }

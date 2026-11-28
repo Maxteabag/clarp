@@ -15,7 +15,7 @@ case $name in artifacts|artifact-open|scroll-jump|live|row-overlap|frame-budget)
 [ "$name" = desktop ] && export CLARP_TEST_LOGIN=unlocked
 # notify-daemon sends popups over D-Bus to its own slow daemon on the
 # private bus, not into the notification log.
-[ "$name" = notify-daemon ] && export CLARP_TEST_NOTIFY_DAEMON=1
+[[ "$name" == notify-daemon || "$name" == notify-restart ]] && export CLARP_TEST_NOTIFY_DAEMON=1
 # The null sink "plays" a clip this long, so a check can pause it.
 case $name in artifacts|artifact-keys) export CLARP_TEST_SILENT_CLIP_MS=4000 ;; esac
 # roster-stale lets a slow snapshot time out in 1.5 s, not a minute.
@@ -143,6 +143,10 @@ settings=off; case $name in keymap|fonts) passes=(once restart); settings="$scra
 # form-events runs it twice too: what the first run queued is delivered by
 # the second (the scratch data folder and the fake Host outlive the app).
 [ "$name" = form-events ] && passes=(first second)
+if [ "$name" = notify-restart ]; then
+    export CLARP_RESTART_LOG="$scratch/daemon.jsonl" CLARP_TRANSCRIPT_CACHE="$scratch/d/notification-cache"
+    wrap=(/usr/bin/python3 "$PWD/slint-app/tests/restart-notifications.py" "${wrap[@]}")
+fi
 for pass in "${passes[@]}"; do
 [ "$pass" = once ] || echo "perf pass: $pass"
 CLARP_EXPLORER_FAILURE_OUT="$out" CLARP_CHECK_PASS=$pass env -u WAYLAND_DISPLAY -u DISPLAY -u XDG_SESSION_ID CLARP_BASE_URL="http://127.0.0.1:$(cat "$scratch/port")" CLARP_TOKEN=probe-token CLARP_SETTINGS="$settings" \
@@ -162,4 +166,8 @@ cp "$scratch/run.log" "$out/app.log"
 cp "$scratch/host.log" "$out/host.log" 2>/dev/null
 # artifact-open: what the third-party web saw, and what Chrome rendered.
 [ -f "$scratch/third-party.log" ] && cp "$scratch/third-party.log" "$scratch"/browser.log.page*.dom "$out/" 2>/dev/null
+if [ "$name" = notify-restart ]; then
+    cp "$CLARP_RESTART_LOG" "$out/daemon.jsonl"
+    [ "$(grep -c '^E2E_PASS' "$scratch/run.log")" = 2 ] || exit 1
+fi
 grep -q "^E2E_PASS" "$scratch/run.log" && ! grep -q "^E2E_FAIL" "$scratch/run.log"
