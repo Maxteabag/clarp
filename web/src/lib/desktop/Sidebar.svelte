@@ -17,7 +17,7 @@
   import { formatRelative } from '../i18n/format.js';
   import { t } from '../../stores/i18n.svelte.js';
   import { hostsState, openOnHost, readHosts } from '../../stores/hosts.svelte.js';
-  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../../stores/reach.svelte.js';
+  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach, unheard } from '../../stores/reach.svelte.js';
   import HostBadge from '../HostBadge.svelte';
   import { input, orderedSessions, setRegion } from '../../stores/input.svelte.js';
 
@@ -53,19 +53,24 @@
     return mergeChats(groups, new Set(listedHostIds())).map(row => {
       const remote = row.hostId === PRIMARY ? null : others.find(h => h.id === row.hostId);
       const s = remote ? row.status : statusFor(row.sid);
+      const hostDown = isDown(remote ? remote.id : SERVING);
+      // Not heard (down, or no network): nothing it last said is happening now.
+      const silent = unheard(remote ? remote.id : SERVING);
       return {
         ...row,
         remote,
         current: !remote && row.sid === app.session,
-        busy: !!s.busy,
+        // A Host that does not answer: what it last said is not happening now, so nothing working.
+        busy: !!s.busy && !silent,
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         unread: !remote && isUserNotificationUnread(row.sid),
         // Its Host does not answer: the row stays, dimmed, with an offline dot.
-        hostDown: isDown(remote ? remote.id : SERVING),
+        hostDown,
         // Another Host's portraits need that Host's sign-in; the bundled ones are this app's.
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         // A moved agent's row says where it went (contract 125).
-        line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
+        line: silent ? (movedLine(s.moved) || '')
+          : movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
               || (s.busy ? 'Working' : 'Idle'),
       };
     });
