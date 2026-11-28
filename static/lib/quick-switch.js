@@ -9,6 +9,8 @@
 // the overview's search box and wrong here: you are typing a name. Keep its
 // results, but float the name matches — prefix first, then substring — so the
 // row you meant is at the top and Enter is safe to hit blind.
+import { english } from './i18n-en.js';
+
 function nameRank(name, query) {
   if (!query) return 0;
   const n = String(name || '').toLowerCase();
@@ -20,14 +22,14 @@ function nameRank(name, query) {
   return 3;
 }
 
-export function quickSwitchRows({ chats = [], contacts = [] } = {}, limit = 12, query = '') {
+export function quickSwitchRows({ chats = [], contacts = [] } = {}, limit = 12, query = '', tr = english) {
   const rows = [
     ...chats.map(row => ({
       kind: 'chat',
       key: `chat:${row.session}`,
       name: row.name,
       session: row.session,
-      detail: row.statusText || (row.busy ? 'Working' : 'Idle'),
+      detail: row.statusText || tr(row.busy ? 'agent.working' : 'agent.idle'),
       row,
     })),
     ...contacts.map(row => ({
@@ -35,7 +37,7 @@ export function quickSwitchRows({ chats = [], contacts = [] } = {}, limit = 12, 
       key: `contact:${row.name}`,
       name: row.name,
       session: '',
-      detail: 'Start a new session',
+      detail: tr('quick_switch.start_new'),
       row,
     })),
   ];

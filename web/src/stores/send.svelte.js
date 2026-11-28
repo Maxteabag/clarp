@@ -4,6 +4,7 @@
 import { buildSendBody, newClientMsgId } from '@core/send-request.js';
 import { serverIdFor } from '@core/delivery.js';
 import { movedRefusal, movedSendText } from '@core/agent-moved.js';
+import { t } from './i18n.svelte.js';
 import { clog, trace } from '../lib/net.js';
 import {
   app, chipLabel, flash, refreshAgentSnapshot, setSession, statusFor,
@@ -31,7 +32,7 @@ export async function sendText(text, opts = {}) {
   const moved = statusFor(target).moved;
   if (moved) {
     // It takes no turn on this Host (contract 125): said, never sent (also a voice capture).
-    flash(movedSendText(chipLabel(target), moved), 5000);
+    flash(movedSendText(chipLabel(target), moved, t), 5000);
     return;
   }
 
@@ -60,10 +61,10 @@ export async function sendText(text, opts = {}) {
       let refused = '';
       if (r.status === 409) {
         // The agent moved to another Host since the list was read: final, never sent again.
-        try { refused = movedRefusal(r.status, await r.json(), chipLabel(target)); } catch (_) {}
+        try { refused = movedRefusal(r.status, await r.json(), chipLabel(target), t); } catch (_) {}
       }
       if (refused) refreshAgentSnapshot();          // the row and composer show the move now
-      const why = refused || `send failed (${r.status})`;
+      const why = refused || t('send.failed_status', { status: String(r.status) });
       noteSendResult(clientMsgId, false, why);
       flash(why, refused ? 6000 : 4000);
       return;
@@ -95,7 +96,7 @@ export async function sendText(text, opts = {}) {
   } catch (err) {
     chime(false);
     noteSendResult(clientMsgId, false, `send failed: ${err.message}`);
-    flash(`send failed: ${err.message}`, 4000);
+    flash(t('send.failed', { error: err.message }), 4000);
     return;
   }
   if (!dispatched) {
@@ -123,7 +124,7 @@ export function stopAgentTurn(session = app.session) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ session }),
   }).then(r => {
-    if (!r.ok) flash('Stop failed: ' + r.status, 2000);
-  }).catch(e => flash('Stop network error: ' + (e && e.message), 2000));
-  flash('Stopped', 1000);
+    if (!r.ok) flash(t('send.stop_failed', { error: String(r.status) }), 2000);
+  }).catch(e => flash(t('send.stop_network', { error: String(e && e.message) }), 2000));
+  flash(t('send.stopped'), 1000);
 }

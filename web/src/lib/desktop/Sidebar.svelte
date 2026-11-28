@@ -69,9 +69,9 @@
         // Another Host's portraits need that Host's sign-in; the bundled ones are this app's.
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         // A moved agent's row says where it went (contract 125).
-        line: silent ? (movedLine(s.moved) || '')
-          : movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
-              || (s.busy ? 'Working' : 'Idle'),
+        line: silent ? (movedLine(s.moved, t) || '')
+          : movedLine(s.moved, t) || shortActivityText(s) || shortActivityPhase(s)
+              || t(s.busy ? 'agent.working' : 'agent.idle'),
       };
     });
   });
@@ -89,11 +89,11 @@
 
 <aside class="sidebar" class:collapsed>
   <header class="sidebar-head">
-    {#if !collapsed}<span class="sidebar-title">Chats</span>{/if}
+    {#if !collapsed}<span class="sidebar-title">{t('sidebar.chats')}</span>{/if}
     <button
       class="sidebar-toggle"
-      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      title={forced ? 'Window is too narrow to expand' : (collapsed ? 'Expand' : 'Collapse')}
+      aria-label={t(collapsed ? 'sidebar.expand_a11y' : 'sidebar.collapse_a11y')}
+      title={t(forced ? 'sidebar.too_narrow' : collapsed ? 'sidebar.expand' : 'sidebar.collapse')}
       disabled={forced}
       onclick={onToggle}
     >
@@ -112,7 +112,7 @@
       </button>
     {/each}
   {/if}
-  <nav class="sidebar-list" aria-label="Conversations" bind:this={listEl}>
+  <nav class="sidebar-list" aria-label={t('sidebar.conversations')} bind:this={listEl}>
     {#each chats as chat, i (chat.key)}
       <button
         class="side-row"
@@ -122,7 +122,7 @@
         class:remote={!!chat.remote}
         class:host-down={chat.hostDown}
         title={(collapsed ? `${chat.name} — ${chat.line}` : chat.line)
-               + (chat.remote ? ` · opens on ${chat.remote.name || chat.remote.url}` : '')}
+               + (chat.remote ? ` · ${t('sidebar.opens_on', { host: chat.remote.name || chat.remote.url })}` : '')}
         onclick={() => open(chat)}
       >
         <span
@@ -146,13 +146,13 @@
   </nav>
 
   <footer class="sidebar-foot">
-    <a href="/viz" class="sidebar-all" title="Fleet map">◌ {#if !collapsed}<span>Fleet map</span>{/if}</a>
+    <a href="/viz" class="sidebar-all" title={t('overview.fleet_map')}>◌ {#if !collapsed}<span>{t('overview.fleet_map')}</span>{/if}</a>
     <button class="sidebar-all" onclick={onOpenOverview}
-            title="All agents — start, stop, relaunch">
+            title={t('sidebar.all_agents_tip')}>
       <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
         <path fill="currentColor" d="M4 5h16v2H4zm0 6h16v2H4zm0 6h16v2H4z"/>
       </svg>
-      {#if !collapsed}<span>All agents</span>{/if}
+      {#if !collapsed}<span>{t('sidebar.all_agents')}</span>{/if}
     </button>
   </footer>
 </aside>

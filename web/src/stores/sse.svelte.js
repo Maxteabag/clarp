@@ -1,6 +1,7 @@
 // The SSE connection: one EventSource, every server push, reconnect policy.
 
 import { clog, noteSseEvent, withToken } from '../lib/net.js';
+import { t } from './i18n.svelte.js';
 import {
   AgentState, ClientAction, SSEType, Timing,
 } from '@core/protocol.js';
@@ -285,7 +286,7 @@ function handleEvent(ev) {
     // Synthesis failed (e.g. quota) — say so rather than leaving silence
     // with no explanation.
     clog('ttsError', ev.error || ev.message || 'tts failed');
-    flash(ev.message || 'Voice synthesis failed', 5000);
+    flash(ev.message || t('voice.synthesis_failed'), 5000);
 
   } else if (ev.type === SSEType.AGENT_ROSTER) {
     clog('agentRoster', `${ev.kind}:${ev.session || ''}`);

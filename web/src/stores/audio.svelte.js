@@ -11,6 +11,7 @@ import { createFaultMonitor } from '@core/audio-faults.js';
 import { ClipStatus, Timing } from '@core/protocol.js';
 import { clog } from '../lib/net.js';
 import { app, flash, logState } from './app.svelte.js';
+import { t } from './i18n.svelte.js';
 
 const SPEED_RATE = 1.2;
 
@@ -175,7 +176,7 @@ export function setMuted(on) {
     try { scheduler?.silence(); } catch (_) {}
   }
   clog('pwaMuteToggled', audio.muted ? 'on' : 'off');
-  flash(audio.muted ? 'Audio muted' : 'Audio on', 1000);
+  flash(t(audio.muted ? 'audio.muted' : 'audio.on'), 1000);
 }
 
 /** Single tap: stop the clip that is playing now, keep the mute preference. */
@@ -183,7 +184,7 @@ export function silenceNow() {
   playerAdapter?.interrupt();
   const dropped = scheduler?.silence();
   clog('muteClicked', `dropped=${dropped}`);
-  flash('Stopped', 600);
+  flash(t('send.stopped'), 600);
 }
 
 export function tone(hz, dur, vol = 0.10) {

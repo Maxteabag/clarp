@@ -17,6 +17,8 @@ import { hostBadgeText } from '@core/host-badge.js';
 import { prefs } from './prefs.svelte.js';
 import { knownHosts, readHosts } from './hosts.svelte.js';
 import { PRIMARY as SERVING, unheard } from './reach.svelte.js';
+import { t } from './i18n.svelte.js';
+import { formatDateTime } from '../lib/i18n/format.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -174,22 +176,20 @@ export function rememberUserNotification(ev) {
 const PROVIDER_LABELS = { codex: 'Codex', claude: 'Claude', agy: 'Antigravity', 'agy-acp': 'Antigravity' };
 
 export function quotaMessage(quota, now = new Date()) {
-  const name = PROVIDER_LABELS[quota.provider_id] || quota.provider_id || 'This backend';
+  const backend = PROVIDER_LABELS[quota.provider_id] || quota.provider_id || t('banner.this_backend');
   const reset = quota.resets_at ? new Date(quota.resets_at) : null;
-  let until = '';
+  let time = '';
   if (reset && !Number.isNaN(reset.getTime()) && reset > now) {
     const sameDay = reset.toDateString() === now.toDateString();
-    until = ' until ' + reset.toLocaleString(undefined, sameDay
+    time = formatDateTime(reset, sameDay
       ? { hour: '2-digit', minute: '2-digit' }
       : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
   }
-  const next = 'A message sent now will likely fail.';
   // Spent credits need a refill, not patience; the reset only restores the
   // plan's included usage.
-  const what = quota.reason === 'credits_depleted'
-    ? `${name} workspace is out of credits${until ? until.replace(' until ', ' · included usage resets ') : ''}`
-    : `${name} is out of quota${until}`;
-  return `${what}. ${next}`;
+  const key = quota.reason === 'credits_depleted' ? (time ? 'banner.credits_resets' : 'banner.credits')
+    : (time ? 'banner.quota_until' : 'banner.quota');
+  return t(key, { backend, time });
 }
 
 export function bannerFor(sid) {
@@ -197,14 +197,13 @@ export function bannerFor(sid) {
   const kind = s.latest_state || '';
   if (kind === AgentState.THINKING && shortActivityPhase(s) === 'reconnecting') {
     return { cls: 'reconnecting', spinner: true,
-      msg: shortActivityText(s) || 'Reconnecting… Your message is saved.' };
+      msg: shortActivityText(s) || t('banner.reconnecting') };
   }
   if (kind === AgentState.COMPACTING) {
-    const trig = s.compacting_trigger === 'manual' ? ' (manual)' : '';
     return {
       cls: AgentState.COMPACTING,
       spinner: true,
-      msg: shortActivityText(s) || `Compacting context${trig}`,
+      msg: shortActivityText(s) || t(s.compacting_trigger === 'manual' ? 'banner.compacting_manual' : 'banner.compacting'),
       startedAt: s.turn_started_at,
     };
   }
@@ -212,7 +211,7 @@ export function bannerFor(sid) {
     return {
       cls: AgentState.WAITING,
       icon: '!',
-      msg: shortActivityText(s) || s.waiting_message || 'Needs your attention',
+      msg: shortActivityText(s) || s.waiting_message || t('live.status.waiting'),
     };
   }
   // Shown before the user sends, so an exhausted provider is not discovered
@@ -224,7 +223,7 @@ export function bannerFor(sid) {
     return {
       cls: AgentState.INTERRUPTED,
       icon: '!',
-      msg: shortActivityText(s) || 'Reply stopped. Your message is saved — send a message to resume.',
+      msg: shortActivityText(s) || t('banner.interrupted'),
     };
   }
   return null;

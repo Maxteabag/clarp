@@ -1,4 +1,5 @@
 import { AgentBackend } from './protocol.js';
+import { english } from './i18n-en.js';
 
 const ALIASES = {
   antigravity: AgentBackend.AGY,
@@ -76,14 +77,14 @@ export function supportsSteerBackend(raw, catalogue) {
 
 // "picker" | "hidden" | "folded_into_model"; the Host says which control the
 // effort field gets, and effort_help is the note shown instead of a picker.
-export function effortUI(raw, catalogue) {
+export function effortUI(raw, catalogue, tr = english) {
   const provider = providerRow(raw, catalogue);
   const ui = provider && provider.effort_ui;
   if (ui === 'hidden' || ui === 'folded_into_model' || ui === 'picker') {
     return { ui, help: String(provider.effort_help || '') };
   }
   if (provider && provider.model_effort_compatibility === 'unknown') {
-    return { ui: 'folded_into_model', help: 'Not separately reported' };
+    return { ui: 'folded_into_model', help: tr('launch.effort_not_reported') };
   }
   return { ui: 'picker', help: '' };
 }
@@ -101,10 +102,10 @@ export function backendLabel(raw, catalogue) {
   return backend;
 }
 
-export function backendDetail(raw, catalogue) {
+export function backendDetail(raw, catalogue, tr = english) {
   const provider = providerRow(raw, catalogue);
   if (provider && provider.detail) return provider.detail;
-  return `Runs on ${backendLabel(raw, catalogue)}.`;
+  return tr('launch.runs_on', { backend: backendLabel(raw, catalogue) });
 }
 
 const BUNDLED_IDS = [AgentBackend.CLAUDE, AgentBackend.CODEX,

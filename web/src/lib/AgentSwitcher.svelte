@@ -49,10 +49,10 @@
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
-        text: s.moved ? movedLine(s.moved)
-          : isCurrent ? 'current'
-          : isBusy ? (shortActivityPhase(s) || 'working')
-          : isUnread ? 'new' : silent ? '' : 'idle',
+        text: s.moved ? movedLine(s.moved, t)
+          : isCurrent ? t('switcher.current')
+          : isBusy ? (shortActivityPhase(s) || t('overview.state.working'))
+          : isUnread ? t('switcher.new') : silent ? '' : t('overview.state.idle'),
       };
     });
   });
@@ -86,7 +86,7 @@
 />
 
 {#if open}
-  <div class="agent-switcher" role="menu" aria-label="Quick switch agent">
+  <div class="agent-switcher" role="menu" aria-label={t('switcher.label')}>
     {#each down as line (line.id)}
       <button class="switcher-host-down" onclick={() => { openPanel(line.id); open = false; }}>
         <span class="switcher-offline-dot" aria-hidden="true"></span>{line.text}

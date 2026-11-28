@@ -33,6 +33,7 @@ import { logParams } from '@core/coordination.js';
 import { createTranscriptCache } from '@core/transcript-cache.js';
 import { idbTranscriptStorage } from '../lib/idb-transcripts.js';
 import { confirmFromTurns } from '@core/delivery.js';
+import { t } from './i18n.svelte.js';
 
 registerModule(globalThis, 'conversations', instanceId('conversations'));
 
@@ -142,10 +143,10 @@ function entry(session) {
 
 export function placeholderFor(conv) {
   if (!conv) return '';
-  if (conv.status === 'loading' && !conv.turns.length) return 'loading…';
-  if (conv.status === 'error') return `error: ${conv.error || 'failed to load'}`;
+  if (conv.status === 'loading' && !conv.turns.length) return t('chat.loading');
+  if (conv.status === 'error') return t('chat.load_error', { error: conv.error || t('chat.load_failed') });
   if (conv.status === 'ready' && !conv.turns.length) {
-    return `${conv.missing ? 'no conversation yet in' : 'no messages in'} ${conv.cwd || ''}`.trim();
+    return t(conv.missing ? 'chat.no_conversation_in' : 'chat.no_messages_in', { folder: conv.cwd || '' }).trim();
   }
   return '';
 }
@@ -279,7 +280,7 @@ export function reload(session) {
       clog('conversationLoad', `${session} turns=${conv.turns.length} rev=${conv.latestRevision} dur=${Math.round(performance.now() - t0)}ms`);
     } catch (err) {
       conv.status = 'error';
-      conv.error = err && err.message ? err.message : 'failed to load';
+      conv.error = err && err.message ? err.message : '';  // none: placeholderFor says chat.load_failed
       clog('conversationLoadError', `${session} ${conv.error}`);
     }
   });
@@ -304,7 +305,7 @@ function openFromCache(session) {
         await loadTail(session);
       } catch (err) {
         conv.status = 'error';
-        conv.error = err && err.message ? err.message : 'failed to load';
+        conv.error = err && err.message ? err.message : '';  // none: placeholderFor says chat.load_failed
       }
       return;
     }
@@ -547,7 +548,7 @@ export function appendThinking(session, label) {
   }
   conv.activity = [...conv.activity, {
     key: 'thinking-live', thinkingLive: true, cls: 'running',
-    label: AgentState.THINKING, summary: `${label || session} is working`,
+    label: AgentState.THINKING, summary: t('chat.is_working', { name: label || session }),
   }];
   conv.appendSeq++;
 }
