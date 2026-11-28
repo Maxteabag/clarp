@@ -20,6 +20,7 @@ use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
 use clarp_kernel::turn::{Activity, Origin, Outcome, Settled, Wait};
 use clarp_protocol::events::AgentStateKind;
+use clarp_speech::list_line::{self, Part};
 use clarp_speech::markup;
 use serde_json::{Map, Value, json};
 
@@ -1244,18 +1245,40 @@ pub fn notification_preview(reply: &str) -> Option<(String, &'static str)> {
     Some((written, "text-reply"))
 }
 
-/// What a notification shows of a written text: cleaned for display on one line and cut, and
-/// nothing when nothing is left for the user in it (the Python Host's `_visible_text_preview`).
+/// What a notification shows of a written text, as the chat list shows it (an app puts it on
+/// the chat's line): what it holds ([`visible_part`]) in English, cut. Empty when nothing is
+/// left for the user in it (the Python Host's `_visible_text_preview`).
 pub fn visible_preview(text: &str) -> String {
+    visible_part(text).map_or_else(String::new, |part| {
+        part.cut(NOTIFICATION_PREVIEW_MAX).english()
+    })
+}
+
+/// What a written text holds as the chat list says it ([`list_line::read`]), or `None` when
+/// nothing is left for the user in it: a heartbeat's marker, an automated check that found
+/// nothing to do.
+pub fn visible_part(text: &str) -> Option<Part> {
     let mut written = text.to_string();
     for marker in ["HEARTBEAT_OK", "DREAMING_OK", "LEADER_NOOP"] {
         written = written.replace(marker, "");
     }
-    let written = markup::clean_for_display(&written, true);
-    if written.is_empty() || NOTHING_TO_DO.contains(&written.to_lowercase().as_str()) {
-        return String::new();
+    let cleaned = markup::clean_for_display(&written, true);
+    if cleaned.is_empty() || NOTHING_TO_DO.contains(&cleaned.to_lowercase().as_str()) {
+        return None;
     }
-    cut(written, NOTIFICATION_PREVIEW_MAX, false)
+    list_line::read(&markup::clean_for_display(&written, false))
+}
+
+/// The kind and values of a notification's `preview` (`preview_parts`, feature
+/// `chat_preview_parts`), as an app words it on the chat's line: what was said aloud is its
+/// words; what was written, what it holds.
+fn notification_parts(reply: &str, kind: Option<&str>, preview: &str) -> Value {
+    if kind == Some("speak") {
+        return Part::Text(preview.to_string()).json();
+    }
+    visible_part(reply).map_or(Value::Null, |part| {
+        part.cut(NOTIFICATION_PREVIEW_MAX).json()
+    })
 }
 
 /// What of an agent decides whether the user is told of what it says. A helper reports to the
@@ -1302,6 +1325,7 @@ pub fn note_notification(
             "unread": true,
             "muted": muted,
             "preview": visible_preview(text),
+            "preview_parts": notification_parts(text, None, ""),
             "reason": reason,
         })),
         notify::Decision::Suppress { reason } => Err(reason),
@@ -1331,6 +1355,7 @@ pub fn user_notification(
         return None;
     };
     let (preview, kind) = notification_preview(&said.text).unzip();
+    let parts = notification_parts(&said.text, kind, preview.as_deref().unwrap_or(""));
     let turn = notify::Completed {
         agent_id: &record.agent_id,
         has_cause: !asked.message_id.is_empty(),
@@ -1359,6 +1384,7 @@ pub fn user_notification(
         "cause_message_id": asked.message_id,
         "source_message_id": reply.entry.id(),
         "preview": preview.unwrap_or_default(),
+        "preview_parts": parts,
         "done_ts": done_ms,
         "badge": true,
         "unread": true,
@@ -2030,6 +2056,9 @@ pub fn no_conversation(cwd: &str) -> Value {
         "latest_ts": "",
         "cwd": cwd,
         "includes_automated": true,
+        // The chat list's line of a chat that has said nothing (feature `chat_preview_parts`).
+        "last_message": "",
+        "last_message_preview": null,
     })
 }
 
@@ -2039,34 +2068,56 @@ pub fn no_conversation(cwd: &str) -> Value {
 /// written part, the text outside the `<speak>` blocks, and the spoken words only where nothing
 /// is written. A push keeps the spoken form ([`notification_preview`]).
 pub(crate) fn preview(version: &Versioned) -> String {
+    preview_part(version).map_or_else(String::new, |(part, theirs)| {
+        let line = part.english();
+        let line = if theirs { format!("You: {line}") } else { line };
+        list_line::cut(&line, LIST_LINE_MAX)
+    })
+}
+
+/// What a row says in a list of chats, as a kind and its values an app words in the user's
+/// language (`last_message_preview`, feature `chat_preview_parts`): with `own` where the user
+/// wrote it, `null` where the row has nothing to show. [`preview`] is its English line.
+pub(crate) fn preview_parts(version: &Versioned) -> Value {
+    preview_part(version).map_or(Value::Null, |(part, theirs)| {
+        let mut parts = part.cut(LIST_LINE_MAX).json();
+        parts["own"] = json!(theirs);
+        parts
+    })
+}
+
+/// What a row holds for the chat list, and whether the user wrote it. A resolved decision is
+/// its question and how it ended, not the user's words; a tool, what it did.
+fn preview_part(version: &Versioned) -> Option<(Part, bool)> {
     let (theirs, text) = match &version.entry {
         Entry::Message(message) => (true, message.text.as_str()),
         Entry::Reply(reply) => (false, reply.text.as_str()),
         Entry::Notice(notice) => (false, notice.text.as_str()),
         Entry::Note(note) => (false, note.text.as_str()),
-        Entry::Tool(call) => (false, call.name.as_str()),
+        Entry::Tool(call) => {
+            let described = tools::describe(&call.name, &call.input);
+            return Some((
+                Part::tool(described.category, &call.name, &described.label),
+                false,
+            ));
+        }
         Entry::Imported(imported) => (
             imported.row["role"] == "user",
             imported.row["text"].as_str().unwrap_or(""),
         ),
         Entry::TurnEnd(_) | Entry::Commentary(_) => (false, ""),
     };
-    let written = markup::clean_for_display(&markup::written_part(text), true);
-    let shown = if written.is_empty() {
-        markup::clean_for_display(text, true)
-    } else {
-        written
-    };
-    if shown.is_empty() {
-        return String::new();
-    }
-    let shown = if theirs {
-        format!("You: {shown}")
-    } else {
-        shown
-    };
-    cut(shown, 80, true)
+    let written = list_line::read(&markup::clean_for_display(
+        &markup::written_part(text),
+        false,
+    ));
+    let part = written.or_else(|| list_line::read(&markup::clean_for_display(text, false)))?;
+    let theirs = theirs && !matches!(part, Part::Decision { .. });
+    Some((part, theirs))
 }
+
+/// The longest line the chat list is sent of a message.
+const LIST_LINE_MAX: usize = 80;
 
 /// An agent's row in the snapshot, with every field of a row. `ended` is how the last turn
 /// ended, when it is known.
@@ -2084,6 +2135,7 @@ pub fn summary(
     let ended = ended.filter(|end| last.is_some_and(|last| last.id.0 == end.turn));
     let since = state_since(record, status);
     let last_message = newest.map(preview).unwrap_or_default();
+    let last_message_preview = newest.map_or(Value::Null, preview_parts);
     let completed = last.filter(|last| last.outcome == Outcome::Completed);
     // The turn an app may show as the agent's current or latest one, by its trace.
     let turn_id = match live {
@@ -2220,6 +2272,7 @@ pub fn summary(
         "head_revision": status.head_revision,
         "last_message_id": newest.map(|row| row.entry.id()).unwrap_or_default(),
         "last_message": last_message,
+        "last_message_preview": last_message_preview,
         "last_completed_message": last_message,
 
         "alive": true,
@@ -2918,6 +2971,10 @@ mod tests {
             (&json!(true), &json!(""))
         );
         assert!(nothing.get("file").is_none());
+        assert_eq!(
+            (&nothing["last_message"], &nothing["last_message_preview"]),
+            (&json!(""), &Value::Null)
+        );
     }
 
     #[test]
@@ -3168,8 +3225,9 @@ mod tests {
         assert_eq!(row.get("archived_by"), Some(&serde_json::Value::Null));
         assert_eq!(
             row.as_object().unwrap().len(),
-            // The Python Host's 55, plus Rust's `transit` and `archived_by`.
-            57,
+            // The Python Host's 55, plus Rust's `transit`, `archived_by` and
+            // `last_message_preview` (contract 219, chat_preview_parts).
+            58,
             "the fields of the snapshot row"
         );
         let typed: AgentSummary = serde_json::from_value(row).unwrap();
@@ -3923,12 +3981,24 @@ mod tests {
         assert_eq!(notification_preview("<team>only for the team</team>"), None);
         let long = "word ".repeat(60);
         let (preview, _) = notification_preview(&long).unwrap();
-        assert_eq!(preview.chars().count(), 180);
-        assert!(preview.ends_with('…'));
+        assert!(preview.chars().count() <= 180, "{preview}");
+        assert!(preview.ends_with("word…"), "{preview}");
     }
 
     #[test]
     fn a_preview_is_one_line_without_markup_and_not_long() {
+        let asked_text = |text: &str| {
+            version(
+                Entry::Message(Message {
+                    id: "u-1".to_string(),
+                    text: text.to_string(),
+                    origin: Origin::User,
+                    ..Message::default()
+                }),
+                9,
+                None,
+            )
+        };
         let reply = |text: &str| {
             version(
                 Entry::Reply(Reply {
@@ -3955,7 +4025,7 @@ mod tests {
                     overwrites rows.</speak>\n\n# PostgreSQL MVCC\n\nEvery row has versions.";
         assert_eq!(
             preview(&reply(gist)),
-            "# PostgreSQL MVCC Every row has versions."
+            "PostgreSQL MVCC Every row has versions."
         );
         // A reply that is only spoken shows its spoken words: there is nothing else.
         assert_eq!(
@@ -3968,9 +4038,25 @@ mod tests {
             "Written first."
         );
         let long = preview(&reply(&"abcdefghi ".repeat(20)));
-        assert_eq!(long.chars().count(), 80, "{long}");
-        assert!(long.ends_with('…') && !long.contains(" …"));
+        assert!(long.chars().count() <= 80, "{long}");
+        assert!(long.ends_with("abcdefghi…"), "{long}");
         assert_eq!(preview(&reply("<team>x</team>")), "");
+        // What the chat draws, the list names: never the Markdown that draws it.
+        let image = reply("![Synthetic picker fixture](clarp-media://asset/asset_AbC_123)");
+        assert_eq!(preview(&image), "Image: Synthetic picker fixture");
+        // The apps word it in the user's language from its kind and values.
+        assert_eq!(
+            preview_parts(&image),
+            json!({"kind": "image", "caption": "Synthetic picker fixture", "own": false})
+        );
+        let sent = asked_text(
+            "![photo](clarp-media://asset/asset_1)\n![two](clarp-media://asset/asset_2)",
+        );
+        assert_eq!(preview(&sent), "You: 2 images");
+        assert_eq!(
+            preview_parts(&sent),
+            json!({"kind": "images", "count": 2, "own": true})
+        );
         // A row never carries what is metadata.
         let shown = row(&reply("Visible.\n<oai-mem-citation>c</oai-mem-citation>"));
         assert_eq!(shown["text"], "Visible.\n");

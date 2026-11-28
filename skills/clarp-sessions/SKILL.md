@@ -14,6 +14,16 @@ clarp-admin sessions
 Use the `session` slug for Clarp API requests. Do not guess a session from a
 persona when more than one row could match.
 
+## Read the chat-list preview
+
+On a Rust Host with feature `chat_preview_parts` in `GET /server-info`, read
+`last_message` for the short English line and `last_message_preview` for the
+structured preview. Both are on the agent's snapshot row and in `GET /log`.
+A `user-notification` carries its structured preview as `preview_parts`.
+Supporting clients word these parts in the user's language. A null part means
+the Host has no preview to show to that reader. On an older Host, use the
+snapshot row's `last_message` when available.
+
 ## Find a past conversation by what was said
 
 On a Rust Host that lists feature `message_search` in `GET /server-info`
