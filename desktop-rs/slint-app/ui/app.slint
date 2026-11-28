@@ -437,6 +437,13 @@ export component AppWindow inherits Window {
     in property <bool> stored-credential;
     in property <bool> has-agents;
     in property <[SavedHostRow]> saved-hosts;
+    callback repair-peer(string, string, string, bool);
+    callback switch-content(string);
+    out property <string> repair-target: connection-page.repair-target;
+    out property <bool> choosing-host: connection-page.choosing-host;
+    out property <bool> connection-submitted: connection-page.submitted;
+    in property <string> dialog-error;
+    in property <string> dialog-state;
     callback connect-host(string, string);
     callback pair-host(string, string);
     callback forget-host();
@@ -784,12 +791,14 @@ export component AppWindow inherits Window {
             width: parent.width;
             height: parent.height;
             base-url: root.base-url;
-            state: root.connection;
-            error: root.error;
-            connecting: root.connecting;
+            state: root.dialog-state;
+            error: root.dialog-error;
+            connecting: root.dialog-state == "connecting" || root.dialog-state == "pairing";
             can-cancel: root.has-agents;
             stored: root.stored-credential;
             hosts: root.saved-hosts;
+            repair(original, url, secret, pairing) => { root.repair-peer(original, url, secret, pairing); }
+            switch-content(url) => { root.switch-content(url); }
             connect(url, token) => { root.connect-host(url, token); }
             remove(url) => { root.remove-saved-host(url); }
             pair(url, code) => { root.pair-host(url, code); }

@@ -196,6 +196,7 @@ pub fn wire(window: &AppWindow) {
             "pair" | "address" => {
                 open_connection(&app, &window);
                 window.invoke_open_host_action(url, action);
+                app.refresh(&[Change::Connection]);
             }
             "tailscale" => crate::view::open_link(TAILSCALE_PAGE),
             other => eprintln!("clarp-slint: no Host-down action {other}"),

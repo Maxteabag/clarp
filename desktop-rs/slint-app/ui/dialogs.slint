@@ -182,8 +182,22 @@ export component ConnectionPage inherits Modal {
     callback cancel();
     // Leaves a saved Host out of the list.
     callback remove(string);
+    out property <string> repair-target;
+    out property <bool> submitted;
+    out property <bool> choosing-host: root.switch-from != "";
+    callback repair(string, string, string, bool);
+    callback switch-content(string);
     private property <string> switch-from;
+    function submit(pairing: bool) {
+        root.submitted = true;
+        if (root.repair-target != "") {
+            root.repair(root.repair-target, server.text, pairing ? code.text : token.text, pairing);
+        } else if (pairing) { root.pair(server.text, code.text); }
+        else { root.connect(server.text, token.text); }
+    }
     public function open-for(url: string, action: string) {
+        root.submitted = false;
+        root.repair-target = (action == "pair" || action == "address") && url != root.base-url ? url : "";
         root.switch-from = action == "switch" ? url : "";
         server.text = url;
         token.text = "";
@@ -202,7 +216,7 @@ export component ConnectionPage inherits Modal {
         if root.hosts.length > 0: Text { text: @tr("Saved Hosts"); color: Palette.muted; font-size: 11 * Look.unit; }
         // At most six (the app sends no more); Ctrl+K finds every saved Host.
         for host in root.hosts: HorizontalLayout {
-            visible: host.url != root.switch-from;
+            visible: root.repair-target == "" && host.url != root.switch-from;
             height: self.visible ? 40px : 0px;
             spacing: 8px;
             VerticalLayout {
@@ -224,7 +238,7 @@ export component ConnectionPage inherits Modal {
                 // i18n: Connection page, saved Host row, button (verb): connect to this Host
                 text: @tr("Connect");
                 enabled: !root.connecting;
-                clicked => { if (host.current) { root.cancel(); } else { root.connect(host.url, ""); } }
+                clicked => { if (root.switch-from != "") { root.switch-content(host.url); } else { root.connect(host.url, ""); } }
             }
             Button {
                 // i18n: Connection page, saved Host row, button (verb): forget this saved Host
@@ -244,7 +258,7 @@ export component ConnectionPage inherits Modal {
             input-type: password;
             // i18n: Connection page, accessibility label of the access token field (noun: a secret key)
             accessible-label: @tr("Token");
-            accepted => { root.connect(server.text, token.text); }
+            accepted => { root.submit(false); }
         }
         Rectangle { height: 1px; background: Palette.border; }
         // i18n: Connection page, line over the pairing code field: instead of a token, pair with a code shown on the Host
@@ -256,13 +270,13 @@ export component ConnectionPage inherits Modal {
                 input-type: password;
                 // i18n: Connection page, accessibility label of the one-time pairing code field (noun)
                 accessible-label: @tr("Pairing code");
-                accepted => { root.pair(server.text, code.text); }
+                accepted => { root.submit(true); }
             }
             Button {
                 // i18n: Connection page, button (verb): pair with the Host using the one-time code
                 text: @tr("Pair");
                 enabled: code.text != "" && !root.connecting;
-                clicked => { root.pair(server.text, code.text); }
+                clicked => { root.submit(true); }
             }
         }
         if root.error != "": Text { text: root.error; color: Palette.danger; font-size: 11 * Look.unit; wrap: word-wrap; }
@@ -310,7 +324,7 @@ export component ConnectionPage inherits Modal {
                     : @tr("Connect");
                 primary: true;
                 enabled: !root.connecting;
-                clicked => { root.connect(server.text, token.text); }
+                clicked => { root.submit(false); }
             }
         }
     }
