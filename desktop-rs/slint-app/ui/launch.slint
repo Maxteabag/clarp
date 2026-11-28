@@ -65,7 +65,7 @@ export component IconButton inherits Rectangle {
     }
 }
 
-// A small caption above a section ("HARNESS", "MODEL", …).
+// A small caption above a section ("BACKEND", "MODEL", …).
 export component Caption inherits Text {
     color: Palette.muted;
     font-size: 11 * Look.unit;
@@ -408,7 +408,7 @@ export component NewSessionHub inherits Modal {
                     Caption { text: @tr("BACKEND"); }
                     KeyTag { text: "ctrl+← →"; }
                 }
-                // Every harness keeps its whole name: the marks wrap onto
+                // Every backend keeps its whole name: the marks wrap onto
                 // another line in a narrow window, never cut or run off it.
                 FlexboxLayout {
                     spacing: 8px;

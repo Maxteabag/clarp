@@ -102,7 +102,7 @@ fn initial(name: &str) -> SharedString {
 }
 
 /// `{id, label}` choices as ids and labels, without the catalog's own
-/// default row: the hub puts "Server default" first instead.
+/// default row: the hub puts "Default" first instead.
 fn choices(values: &[Value]) -> Vec<(String, String)> {
     values
         .iter()
