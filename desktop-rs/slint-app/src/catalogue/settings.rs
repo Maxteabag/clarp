@@ -547,18 +547,23 @@ fn voice() -> Vec<Setting> {
 /// and names the event; then this computer's popups, their sound and
 /// pausing the phone while here.
 fn notifications() -> Vec<Setting> {
-    use clarp_core::notify_events::{self, EVENTS};
-    EVENTS
+    use clarp_core::notify_events::{self, EVENT_IDS, event_about, event_label, text};
+    // The registry's words (Ctrl+K's search) are made once; the page says
+    // each in the app's language when it draws it.
+    let once = |words: String| -> &'static str { Box::leak(words.into_boxed_str()) };
+    EVENT_IDS
         .iter()
-        .map(|&(id, label, about)| {
+        .map(|&id| {
             let on = move |app: &App| app.engine.borrow().notification_settings().and_then(|s| s.event(id)).is_some_and(|e| e.on);
             Setting::toggle(
-                Entry { id: event_setting_id(id), label, description: about, aliases: EVENT_ALIASES, group: "notifications", actions: &[] },
+                Entry { id: event_setting_id(id), label: once(event_label(id)), description: once(event_about(id)), aliases: EVENT_ALIASES, group: "notifications", actions: &[] },
                 "NOTIFICATIONS",
                 on,
                 move |app, _, on| app.engine.borrow_mut().set_notification_event(id, on),
             )
             .when(move |app| app.engine.borrow().notification_settings().is_some_and(|s| s.event(id).is_some()))
+            .label_from(move |_| event_label(id))
+            .describe_from(move |_| event_about(id))
         })
         .chain([
             // This computer's own switches, after the Host's.
@@ -567,13 +572,17 @@ fn notifications() -> Vec<Setting> {
                 "NOTIFICATIONS",
                 "notifications/replies",
                 true,
-            ),
+            )
+            .label_from(|_| text("notify.settings.desktop"))
+            .describe_from(|_| text("notify.settings.desktop.detail")),
             Setting::stored_toggle(
                 e("notification-sound", notify_events::SOUND_LABEL, "notifications", notify_events::SOUND_ABOUT, &["sounds", "chime", "ding", "audio alert", "beep", "notification sound", "notifications", "toggle"]),
                 "NOTIFICATIONS",
                 "notifications/sound",
                 false,
-            ),
+            )
+            .label_from(|_| text("notify.settings.sound"))
+            .describe_from(|_| text("notify.settings.sound.detail")),
             Setting::stored_toggle(
                 e("pause-mobile-push", "Pause phone alerts while active on desktop", "notifications", "Holds phone notifications while you are using this window.", &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"]),
                 "NOTIFICATIONS",

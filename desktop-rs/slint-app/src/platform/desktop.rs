@@ -515,16 +515,16 @@ pub fn close_chat(session: &str) {
 /// A click is Open; a question's answers come first, as a desktop shows
 /// only its first few; then Mark read, Mute <name> and the settings.
 fn actions(note: &Note) -> Vec<String> {
-    use clarp_core::notify_events::text;
-    let mut out = vec!["default".to_owned(), text("notify.action.open").to_owned()];
+    use clarp_core::notify_events::{mute_label, text};
+    let mut out = vec!["default".to_owned(), text("notify.action.open")];
     for (key, label) in &note.choices {
         out.extend([key.clone(), label.clone()]);
     }
-    out.extend(["mark-read".to_owned(), text("notify.action.mark_read").to_owned()]);
+    out.extend(["mark-read".to_owned(), text("notify.action.mark_read")]);
     if !note.name.is_empty() {
-        out.extend(["mute".to_owned(), text("notify.action.mute").replace("{name}", &note.name)]);
+        out.extend(["mute".to_owned(), mute_label(&note.name)]);
     }
-    out.extend(["settings".to_owned(), text("notify.action.settings").to_owned()]);
+    out.extend(["settings".to_owned(), text("notify.action.settings")]);
     out
 }
 

@@ -255,8 +255,8 @@ fn notify_choices(engine: &clarp_engine::Engine, session: &str) -> Vec<NotifyCho
         .events
         .iter()
         .map(|event| {
-            let default = format!("{} · {}", text("notify.settings.default"), if event.on { on } else { off });
-            let choices: Vec<SharedString> = [default.as_str(), on, off].into_iter().map(SharedString::from).collect();
+            let default = format!("{} · {}", text("notify.settings.default"), if event.on { &on } else { &off });
+            let choices: Vec<SharedString> = [default.as_str(), on.as_str(), off.as_str()].into_iter().map(SharedString::from).collect();
             NotifyChoice {
                 id: event.id.as_str().into(),
                 label: event_label(&event.id).into(),
@@ -542,7 +542,7 @@ pub fn hints(app: &App, window: &AppWindow) -> Vec<crate::Hint> {
             "heartbeat" => Some(on(info.heartbeat).into()),
             "dreaming" => Some(on(info.dreaming).into()),
             "push-alerts" => Some(on(info.push_alerts).into()),
-            "notify-customize" => Some(clarp_core::notify_events::text("notify.settings.customize").into()),
+            "notify-customize" => Some(clarp_core::notify_events::text("notify.settings.customize")),
             "compact" if !info.compacting => Some("Compact".into()),
             "queue" => Some("Manage queue".into()),
             "relaunch" => Some("Relaunch".into()),

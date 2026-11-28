@@ -602,11 +602,13 @@ export component AgentProfile inherits Modal {
                         changed preset => { preset-box.current-index = self.preset; }
                         HorizontalLayout {
                             spacing: 8px;
+                            // i18n: contact profile, row label (noun) of the contact's notification preset
                             Text { text: @tr("notify.settings.contact" => "Notifications"); color: Palette.chrome-text; font-size: 12 * Look.unit; width: 150 * Look.unit; vertical-alignment: center; }
                             preset-box := ComboBox {
                                 horizontal-stretch: 1;
                                 model: ProfileBridge.notify-presets;
                                 current-index: root.info.notify-preset;
+                                // i18n: contact profile, accessibility label of the notification preset choice (noun)
                                 accessible-label: @tr("notify.settings.contact" => "Notifications");
                                 selected => { ProfileBridge.set-notify-preset(self.current-index); }
                                 changed has-focus => { ProfileBridge.choice-focused = self.has-focus; }
@@ -617,6 +619,7 @@ export component AgentProfile inherits Modal {
                         alignment: start;
                         Spot {
                             spot: "notify-customize";
+                            // i18n: contact profile, button (verb): shows a notification choice per event
                             TextButton { text: @tr("notify.settings.customize" => "Customize"); clicked => { ProfileBridge.notify-customize = true; } }
                         }
                     }

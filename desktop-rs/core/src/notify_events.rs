@@ -152,7 +152,7 @@ impl Preset {
     }
 
     /// Its words (`notify.settings.preset.<name>`).
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         text(match self {
             Preset::All => "notify.settings.preset.all",
             Preset::NeedsMe => "notify.settings.preset.needs_me",
@@ -234,6 +234,14 @@ pub struct Incoming {
     /// needs_you: `approval`, `single_choice` or `text_input`.
     pub response_type: String,
     pub decision_id: String,
+    /// needs_you: the card the question is on (its answers go through it).
+    pub artifact_id: String,
+    /// The Host's own words by key, for the app to say in its language
+    /// (`title_loc_key`/`body_loc_key` and their arguments), and its English
+    /// title where it made one.
+    pub title: String,
+    pub title_loc: Option<(String, Vec<String>)>,
+    pub body_loc: Option<(String, Vec<String>)>,
     /// needs_you: the decision's revision when the push says it; else the
     /// app reads it from Updates.
     pub revision: Option<i64>,
@@ -334,7 +342,26 @@ impl Failure {
     }
 }
 
+/// A key the Host sent and its arguments as text (numbers as digits).
+fn loc(event: &Object, key: &str, args: &str) -> Option<(String, Vec<String>)> {
+    let key = json::string(event, key);
+    let args = json::array(event, args).iter().map(|a| a.as_str().map_or_else(|| a.to_string(), str::to_owned)).collect();
+    (!key.is_empty()).then_some((key, args))
+}
+
 impl Incoming {
+    /// The Host's text by key in the app's language, else its English
+    /// title (empty when it made none).
+    pub fn title_text(&self) -> String {
+        self.title_loc.as_ref().and_then(|(key, args)| host_text(key, args)).unwrap_or_else(|| self.title.clone())
+    }
+
+    /// The Host's body by key in the app's language, when it sent one the
+    /// desktop knows (a failed turn's `error.*` reads through its card).
+    pub fn body_text(&self) -> Option<String> {
+        self.body_loc.as_ref().and_then(|(key, args)| host_text(key, args))
+    }
+
     pub fn parse(event: &Object) -> Incoming {
         let first = |keys: &[&str]| keys.iter().map(|k| json::string(event, k)).find(|v| !v.is_empty()).unwrap_or_default();
         let mut options: Vec<Choice> = json::array(event, "options")
@@ -358,7 +385,12 @@ impl Incoming {
             alert: event.get("alert").and_then(Value::as_bool),
             unread: event.get("unread").and_then(Value::as_bool),
             notification_id: json::string(event, "notification_id"),
-            message_id: first(&["message_id", "source_message_id"]),
+            // A failed turn's is the message it answered (`cause_message_id`).
+            message_id: first(&["message_id", "source_message_id", "cause_message_id"]),
+            artifact_id: json::string(event, "artifact_id"),
+            title: json::string(event, "title"),
+            title_loc: loc(event, "title_loc_key", "title_loc_args"),
+            body_loc: loc(event, "body_loc_key", "body_loc_args"),
             session: json::string(event, "session"),
             agent_id: json::string(event, "agent_id"),
             persona: json::string(event, "persona"),
@@ -372,10 +404,12 @@ impl Incoming {
         }
     }
 
-    /// Whether it may pop up at all: the Host said alert (or, older, said
-    /// nothing), it marks the chat unread, and the contact is not quiet.
+    /// Whether it may pop up at all, the contact not quiet: the Host's
+    /// `alert` decides where it says one (a question alerts without marking
+    /// the chat unread); an older Host's notification pops up when it marks
+    /// the chat unread.
     pub fn alerts(&self, quiet: bool) -> bool {
-        self.alert.unwrap_or(true) && self.unread != Some(false) && !quiet
+        !quiet && self.alert.unwrap_or(self.unread != Some(false))
     }
 
     /// Whether the popup asks for the desktop's sound, with the reader's
@@ -413,97 +447,171 @@ impl Recent {
     }
 }
 
-/// The reader's own switches (`notifyreplies`, `notifysound` in `prefs`).
+// i18n-screen: notifications
+
+/// The reader's own switches (`notifyreplies`, `notifysound` in `prefs`), in
+/// English for the settings registry; the page shows them through [`text`].
 pub const DESKTOP_LABEL: &str = "Desktop notifications";
 pub const DESKTOP_ABOUT: &str = "Show notifications on this computer";
 pub const SOUND_LABEL: &str = "Sound";
 pub const SOUND_ABOUT: &str = "Play the desktop's message sound when an agent asks you something or rings";
 
-/// The events the desktop knows words for, in the Host catalog's order:
-/// wire id, `notify.event.<id>.title` (a switch's label in Settings >
-/// Notifications and a choice's label on a contact's profile, a noun
-/// phrase), `notify.event.<id>.detail` (the line under that switch). The
-/// Host's `message_key` (`notify.event.<id>`) reads as the title.
-pub const EVENTS: &[(&str, &str, &str)] = &[
-    ("reply", "Replies", "An agent finished and has something for you"),
-    ("needs_you", "Questions for you", "An agent asks you something or waits for your answer"),
-    ("failed", "Failed turns", "A turn failed and the Host stopped trying"),
-    ("update", "Updates", "A note an agent sent you"),
-    ("job_done", "Background jobs done", "A background job of an agent ended"),
-    ("helper_report", "Helper reports", "A helper reported to the agent that started it"),
-    ("call", "Calls", "An agent rings you"),
-    ("account", "Account notices", "Account and usage notices"),
-];
+/// The event ids the desktop has words for, in the Host catalog's order.
+pub const EVENT_IDS: &[&str] = &["reply", "needs_you", "failed", "update", "job_done", "helper_report", "call", "account"];
 
-/// Every other word the desktop shows for notifications: stable key,
-/// English, and the context note translators get (where it appears, what
-/// it does, the part of speech where English is ambiguous). Placeholders
-/// are named (`{name}`). One place, so the localization sweep takes them.
-pub const STRINGS: &[(&str, &str, &str)] = &[
-    ("notify.settings.desktop", DESKTOP_LABEL, "Settings > Notifications: switch label; turns this computer's notification popups on or off"),
-    ("notify.settings.desktop.detail", DESKTOP_ABOUT, "Settings > Notifications: line under the Desktop notifications switch"),
-    ("notify.settings.sound", SOUND_LABEL, "Settings > Notifications: switch label (noun); plays a sound with questions and calls"),
-    ("notify.settings.sound.detail", SOUND_ABOUT, "Settings > Notifications: line under the Sound switch"),
-    ("notify.settings.default", "Default", "Contact profile > Notifications: choice meaning 'follow the setting for everyone'; shown as 'Default · On'"),
-    ("notify.settings.on", "On", "Contact profile > Notifications: choice (adjective, the event notifies)"),
-    ("notify.settings.off", "Off", "Contact profile > Notifications: choice (adjective, the event stays silent)"),
-    ("notify.settings.customize", "Customize", "Contact profile > Notifications: button (verb) that shows a choice per event"),
-    ("notify.settings.preset.all", "All", "Contact profile > Notifications: preset choice, every notification as set for everyone"),
-    ("notify.settings.preset.needs_me", "Only when it needs me", "Contact profile > Notifications: preset choice, only questions and failed turns"),
-    ("notify.settings.preset.muted", "Muted", "Contact profile > Notifications: preset choice (adjective), nothing from this contact"),
-    ("notify.settings.preset.custom", "Custom", "Contact profile > Notifications: preset choice (adjective), its own choice per event"),
-    ("notify.action.open", "Open", "Desktop notification: button (verb) that opens the chat at the message"),
-    ("notify.action.mark_read", "Mark read", "Desktop notification: button (verb) that marks the chat read without opening it"),
-    ("notify.action.mute", "Mute {name}", "Desktop notification: button (verb); {name} is the contact's name; no more notifications from them"),
-    ("notify.action.settings", "Settings", "Desktop notification: button (noun) that opens Settings > Notifications"),
-    ("notify.action.yes", "Yes", "Desktop notification: button that approves an agent's request, when the Host names no label of its own"),
-    ("notify.action.no", "No", "Desktop notification: button that declines an agent's request, when the Host names no label of its own"),
-    ("notify.action.undo", "Undo", "Desktop notification: button (verb) that takes back the answer just given to an agent's question"),
-    ("notify.body.answered", "You answered {answer}", "Desktop notification: body after answering from the notification; {answer} is the chosen answer's label"),
-    ("notify.body.too_late", "Too late to undo: the answer was sent", "Desktop notification: body when Undo came after the agent got the answer"),
-    ("notify.body.needs_you", "Waiting for your answer", "Desktop notification: body when an agent's question has no text of its own"),
-    ("notify.body.failed", "The turn failed", "Desktop notification: body when a failed turn has no text of its own"),
-    ("notify.body.reply", "Done, your turn", "Desktop notification: body when an agent finished without words to show"),
-];
-
-/// The English words for a key; the key itself when none is known.
-pub fn text(key: &str) -> &str {
-    if let Some(rest) = key.strip_prefix("notify.event.") {
-        let (id, part) = rest.split_once('.').unwrap_or((rest, "title"));
-        let found = EVENTS.iter().find(|(e, ..)| *e == id);
-        return match part {
-            "title" => found.map_or(key, |(_, title, _)| title),
-            "detail" => found.map_or(key, |(.., detail)| detail),
-            _ => key,
-        };
-    }
-    STRINGS.iter().find(|(k, ..)| *k == key).map_or(key, |(_, en, _)| en)
-}
-
-/// Every key with its English and context note, for the localization
-/// exporter: the events' titles and details, then `STRINGS`.
-pub fn catalog() -> Vec<(String, &'static str, String)> {
-    let mut out = Vec::new();
-    for (id, title, detail) in EVENTS {
-        out.push((format!("notify.event.{id}.title"), *title, format!("Settings > Notifications and a contact's profile: label (noun phrase) of the {id} event's switch")));
-        out.push((format!("notify.event.{id}.detail"), *detail, format!("Settings > Notifications: line under the {id} event's switch")));
-    }
-    out.extend(STRINGS.iter().map(|(key, en, note)| ((*key).to_owned(), *en, (*note).to_owned())));
-    out
-}
-
-/// The words for an event id (`reply` → "Replies").
+/// An event's name in the app's language (`notify.event.<id>`, the Host's
+/// `message_key`); an id it does not know reads as its words.
 pub fn event_label(id: &str) -> String {
-    let key = format!("notify.event.{id}");
-    let words = text(&key);
-    if words == key { id.replace('_', " ") } else { words.to_owned() }
+    use crate::tr;
+    match id {
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): an agent's finished reply
+        "reply" => tr!("notify.event.reply" => "Replies"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): an agent asks the user something
+        "needs_you" => tr!("notify.event.needs_you" => "Questions for you"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): an agent's turn that failed
+        "failed" => tr!("notify.event.failed" => "Failed turns"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): notes agents send the user
+        "update" => tr!("notify.event.update" => "Updates"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): an agent's background job ended
+        "job_done" => tr!("notify.event.job_done" => "Background jobs done"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): a helper agent reported to its parent
+        "helper_report" => tr!("notify.event.helper_report" => "Helper reports"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): an agent rings the user
+        "call" => tr!("notify.event.call" => "Calls"),
+        // i18n: Settings > Notifications and a contact's profile, label of a switch (noun): account and usage notices
+        "account" => tr!("notify.event.account" => "Account notices"),
+        other => other.replace('_', " "),
+    }
 }
 
-/// The line under an event's switch.
+/// The line under an event's switch (`notify.event.<id>.detail`).
 pub fn event_about(id: &str) -> String {
-    let key = format!("notify.event.{id}.detail");
-    let words = text(&key);
-    if words == key { String::new() } else { words.to_owned() }
+    use crate::tr;
+    match id {
+        // i18n: Settings > Notifications, line under the Replies switch
+        "reply" => tr!("notify.event.reply.detail" => "An agent finished and has something for you"),
+        // i18n: Settings > Notifications, line under the Questions for you switch
+        "needs_you" => tr!("notify.event.needs_you.detail" => "An agent asks you something or waits for your answer"),
+        // i18n: Settings > Notifications, line under the Failed turns switch
+        "failed" => tr!("notify.event.failed.detail" => "A turn failed and the Host stopped trying"),
+        // i18n: Settings > Notifications, line under the Updates switch
+        "update" => tr!("notify.event.update.detail" => "A note an agent sent you"),
+        // i18n: Settings > Notifications, line under the Background jobs done switch
+        "job_done" => tr!("notify.event.job_done.detail" => "A background job of an agent ended"),
+        // i18n: Settings > Notifications, line under the Helper reports switch
+        "helper_report" => tr!("notify.event.helper_report.detail" => "A helper reported to the agent that started it"),
+        // i18n: Settings > Notifications, line under the Calls switch
+        "call" => tr!("notify.event.call.detail" => "An agent rings you"),
+        // i18n: Settings > Notifications, line under the Account notices switch
+        "account" => tr!("notify.event.account.detail" => "Account and usage notices"),
+        _ => String::new(),
+    }
+}
+
+/// The desktop's own notification words by key, in the app's language; the
+/// key itself for one it does not know. Words with a value in them have a
+/// function of their own ([`mute_label`], [`you_answered`]).
+pub fn text(key: &str) -> String {
+    use crate::tr;
+    match key {
+        // i18n: Settings > Notifications, switch label: this computer's notification popups on or off
+        "notify.settings.desktop" => tr!("notify.settings.desktop" => "Desktop notifications"),
+        // i18n: Settings > Notifications, line under the Desktop notifications switch
+        "notify.settings.desktop.detail" => tr!("notify.settings.desktop.detail" => "Show notifications on this computer"),
+        // i18n: Settings > Notifications, switch label (noun): a sound with questions and calls
+        "notify.settings.sound" => tr!("notify.settings.sound" => "Sound"),
+        // i18n: Settings > Notifications, line under the Sound switch
+        "notify.settings.sound.detail" => tr!("notify.settings.sound.detail" => "Play the desktop's message sound when an agent asks you something or rings"),
+        // i18n: contact profile > Notifications, choice meaning "as set for everyone", shown as "Default · On"
+        "notify.settings.default" => tr!("notify.settings.default" => "Default"),
+        // i18n: contact profile > Notifications, choice (adjective): this event notifies
+        "notify.settings.on" => tr!("notify.settings.on" => "On"),
+        // i18n: contact profile > Notifications, choice (adjective): this event stays silent
+        "notify.settings.off" => tr!("notify.settings.off" => "Off"),
+        // i18n: contact profile > Notifications, button (verb): shows a choice per event
+        "notify.settings.customize" => tr!("notify.settings.customize" => "Customize"),
+        // i18n: contact profile > Notifications, preset choice: every notification as set for everyone
+        "notify.settings.preset.all" => tr!("notify.settings.preset.all" => "All"),
+        // i18n: contact profile > Notifications, preset choice: only questions and failed turns
+        "notify.settings.preset.needs_me" => tr!("notify.settings.preset.needs_me" => "Only when it needs me"),
+        // i18n: contact profile > Notifications, preset choice (adjective): nothing from this contact
+        "notify.settings.preset.muted" => tr!("notify.settings.preset.muted" => "Muted"),
+        // i18n: contact profile > Notifications, preset choice (adjective): its own choice per event
+        "notify.settings.preset.custom" => tr!("notify.settings.preset.custom" => "Custom"),
+        // i18n: desktop notification, button (verb): opens the chat at the message
+        "notify.action.open" => tr!("notify.action.open" => "Open"),
+        // i18n: desktop notification, button (verb): marks the chat read without opening it
+        "notify.action.mark_read" => tr!("notify.action.mark_read" => "Mark read"),
+        // i18n: desktop notification, button (noun): opens Settings > Notifications
+        "notify.action.settings" => tr!("notify.action.settings" => "Settings"),
+        // i18n: desktop notification, button that approves an agent's request when the card names no label
+        "notify.action.yes" => tr!("notify.action.yes" => "Yes"),
+        // i18n: desktop notification, button that declines an agent's request when the card names no label
+        "notify.action.no" => tr!("notify.action.no" => "No"),
+        // i18n: desktop notification, button (verb): takes back the answer just given to an agent's question
+        "notify.action.undo" => tr!("notify.action.undo" => "Undo"),
+        // i18n: desktop notification, body when an agent's question has no text of its own
+        "notify.body.needs_you" => tr!("notify.body.needs_you" => "Waiting for your answer"),
+        // i18n: desktop notification, body when a failed turn has no text of its own
+        "notify.body.failed" => tr!("notify.body.failed" => "The turn failed"),
+        // i18n: desktop notification, body when Undo came after the agent got the answer
+        "notify.body.too_late" => tr!("notify.body.too_late" => "Too late to undo: the answer was sent"),
+        _ => host_text(key, &[]).unwrap_or_else(|| key.to_owned()),
+    }
+}
+
+/// "Mute <name>", a notification's button (`notify.action.mute`).
+pub fn mute_label(name: &str) -> String {
+    // i18n: desktop notification, button (verb): no more notifications from this contact; {} is the contact's name
+    crate::tr!("notify.action.mute" => "Mute {}", name)
+}
+
+/// What was answered from a notification (`notify.body.you_answered`).
+pub fn you_answered(answer: &str) -> String {
+    // i18n: desktop notification, body after answering from the notification; {} is the chosen answer's label
+    crate::tr!("notify.body.you_answered" => "You answered {}", answer)
+}
+
+/// A text the Host made, by the key it sent (`title_loc_key` or
+/// `body_loc_key`) and its arguments, in the app's language; None for a key
+/// the desktop does not know (the Host's English stands then). `error.*`
+/// keys are a failed turn's and read through [`Failure::turn_error`].
+pub fn host_text(key: &str, args: &[String]) -> Option<String> {
+    use crate::tr;
+    let a = |i: usize| args.get(i).cloned().unwrap_or_default();
+    Some(match key {
+        "notify.event.reply" | "notify.event.needs_you" | "notify.event.failed" | "notify.event.update" | "notify.event.job_done"
+        | "notify.event.helper_report" | "notify.event.call" | "notify.event.account" => event_label(&key["notify.event.".len()..]),
+        // i18n: desktop notification, body when an agent finished without words to show
+        "notify.body.done" => tr!("notify.body.done" => "Done, your turn"),
+        // i18n: desktop notification, title when an agent bound to privacy answered; {} is the agent's name
+        "notify.body.answered" => tr!("notify.body.answered" => "{} answered", a(0)),
+        // i18n: desktop notification, title when an agent bound to privacy asks something; {} is the agent's name
+        "notify.body.asks" => tr!("notify.body.asks" => "{} asks", a(0)),
+        // i18n: desktop notification, body of a private agent's question: its words are not shown
+        "notify.body.open_to_answer" => tr!("notify.body.open_to_answer" => "Open Clarp to answer."),
+        // i18n: desktop notification, title of an agent's call ringing; {} is the agent's name
+        "notify.body.call_ringing" => tr!("notify.body.call_ringing" => "{} is calling", a(0)),
+        // i18n: desktop notification, title of a call not answered; {} is the agent's name
+        "notify.body.call_missed" => tr!("notify.body.call_missed" => "Missed call from {}", a(0)),
+        // i18n: desktop notification, title of a call the user declined; {} is the agent's name
+        "notify.body.call_declined" => tr!("notify.body.call_declined" => "Declined call from {}", a(0)),
+        // i18n: desktop notification, title of a call going on; {} is the agent's name
+        "notify.body.call_answered" => tr!("notify.body.call_answered" => "Call with {}", a(0)),
+        // i18n: desktop notification, title when the calling agent hung up before it was answered; {} is the agent's name
+        "notify.body.call_cancelled" => tr!("notify.body.call_cancelled" => "{} hung up", a(0)),
+        // i18n: desktop notification, title of a call when the caller is not named
+        "notify.body.call_incoming" => tr!("notify.body.call_incoming" => "Incoming call"),
+        // i18n: desktop notification, title of a failed turn; {} is the agent's name
+        "notify.body.failed_title" => tr!("notify.body.failed_title" => "{} couldn't finish", a(0)),
+        // i18n: desktop notification, body when an agent's background job succeeded; {} is the job's title
+        "notify.body.job_succeeded" => tr!("notify.body.job_succeeded" => "Finished: {}", a(0)),
+        // i18n: desktop notification, body when an agent's background job failed; {} is the job's title
+        "notify.body.job_failed" => tr!("notify.body.job_failed" => "Failed: {}", a(0)),
+        // i18n: desktop notification, body when a helper agent reported to its parent; {} is the helper's name
+        "notify.body.helper_reported" => tr!("notify.body.helper_reported" => "{} reported back", a(0)),
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -593,10 +701,14 @@ mod tests {
     }
 
     #[test]
-    fn alert_false_or_not_unread_stays_quiet() {
+    fn alert_decides_and_an_older_hosts_read_stays_quiet() {
         let off = Incoming::parse(&object(json!({"event": "reply", "alert": false})));
         assert!(!off.alerts(false));
-        let read = Incoming::parse(&object(json!({"event": "reply", "alert": true, "unread": false})));
+        // A question alerts without marking the chat unread.
+        let asked = Incoming::parse(&object(json!({"event": "needs_you", "alert": true, "unread": false})));
+        assert!(asked.alerts(false));
+        assert!(!asked.alerts(true), "never from a quiet contact");
+        let read = Incoming::parse(&object(json!({"preview": "older Host", "unread": false})));
         assert!(!read.alerts(false));
         let on = Incoming::parse(&object(json!({"event": "failed", "alert": true, "unread": true, "body": "You hit the usage limit."})));
         assert!(on.alerts(false));
@@ -689,25 +801,41 @@ mod tests {
 
     #[test]
     fn every_event_has_words() {
-        for id in ["reply", "needs_you", "failed", "update", "job_done", "helper_report", "call", "account"] {
-            assert_ne!(event_label(id), id, "{id}");
+        for id in EVENT_IDS {
+            assert_ne!(event_label(id), *id, "{id}");
             assert!(!event_about(id).is_empty(), "{id}");
         }
         assert_eq!(event_label("new_kind"), "new kind");
-        assert_eq!(text("notify.event.reply"), "Replies", "the Host's message_key reads as the title");
-        assert_eq!(text("notify.event.reply.title"), "Replies");
-        assert_eq!(text("notify.event.reply.detail"), event_about("reply"));
+        assert_eq!(host_text("notify.event.reply", &[]).as_deref(), Some("Replies"), "the Host's message_key reads as the title");
     }
 
     #[test]
-    fn every_key_has_english_and_a_context_note() {
-        let catalog = catalog();
-        let mut keys = std::collections::HashSet::new();
-        for (key, en, note) in &catalog {
-            assert!(key.starts_with("notify."), "{key}");
-            assert!(keys.insert(key.clone()), "{key} twice");
-            assert!(!en.is_empty() && note.len() > 20, "{key} needs English and a context note");
-            assert_eq!(text(key), *en, "{key}");
-        }
+    fn a_notification_reads_the_hosts_keys() {
+        let failed = Incoming::parse(&object(json!({
+            "event": "failed", "title": "Vera couldn't finish", "title_loc_key": "notify.body.failed_title", "title_loc_args": ["Vera"],
+            "body_loc_key": "error.auth", "body_loc_args": ["Claude"], "cause_message_id": "m7", "source_message_id": "",
+        })));
+        assert_eq!(failed.title_text(), "Vera couldn't finish");
+        assert_eq!(failed.body_text(), None, "the card's sentence says it");
+        assert_eq!(failed.message_id, "m7", "the message the failed turn answered");
+        let job = Incoming::parse(&object(json!({"event": "job_done", "body_loc_key": "notify.body.job_failed", "body_loc_args": ["Backup"], "title": "Nightly"})));
+        assert_eq!(job.body_text().as_deref(), Some("Failed: Backup"));
+        assert_eq!(job.title_text(), "Nightly", "no title key: the Host's English");
+        let asked = Incoming::parse(&object(json!({"event": "needs_you", "artifact_id": "q1", "decision_id": "d1"})));
+        assert_eq!(asked.artifact_id, "q1");
+    }
+
+    #[test]
+    fn the_desktop_says_the_hosts_texts_by_key() {
+        let args = ["Vera".to_owned()];
+        assert_eq!(host_text("notify.body.failed_title", &args).as_deref(), Some("Vera couldn't finish"));
+        assert_eq!(host_text("notify.body.job_succeeded", &["Nightly build".to_owned()]).as_deref(), Some("Finished: Nightly build"));
+        assert_eq!(host_text("notify.body.done", &[]).as_deref(), Some("Done, your turn"));
+        assert_eq!(host_text("notify.body.brand_new", &args), None, "the Host's English stands");
+        assert_eq!(host_text("error.auth", &args), None, "a failed turn's sentence is the card's");
+        assert_eq!(text("notify.body.done"), "Done, your turn");
+        assert_eq!(text("notify.unknown"), "notify.unknown");
+        assert_eq!(mute_label("Vera"), "Mute Vera");
+        assert_eq!(you_answered("Now"), "You answered Now");
     }
 }

@@ -1941,7 +1941,8 @@ fn desktop_check(out: String) {
             // The chat on screen, in a window that has the keyboard.
             send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "notification_id": "pn-mike",
                                     "session": "mike", "agent_id": "a2", "persona": "Mike", "preview": "On screen"}));
-            send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": false, "notification_id": "pn-read",
+            // An older Host's notification that marks nothing unread.
+            send(serde_json::json!({"type": "user-notification", "unread": false, "notification_id": "pn-read",
                                     "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Already read"}));
             true
         })),

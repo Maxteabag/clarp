@@ -189,7 +189,8 @@ impl Engine {
                 }
                 // Not in Updates yet: the decision alone (the artifact only
                 // names the card's status line there).
-                let artifact = self.decision_artifact(decision_id).unwrap_or_default();
+                let pushed = self.question(decision_id).map(|q| q.notification.artifact_id).filter(|a| !a.is_empty());
+                let artifact = self.decision_artifact(decision_id).or(pushed).unwrap_or_default();
                 self.send_decision(&artifact, decision_id, "resolve", body, revision);
                 self.notifications.answers.insert(decision_id.to_owned(), (words, None));
                 true
@@ -248,8 +249,8 @@ impl Engine {
         notification.event = ANSWERED.into();
         notification.response_type = ANSWERED.into();
         notification.notification_id.clear();
-        notification.options = vec![Choice { id: UNDO.into(), label: notify_events::text("notify.action.undo").into() }];
-        let body = notify_events::text("notify.body.answered").replace("{answer}", &words);
+        notification.options = vec![Choice { id: UNDO.into(), label: notify_events::text("notify.action.undo") }];
+        let body = notify_events::you_answered(&words);
         self.changes.push(Change::Notification(Popup { body, notification, selected: false, ..question }));
     }
 
@@ -277,7 +278,7 @@ impl Engine {
         question.notification.options.clear();
         question.notification.decision_id.clear();
         question.notification.event = ANSWERED.into();
-        question.body = notify_events::text("notify.body.too_late").to_owned();
+        question.body = notify_events::text("notify.body.too_late");
         question.selected = false;
         self.changes.push(Change::Notification(question));
     }
@@ -404,8 +405,20 @@ impl Engine {
         if !self.notifications.recent.first_time(&incoming.notification_id) {
             return;
         }
-        let title = Some(incoming.persona.clone()).filter(|p| !p.is_empty()).unwrap_or_else(|| session.clone());
-        let mut body = clarp_core::decision_receipt::preview_line(&incoming.preview);
+        let mut incoming = incoming;
+        // Words are made here, as the popup is shown: in the app's language now.
+        let title = [incoming.title_text(), incoming.persona.clone()].into_iter().find(|t| !t.is_empty()).unwrap_or_else(|| session.clone());
+        let mut body = incoming.body_text().unwrap_or_else(|| clarp_core::decision_receipt::preview_line(&incoming.preview));
+        // An approval's answers in the card's own words, where Updates lists it.
+        if incoming.response_type == "approval" {
+            let listed = self.attention_items().iter().filter_map(Value::as_object).find(|i| json::string(i, "decision_id") == incoming.decision_id).cloned();
+            for choice in incoming.options.iter_mut() {
+                let said = listed.as_ref().map(|i| json::string(i, if choice.id == "accepted" { "yes_label" } else { "no_label" })).unwrap_or_default();
+                if !said.is_empty() && (choice.label == notify_events::text("notify.action.yes") || choice.label == notify_events::text("notify.action.no")) {
+                    choice.label = said;
+                }
+            }
+        }
         // A failed turn says what its card says, in the app's language.
         if let Some(failure) = &incoming.failure {
             let now = chrono::Utc::now().timestamp_millis();
@@ -417,7 +430,7 @@ impl Engine {
         if body.is_empty() {
             let key = format!("notify.body.{}", incoming.event);
             let words = notify_events::text(&key);
-            body = if words == key { notify_events::text("notify.body.reply").to_owned() } else { words.to_owned() };
+            body = if words == key { notify_events::text("notify.body.done") } else { words };
         }
         let popup = Popup { title, body, session, notification: incoming, selected };
         if popup.notification.failure.is_some() {
