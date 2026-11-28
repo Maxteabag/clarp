@@ -68,6 +68,16 @@ def exercise(release, scenario):
 
         assert send("main","U: main work")["admission_route"] == "started"
         until(bound, lambda row:bool(row.get("backend_session_id")), "main bound")
+        if scenario == "untracked":
+            text = "U: ADMISSION without a client message ID"
+            ack = api("POST", "/send", {"session":session, "text":text, "while_busy":"take_over"})
+            assert "admission_route" not in ack
+            until(launches, lambda rows:any(r["whose"] == "fork" and r["said"] == text for r in rows), "untracked fork")
+            touch("finish")
+            until(bound, lambda row:row["busy"] is False, "untracked work finished")
+            assert [r["whose"] for r in launches() if r["said"] == text] == ["fork"]
+            print("untracked owner message routed once to fork", flush=True)
+            return
         text = "U: ADMISSION FAIL" if scenario == "giveback" else "U: ADMISSION"
         ack = send("one",text)
         assert ack["admission_route"] == "conversation_fork", ack
@@ -115,5 +125,5 @@ def exercise(release, scenario):
 
 
 if __name__ == "__main__":
-    for case in ("giveback","post-read","restart"):
+    for case in ("giveback","post-read","restart","untracked"):
         exercise(sys.argv[1], case)
