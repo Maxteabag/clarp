@@ -48,7 +48,7 @@ fn rust_text_reads_the_same_catalog_as_slint() {
     let ago = |tag, n| i18n::translate_in(tag, "", "{n} day ago", "{n} days ago", Some(n), &[]);
     assert_eq!((ago("en", 1), ago("en", 3)), ("1 day ago".to_owned(), "3 days ago".to_owned()));
     assert_eq!((ago("nb", 1), ago("nb", 3)), ("for 1 dag siden".to_owned(), "for 3 dager siden".to_owned()));
-    assert_eq!(ago("zh-Hans", 3), "3天前");
+    assert_eq!(ago("zh-Hans", 3), "3 天前");
 }
 
 #[test]
@@ -91,5 +91,18 @@ fn numbers_and_relative_times_follow_the_language() {
     assert_eq!(format::relative("en", -300), "5 minutes ago");
     assert_eq!(format::relative("fr", -86_400), "il y a 1 jour");
     assert_eq!(format::relative("es", 2 * 3600), "dentro de 2 horas");
-    assert_eq!(format::relative("zh-Hans", -3 * 86_400), "3天前");
+    assert_eq!(format::relative("zh-Hans", -3 * 86_400), "3 天前");
+}
+
+#[test]
+fn lists_join_in_the_language() {
+    assert_eq!(format::and_list::<&str>("en", &[]), "");
+    assert_eq!(format::and_list("en", &["Arnold"]), "Arnold");
+    assert_eq!(format::and_list("en", &["Arnold", "Hazel"]), "Arnold and Hazel");
+    assert_eq!(format::and_list("en", &["laptop", "studio", "elitebook"]), "laptop, studio and elitebook");
+    assert_eq!(format::and_list("es", &["Arnold", "Iris"]), "Arnold e Iris");
+    assert_eq!(format::and_list("es", &["Arnold", "Hazel"]), "Arnold y Hazel");
+    assert_eq!(format::and_list("nb", &["Arnold", "Hazel"]), "Arnold og Hazel");
+    assert_eq!(format::and_list("fr", &["A", "B", "C"]), "A, B et C");
+    assert_eq!(format::and_list("zh-Hans", &["A", "B", "C"]), "A、B和C");
 }

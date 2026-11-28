@@ -861,7 +861,7 @@ export component ProfileLayers inherits Rectangle {
         // i18n: agent profile, compact-context confirmation, explanation under the title: what compacting does
         message: @tr("Summarizes older messages.");
         // i18n: agent profile, compact-context confirmation, tooltip of the icon button that confirms (verb: compact the context)
-        yes-tip: @tr("Compact");
+        yes-tip: @tr("verb" => "Compact");
         accepted => { ProfileBridge.compact(); }
     }
     if ProfileBridge.confirm == "release": Confirm {
@@ -872,7 +872,7 @@ export component ProfileLayers inherits Rectangle {
         // i18n: agent profile, release-chat confirmation, explanation under the title: releasing keeps the chat's history and files
         message: @tr("History and files are kept.");
         // i18n: agent profile, release-chat confirmation, tooltip of the icon button that confirms (verb: release the chat)
-        yes-tip: @tr("Release");
+        yes-tip: @tr("verb" => "Release");
         accepted => { ProfileBridge.release(); }
     }
 }

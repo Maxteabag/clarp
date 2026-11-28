@@ -174,10 +174,10 @@ component Card inherits Rectangle {
                     TextButton {
                         y: (parent.height - self.height) / 2;
                         text: schedule.on
-                            // i18n: All agents overview, scheduled task row, toggle button while the task is on (a state; clicking turns it off)
-                            ? @tr("On")
-                            // i18n: All agents overview, scheduled task row, toggle button while the task is off (a state; clicking turns it on)
-                            : @tr("Off");
+                            // i18n: All agents overview, scheduled task row, toggle button while the task is on (a state of the task, feminine where "task" is; clicking turns it off)
+                            ? @tr("scheduled task" => "On")
+                            // i18n: All agents overview, scheduled task row, toggle button while the task is off (a state of the task, feminine where "task" is; clicking turns it on)
+                            : @tr("scheduled task" => "Off");
                         primary: schedule.on;
                         clicked => { OverviewBridge.schedule(schedule.id, !schedule.on); }
                     }
@@ -276,7 +276,7 @@ export component AgentOverview inherits Modal {
             }
             // i18n: All agents overview, tooltip of the + button: create a new agent
             IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/plus.svg"); tip: @tr("New agent"); clicked => { OverviewBridge.new-agent(); } }
-            // i18n: All agents overview, tooltip of the button that opens the Orchestrator dialog (feature name, left as is)
+            // i18n: All agents overview, tooltip of the button that opens the Orchestrator dialog (noun, translated: the model that routes messages to agents)
             IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/route.svg"); tip: @tr("Orchestrator"); clicked => { OverviewBridge.orchestrator(); } }
             // i18n: All agents overview, tooltip of the close button (verb)
             IconButton { y: (parent.height - self.height) / 2; icon: @image-url("icons/close.svg"); tip: @tr("Close"); clicked => { OverviewBridge.close(); } }

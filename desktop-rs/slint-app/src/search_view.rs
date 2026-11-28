@@ -185,16 +185,7 @@ pub fn load_more(app: &Rc<App>) {
 
 /// Names as a list: "A", "A and B", "A, B and C".
 fn listed(names: &[String]) -> String {
-    match names {
-        [] => String::new(),
-        [one] => one.clone(),
-        [rest @ .., last] => {
-            // i18n: separator between items of a short inline list ("2 files, 1 search"); keep the trailing space where the language uses one
-            let separator = tr!("list separator" => ", ");
-            // i18n: names joined, the last with "and" ("laptop, studio and elitebook"); {0} the names before, {1} the last
-            tr!("{0} and {1}", rest.join(&separator), last)
-        }
-    }
+    clarp_core::i18n::format::and_list(clarp_core::i18n::current(), names)
 }
 
 /// Who wrote a hit, for its line: "you" or "agent".

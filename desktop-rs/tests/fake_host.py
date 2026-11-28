@@ -3373,6 +3373,37 @@ def become_peer():
     attention[:] = []
 
 
+def become_rich():
+    """--rich: Rachel's chat holds a worked turn (tool rows of each kind, one
+    failed, a plan) and a reply with a list, with a job and a decision waiting,
+    for the screenshots translators review (tests/screens.sh)."""
+    turns["rachel"] = [
+        {"id": "r1", "role": "user", "revision": 1, "timestamp": "2026-11-27T09:58:00Z",
+         "text": "The build fails on the laptop. Can you find out why and fix it?"},
+        {"id": "r2", "role": "assistant", "revision": 2, "timestamp": "2026-11-27T10:02:00Z",
+         "text": "The build failed because `parse_config` returned early on an empty file. I fixed it and the tests pass now.",
+         "tools": [
+             {"id": "t1", "name": "Read", "file_path": "src/config.rs", "status": "completed", "result": "fn parse_config() {}"},
+             {"id": "t2", "name": "Grep", "summary": "parse_config", "status": "completed", "result": "src/config.rs:12"},
+             {"id": "t3", "name": "Bash", "command": "cargo build", "status": "failed",
+              "result": "error[E0308]: mismatched types\n --> src/config.rs:14:5"},
+             {"id": "t4", "name": "Edit", "file_path": "src/config.rs", "status": "completed", "result": "1 line changed"},
+             {"id": "t5", "name": "Bash", "command": "cargo test", "status": "completed",
+              "result": "test config::empty_file ... ok\ntest result: ok. 12 passed"},
+             {"id": "t6", "name": "WebSearch", "summary": "serde default empty file", "status": "completed", "result": "3 results"},
+             {"id": "t7", "name": "TodoWrite", "summary": "Updated the plan", "status": "completed", "result": ""},
+         ]},
+        {"id": "r3", "role": "user", "revision": 3, "timestamp": "2026-11-27T10:03:00Z", "text": "Thanks. What changed?"},
+        {"id": "r4", "role": "assistant", "revision": 4, "timestamp": "2026-11-27T10:03:30Z",
+         "text": "## Changes\n\n- `parse_config` reads an empty file as the defaults\n- a test for the empty file\n\n"
+                 "> Nothing else was touched."},
+    ]
+    agents[0].update(head_revision=4, last_message="The build failed because parse_config returned early.")
+    agents[1]["last_message"] = "Build plan: run cargo test first."
+    jobs.append({"job_id": "job-rich", "agent_id": "a1", "status": "running", "title": "Watch the laptop build", "kind": "watcher"})
+    attention.append({"id": "d-rich", "session": "rachel", "kind": "decision"})
+
+
 def main():
     global log_path
     parser = argparse.ArgumentParser()
@@ -3380,10 +3411,13 @@ def main():
     parser.add_argument("--log", required=True)
     parser.add_argument("--roster", type=int, default=0)
     parser.add_argument("--peer", action="store_true")
+    parser.add_argument("--rich", action="store_true")
     args = parser.parse_args()
     log_path = args.log
     if args.peer:
         become_peer()
+    if args.rich:
+        become_rich()
     fill_roster(args.roster)
     server = Server(("127.0.0.1", 0), Handler)
     with open(args.port_file, "w") as handle:
