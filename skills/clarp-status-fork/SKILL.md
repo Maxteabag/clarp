@@ -117,3 +117,15 @@ approval policy `never`, and shell, plugins and configured MCP tools disabled.
 
 To give the user one always-available agent for status, decisions and steering across
 a group of workers, follow [references/front-desk.md](references/front-desk.md).
+
+### Reading an owner Conversation send
+
+On Hosts advertising `owner_conversation_fork` (contract 226), the opted-in
+Claude Conversation pilot for `hazel-74f6` accepts an ordinary owner text
+send, including dictation outside a call. Use the original client message ID
+to look up its disposition with authenticated
+`GET /send-admission?session=S&client_msg_id=ID`. A `conversation_fork`
+reservation may fall back to `waiting` before the fork reads it. `started`
+means the message entered a turn. `unresolved` carries no revision. Follow
+`send-admission` hints or query after reconnect. Keep the greatest revision
+seen for each session and ID.

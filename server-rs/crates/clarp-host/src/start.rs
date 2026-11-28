@@ -122,7 +122,7 @@ pub fn needs(path: &str) -> Stage {
         // Answered from the named agent's glance while it is opened, then by its own thread. A
         // send waits in that agent's mailbox until it is open; one that belongs to a call
         // waits in its handler until the calls are recovered (`sent_from`).
-        "/live" | "/log" | "/send" => Stage::Starting,
+        "/live" | "/log" | "/send" | "/send-admission" => Stage::Starting,
         // Its queue too, read from its glance with the sends kept for it (`accepted`).
         "/turn-queue" => Stage::Starting,
         "/agents/snapshot" => Stage::Rows,
@@ -156,6 +156,7 @@ mod tests {
             "/live",
             "/log",
             "/send",
+            "/send-admission",
             "/turn-queue",
             "/events",
         ] {

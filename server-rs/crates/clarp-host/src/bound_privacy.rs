@@ -203,7 +203,13 @@ impl Withheld {
     fn blanked(&self, fields: &Map<String, Value>) -> Value {
         let mut kept = Map::new();
         for (key, value) in fields {
-            if CARRIED.contains(&key.as_str()) {
+            if CARRIED.contains(&key.as_str())
+                || (fields.get("type").and_then(Value::as_str) == Some("send-admission")
+                    && matches!(
+                        key.as_str(),
+                        "client_msg_id" | "admission_route" | "admission_revision"
+                    ))
+            {
                 continue;
             }
             kept.insert(key.clone(), self.blank(key, value));
@@ -617,6 +623,7 @@ pub const CLASSES: &[(&str, Class)] = &[
     ("/transcription-providers", NoWords),
     ("/tts/providers", NoWords),
     ("/turn-queue", Words(Query)),
+    ("/send-admission", Words(Query)),
     ("/viz", NoWords),
     ("/vocab/assignments", OwnerOnly(Nobody)),
     ("/vocab/budgets", NoWords),
