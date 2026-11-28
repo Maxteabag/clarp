@@ -344,6 +344,42 @@
         "text": "Averyveryveryveryveryveryveryverylongwordwithoutanyspacesatallthatgoesonandonan…"
       },
       "max": 80
+    },
+    {
+      "name": "an escape inside inline code stays",
+      "text": "Use `\\*` literally.",
+      "en": "Use \\* literally.",
+      "part": {
+        "kind": "text",
+        "text": "Use \\* literally."
+      }
+    },
+    {
+      "name": "escaped backslashes inside inline code stay",
+      "text": "Run `C:\\\\tmp\\\\` now",
+      "en": "Run C:\\\\tmp\\\\ now",
+      "part": {
+        "kind": "text",
+        "text": "Run C:\\\\tmp\\\\ now"
+      }
+    },
+    {
+      "name": "an escaped backtick opens no code",
+      "text": "Not \\`code\\` here",
+      "en": "Not `code` here",
+      "part": {
+        "kind": "text",
+        "text": "Not `code` here"
+      }
+    },
+    {
+      "name": "an escaped opening backtick, then code",
+      "text": "A \\``b` c",
+      "en": "A `b c",
+      "part": {
+        "kind": "text",
+        "text": "A `b c"
+      }
     }
   ]
 }
