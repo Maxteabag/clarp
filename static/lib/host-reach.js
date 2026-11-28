@@ -5,7 +5,7 @@
 // - the reconnect backoff (2 s, 5 s, 10 s, 30 s, then every 60 s);
 // - the classifier: which plain reason the last failed attempt most likely means;
 // - the copy, word for word the same on every platform;
-// - "Since 09:14", the quiet status line, and the private-data-free diagnostics text.
+// - the quiet status line, the severity colour, and the private-data-free diagnostics text.
 //
 // The store (web/src/stores/reach.svelte.js) owns timers, fetches and Svelte state.
 
@@ -14,37 +14,42 @@
 /**
  * The English of every string the panel shows, by its key in the web app's catalogs
  * (web/src/lib/i18n/en.json carries the same; a test keeps them equal). The views pass their
- * `t` as `tr`; without one these English strings are used (the diagnostics, the tests).
+ * `t` as `tr`; without one these English strings are used (the tests).
  */
 export const EN = Object.freeze({
-  'host_down.title': '{host} isn\'t answering',
-  'host_down.since': 'Since {time}',
-  'host_down.yesterday': 'yesterday {time}',
-  'host_down.reconnecting': 'Reconnecting automatically…',
-  'host_down.trying_in_s': 'Trying again in {n} s',
-  'host_down.trying_in_min': 'Trying again in {n} min',
-  'host_down.back_online': 'Back online',
+  'host_down.device_offline.title': 'This device is offline',
+  'host_down.device_offline.body': 'Clarp will reconnect when the network is back.',
+  'host_down.auth_expired.title': '{host} needs pairing again',
+  'host_down.auth_expired.body': 'This device is no longer signed in to {host}.',
+  'host_down.wrong_address.title': '{host} isn\'t at this address',
+  'host_down.wrong_address.body': 'The address may have changed.',
+  'host_down.server_stopped.title': '{host} isn\'t answering',
+  'host_down.server_stopped.body': 'The computer is on, but Clarp isn\'t running on it.',
+  'host_down.tailscale_off.title': '{host} isn\'t answering',
+  'host_down.tailscale_off.body': 'Tailscale doesn\'t seem to be connected on this device.',
+  'host_down.host_asleep.title': '{host} isn\'t answering',
+  'host_down.host_asleep.body': 'The computer seems to be off or asleep.',
+  'host_down.unknown.title': '{host} isn\'t answering',
+  'host_down.unknown.body': '{host} isn\'t responding right now.',
+  'host_down.last_seen': 'Last answered {when}',
+  'host_down.status.reconnecting': 'Reconnecting automatically…',
+  'host_down.status.retry_in': 'Trying again {in}',
+  'host_down.status.back_online': 'Back online',
   'host_down.read_only': 'Showing saved messages. You can send again when {host} is back.',
-  'host_down.row': '{host} isn\'t answering · since {time}',
-  'host_down.device_offline': 'This device is offline',
-  'host_down.try_again': 'Try again',
-  'host_down.check_tailscale': 'Check Tailscale',
-  'host_down.pair_again': 'Pair again',
-  'host_down.edit_address': 'Edit address',
-  'host_down.switch_host': 'Switch Host',
+  'host_down.list_row': '{host} isn\'t answering · {when}',
+  'host_down.banner': 'This device is offline',
+  'host_down.action.retry': 'Try again',
+  'host_down.action.check_tailscale': 'Check Tailscale',
+  'host_down.action.pair_again': 'Pair again',
+  'host_down.action.edit_address': 'Edit address',
+  'host_down.action.switch_host': 'Switch Host',
   'host_down.copy_diagnostics': 'Copy diagnostics',
   'host_down.copied': 'Diagnostics copied',
+  'host_down.details': 'Details',
   'host_down.close': 'Close',
   'host_down.token_or_link': 'Token or ?token= link',
   'host_down.token': 'Token',
   'host_down.token_needed': 'Paste the token or the link clarp-admin url prints.',
-  'host_down.reason.device_offline': 'This device is offline.',
-  'host_down.reason.auth_expired': 'This device is no longer signed in to {host}.',
-  'host_down.reason.wrong_address': 'Nothing at this address is {host}. The address may have changed.',
-  'host_down.reason.server_stopped': 'The computer is on, but Clarp isn\'t running on it.',
-  'host_down.reason.tailscale_off': 'Tailscale doesn\'t seem to be connected on this device.',
-  'host_down.reason.host_asleep': 'The computer seems to be off or asleep.',
-  'host_down.reason.unknown': '{host} isn\'t responding right now.',
 });
 
 /** The English translator: `{name}` placeholders filled from params. */
@@ -60,13 +65,42 @@ export const REASON_ACTIONS = Object.freeze({
   tailscale_off: 'tailscale', host_asleep: '', unknown: '',
 });
 
+const known = id => (Object.hasOwn(REASON_ACTIONS, id) ? id : 'unknown');
+
 export function reasonAction(id) {
-  return REASON_ACTIONS[id] ?? '';
+  return REASON_ACTIONS[known(id)];
 }
 
-export function reasonSentence(id, host, tr = english) {
-  const key = Object.hasOwn(REASON_ACTIONS, id) ? id : 'unknown';
-  return tr(`host_down.reason.${key}`, { host });
+/** The panel's title and plain sentence for a reason, in the app's language. */
+export function reasonTitle(id, host, tr = english) {
+  return tr(`host_down.${known(id)}.title`, { host });
+}
+
+export function reasonBody(id, host, tr = english) {
+  return tr(`host_down.${known(id)}.body`, { host });
+}
+
+/**
+ * The colour it is shown in, shared with turn errors: warning (yellow) where the user must act,
+ * info (grey) otherwise. Never error red.
+ */
+export function reasonSeverity(id) {
+  return id === 'auth_expired' || id === 'wrong_address' ? 'warning' : 'info';
+}
+
+/** The diagnostics' sentence, always English and without the Host's label (not in a catalog). */
+const GIST = Object.freeze({
+  device_offline: 'This device is offline.',
+  auth_expired: 'This device is no longer signed in to the Host.',
+  wrong_address: 'The Host isn\'t at this address.',
+  server_stopped: 'The computer is on, but Clarp isn\'t running on it.',
+  tailscale_off: 'Tailscale doesn\'t seem to be connected on this device.',
+  host_asleep: 'The computer seems to be off or asleep.',
+  unknown: 'The Host isn\'t responding right now.',
+});
+
+export function reasonGist(id) {
+  return GIST[known(id)];
 }
 
 /** Which picture goes with a reason: calm, never an alarm. */
@@ -272,37 +306,39 @@ export function classify(attempt, { deviceOnline = true, address = 'unknown', vi
 
 // ---- time -------------------------------------------------------------------------------------
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const pad = n => String(n).padStart(2, '0');
-
-/**
- * `HH:mm` today, `yesterday HH:mm`, else `d MMM HH:mm`; 24-hour clock, local time. In another
- * language "yesterday" comes from `tr` and the month's short name from Intl.
- */
-export function sinceTime(ts, now = Date.now(), tr = english, locale = 'en') {
-  const d = new Date(ts);
-  const n = new Date(now);
-  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const day = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const days = Math.round((day(n) - day(d)) / 86400000);
-  if (days <= 0) return hm;
-  if (days === 1) return tr('host_down.yesterday', { time: hm });
-  let month = MONTHS[d.getMonth()];
-  if (locale && locale !== 'en') {
-    try { month = new Intl.DateTimeFormat(locale, { month: 'short' }).format(d); } catch (_) {}
+const rtfs = new Map();
+function relative(locale, numeric) {
+  const k = `${locale}|${numeric}`;
+  let f = rtfs.get(k);
+  if (!f) {
+    try { f = new Intl.RelativeTimeFormat(locale, { numeric }); } catch (_) { f = new Intl.RelativeTimeFormat('en', { numeric }); }
+    rtfs.set(k, f);
   }
-  return `${d.getDate()} ${month} ${hm}`;
+  return f;
 }
 
-/** The quiet status line under the panel. */
-export function statusLine(rec, now = Date.now(), tr = english) {
+/**
+ * "in 30 seconds", "in 1 minute": the wait before the next attempt, by Intl in the app's
+ * language. Seconds stay seconds (a relative formatter's "now" would say nothing).
+ */
+export function retryIn(ms, locale = 'en') {
+  const s = Math.max(1, Math.ceil(ms / 1000));
+  if (s < 60) return relative(locale, 'always').format(s, 'second');
+  return relative(locale, 'always').format(Math.round(s / 60), 'minute');
+}
+
+/** The quiet status line under the panel. `locale` is the app's language for {in}. */
+export function statusLine(rec, now = Date.now(), tr = english, locale = 'en') {
   if (!rec) return '';
-  if (!rec.down && rec.backUntil > now) return tr('host_down.back_online');
+  if (!rec.down && rec.backUntil > now) return tr('host_down.status.back_online');
   if (!rec.down) return '';
-  if (rec.inFlight || !rec.nextAt) return tr('host_down.reconnecting');
-  const s = Math.max(1, Math.ceil((rec.nextAt - now) / 1000));
-  if (s < 60) return tr('host_down.trying_in_s', { n: s });
-  return tr('host_down.trying_in_min', { n: Math.round(s / 60) });
+  if (rec.inFlight || !rec.nextAt) return tr('host_down.status.reconnecting');
+  return tr('host_down.status.retry_in', { in: retryIn(rec.nextAt - now, locale) });
+}
+
+/** When the Host last answered, for "Last answered {when}" and the list row: last_ok, else down_since. */
+export function lastSeenAt(rec) {
+  return (rec && (rec.lastOk || rec.downSince)) || 0;
 }
 
 function duration(ms) {
@@ -379,7 +415,6 @@ export function diagnosticsText({
 } = {}) {
   const iso = t => new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z');
   const reason = rec.reason || 'unknown';
-  const sentence = reasonSentence(reason, 'the Host');
   const net = deviceOnline === false ? 'offline'
     : deviceOnline === true ? `online${network ? ` (${network})` : ''}` : 'unknown';
   const yn = v => (v === true ? 'yes' : v === false ? 'no' : 'unknown');
@@ -396,7 +431,7 @@ export function diagnosticsText({
     `Host: #${sha256Hex(hostKey || url).slice(0, 6)} · address kind: ${addressKind(url)} · scheme: ${schemeOf(url)}`,
     `Host version: ${hostVersion}`,
     `State: ${state}`,
-    `Likely reason: ${reason} — ${sentence[0].toUpperCase()}${sentence.slice(1)}`,
+    `Likely reason: ${reason} — ${reasonGist(reason)}`,
     `Last attempt: ${attemptLabel(rec.attempt)}`,
     `Attempts since down: ${rec.failures} · next in ${next} s`,
     `Other Hosts answering: ${othersOk} of ${othersTotal}`,

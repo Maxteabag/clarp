@@ -10,8 +10,8 @@
   import { PRIMARY, mergeChats } from '@core/all-hosts.js';
   import { listedHostIds, hostBadgeFor } from '../stores/app.svelte.js';
   import { hostsState, openOnHost, readHosts } from '../stores/hosts.svelte.js';
-  import { sinceTime } from '@core/host-reach.js';
-  import { i18n, t } from '../stores/i18n.svelte.js';
+  import { formatRelative } from './i18n/format.js';
+  import { t } from '../stores/i18n.svelte.js';
   import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
@@ -57,7 +57,7 @@
   let down = $derived.by(() => {
     const others = readHosts();
     return downHosts([...(others.length ? [SERVING] : []), ...others.map(h => h.id)])
-      .map(h => ({ id: h.id, text: t('host_down.row', { host: h.label, time: sinceTime(h.since, reach.now, t, i18n.locale) }) }));
+      .map(h => ({ id: h.id, text: t('host_down.list_row', { host: h.label, when: formatRelative(h.since, reach.now) }) }));
   });
 
   function pick(item) {

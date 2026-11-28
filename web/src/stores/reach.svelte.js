@@ -11,7 +11,7 @@
 
 import {
   PROBE_TIMEOUT_MS, addressKind, answerFailure, blankReach, classify, fetchFailure,
-  reachFail, reachOk,
+  lastSeenAt, reachFail, reachOk,
 } from '@core/host-reach.js';
 import { clog } from '../lib/net.js';
 
@@ -109,11 +109,11 @@ export function panelShown(id) {
   return r.down || r.backUntil > reach.now;
 }
 
-/** The combined list's line for each of `ids` that does not answer: [{id, label, since}]. */
+/** The combined list's line for each of `ids` that does not answer: [{id, label, since}], since = last answer. */
 export function downHosts(ids) {
   return ids.filter(isDown).map(id => {
     const r = reach.hosts[id];
-    return { id, label: r.label || 'This Host', since: r.downSince || reach.now };
+    return { id, label: r.label || 'This Host', since: lastSeenAt(r) || reach.now };
   });
 }
 

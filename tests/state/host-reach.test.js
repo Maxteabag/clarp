@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import {
   BACKOFF_MS, EN, english, addressKind, answerFailure, attemptLabel, backoffDelay, blankReach, classify,
-  diagnosticsText, fetchFailure, peerAttempt, reachFail, reachOk, reasonSentence, sha256Hex,
-  sinceTime, statusLine,
+  diagnosticsText, fetchFailure, lastSeenAt, peerAttempt, reachFail, reachOk, reasonBody,
+  reasonGist, reasonSeverity, reasonTitle, retryIn, sha256Hex, statusLine,
 } from '../../static/lib/host-reach.js';
 
 vi.mock('../../web/src/lib/net.js', () => ({ clog: vi.fn() }));
@@ -96,44 +96,59 @@ describe('classifier', () => {
 });
 
 describe('copy', () => {
-  it('uses the spec\'s exact strings', () => {
-    expect(english('host_down.title', { host: 'Studio' })).toBe('Studio isn\'t answering');
-    expect(english('host_down.row', { host: 'Studio', time: '09:14' })).toBe('Studio isn\'t answering · since 09:14');
+  it('uses the spec\'s keys and exact English', () => {
+    expect(english('host_down.list_row', { host: 'Studio', when: '2 hours ago' })).toBe('Studio isn\'t answering · 2 hours ago');
     expect(english('host_down.read_only', { host: 'Studio' })).toBe('Showing saved messages. You can send again when Studio is back.');
-    expect(english('host_down.device_offline')).toBe('This device is offline');
-    expect(reasonSentence('wrong_address', 'Studio')).toBe('Nothing at this address is Studio. The address may have changed.');
-    expect(reasonSentence('server_stopped', 'Studio')).toBe('The computer is on, but Clarp isn\'t running on it.');
-    expect(reasonSentence('nonsense', 'Studio')).toBe('Studio isn\'t responding right now.');
-    expect(reasonSentence('toString', 'Studio')).toBe('Studio isn\'t responding right now.');
+    expect(english('host_down.banner')).toBe('This device is offline');
+    expect(english('host_down.copy_diagnostics')).toBe('Copy diagnostics');
+    expect(reasonTitle('auth_expired', 'Studio')).toBe('Studio needs pairing again');
+    expect(reasonBody('auth_expired', 'Studio')).toBe('This device is no longer signed in to Studio.');
+    expect(reasonTitle('wrong_address', 'Studio')).toBe('Studio isn\'t at this address');
+    expect(reasonBody('wrong_address', 'Studio')).toBe('The address may have changed.');
+    expect(reasonTitle('server_stopped', 'Studio')).toBe('Studio isn\'t answering');
+    expect(reasonBody('server_stopped', 'Studio')).toBe('The computer is on, but Clarp isn\'t running on it.');
+    expect(reasonBody('nonsense', 'Studio')).toBe('Studio isn\'t responding right now.');
+    expect(reasonBody('toString', 'Studio')).toBe('Studio isn\'t responding right now.');
   });
 
   it('keeps the web catalog\'s English the same as the rules\'', () => {
     const en = JSON.parse(fs.readFileSync(new URL('../../web/src/lib/i18n/en.json', import.meta.url), 'utf8'));
     for (const [key, text] of Object.entries(EN)) expect(en[key]).toBe(text);
+    for (const id of ['device_offline', 'auth_expired', 'wrong_address', 'server_stopped', 'tailscale_off', 'host_asleep', 'unknown']) {
+      expect(en[`host_down.${id}.title`]).toBeTruthy();
+      expect(en[`host_down.${id}.body`]).toBeTruthy();
+    }
   });
 
-  it('takes a translator', () => {
+  it('is warning yellow only where the user must act, never red', () => {
+    expect(reasonSeverity('auth_expired')).toBe('warning');
+    expect(reasonSeverity('wrong_address')).toBe('warning');
+    for (const id of ['device_offline', 'server_stopped', 'tailscale_off', 'host_asleep', 'unknown']) {
+      expect(reasonSeverity(id)).toBe('info');
+    }
+  });
+
+  it('takes a translator and the app\'s language', () => {
     const tr = (key, p) => `<${key}${p ? ':' + Object.values(p).join(',') : ''}>`;
-    expect(reasonSentence('host_asleep', 'Studio', tr)).toBe('<host_down.reason.host_asleep:Studio>');
-    const now = new Date(2026, 10, 28, 10, 0).getTime();
-    expect(sinceTime(new Date(2026, 10, 27, 21, 3).getTime(), now, tr)).toBe('<host_down.yesterday:21:03>');
-    expect(sinceTime(new Date(2026, 9, 3, 21, 3).getTime(), now, tr, 'nb')).toMatch(/^3 okt\.? 21:03$/);
+    expect(reasonTitle('host_asleep', 'Studio', tr)).toBe('<host_down.host_asleep.title:Studio>');
+    const down = { ...blankReach(), down: true, nextAt: 30_000 };
+    expect(statusLine(down, 0, tr, 'nb')).toBe('<host_down.status.retry_in:om 30 sekunder>');
   });
 
-  it('formats since as today, yesterday, or a date, on a 24-hour clock', () => {
-    const now = new Date(2026, 10, 28, 10, 0).getTime();
-    expect(sinceTime(new Date(2026, 10, 28, 9, 14).getTime(), now)).toBe('09:14');
-    expect(sinceTime(new Date(2026, 10, 27, 21, 3).getTime(), now)).toBe('yesterday 21:03');
-    expect(sinceTime(new Date(2026, 10, 3, 21, 3).getTime(), now)).toBe('3 Nov 21:03');
-  });
-
-  it('keeps the status line quiet and counting', () => {
+  it('keeps the status line quiet and counting, by the relative formatter', () => {
     const down = { ...blankReach(), down: true, nextAt: 10_000 };
     expect(statusLine({ ...down, inFlight: true }, 0)).toBe('Reconnecting automatically…');
-    expect(statusLine(down, 5_000)).toBe('Trying again in 5 s');
-    expect(statusLine({ ...down, nextAt: 125_000 }, 5_000)).toBe('Trying again in 2 min');
+    expect(statusLine(down, 5_000)).toBe('Trying again in 5 seconds');
+    expect(statusLine({ ...down, nextAt: 125_000 }, 5_000)).toBe('Trying again in 2 minutes');
     expect(statusLine({ ...blankReach(), backUntil: 2000 }, 1000)).toBe('Back online');
     expect(statusLine(blankReach(), 5000)).toBe('');
+    expect(retryIn(1000)).toBe('in 1 second');
+  });
+
+  it('says when the Host last answered: last_ok, else down_since', () => {
+    expect(lastSeenAt({ lastOk: 5, downSince: 9 })).toBe(5);
+    expect(lastSeenAt({ lastOk: 0, downSince: 9 })).toBe(9);
+    expect(lastSeenAt(null)).toBe(0);
   });
 });
 
@@ -169,6 +184,7 @@ describe('diagnostics', () => {
     const rec = reachFail(blankReach(), { kind: 'http', status: 401 }, 'auth_expired', 0);
     expect(diagnosticsText({ url: 'http://x', rec, now: 1000 }))
       .toContain('Likely reason: auth_expired — This device is no longer signed in to the Host.');
+    expect(reasonGist('wrong_address')).toBe('The Host isn\'t at this address.');
     expect(attemptLabel({ kind: 'http', status: 503 })).toBe('HTTP 503');
   });
 

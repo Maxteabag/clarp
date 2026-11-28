@@ -5,7 +5,8 @@
   // otherwise the compact panel at the top of one of its chats. Never a raw error: that goes
   // only into the diagnostics text.
   import {
-    diagnosticsText, reasonAction, reasonIcon, reasonSentence, sinceTime, statusLine,
+    attemptLabel, diagnosticsText, lastSeenAt, reasonAction, reasonBody, reasonIcon, reasonSeverity,
+    reasonTitle, statusLine,
   } from '@core/host-reach.js';
   import {
     PRIMARY, deviceNetworkKind, othersAnswering, reach, retry,
@@ -14,6 +15,7 @@
   import { app, flash } from '../stores/app.svelte.js';
   import { APP_VERSION, setAuthToken } from './net.js';
   import { i18n, t } from '../stores/i18n.svelte.js';
+  import { formatRelative } from './i18n/format.js';
 
   let { id, full = false } = $props();
 
@@ -22,6 +24,8 @@
   let back = $derived(!!rec && !rec.down && rec.backUntil > reach.now);
   let action = $derived(rec ? reasonAction(rec.reason) : '');
   let icon = $derived(back ? 'cloud' : reasonIcon(rec?.reason));
+  let severity = $derived(back ? 'info' : reasonSeverity(rec?.reason));
+  let title = $derived(reasonTitle(rec?.reason, label, t));
   // Pair again and Edit address need something this device can change: its own token for the
   // serving Host, the saved token and address of a Host added here. A peer's are its Host's.
   let saved = $derived(hostsState.saved.find(h => h.id === id) || null);
@@ -114,8 +118,8 @@
 </script>
 
 {#if rec && (rec.down || back)}
-  <section class="host-down" class:full class:back role="status" aria-live="polite"
-           aria-label={back ? t('host_down.back_online') : t('host_down.title', { host: label })}>
+  <section class="host-down {severity}" class:full class:back role="status" aria-live="polite"
+           aria-label={back ? t('host_down.status.back_online') : title}>
     <span class="hd-icon" aria-hidden="true">
       <svg viewBox="0 0 24 24" width={full ? 40 : 22} height={full ? 40 : 22} fill="none"
            stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
@@ -140,39 +144,39 @@
     </span>
     <div class="hd-body">
       {#if back}
-        <p class="hd-status-line"><span class="hd-dot ok"></span>{t('host_down.back_online')}</p>
+        <p class="hd-status-line"><span class="hd-dot ok"></span>{t('host_down.status.back_online')}</p>
       {:else}
-        <h2 class="hd-title">{t('host_down.title', { host: label })}</h2>
-        <p class="hd-reason">{reasonSentence(rec.reason, label, t)}</p>
+        <h2 class="hd-title">{title}</h2>
+        <p class="hd-reason">{reasonBody(rec.reason, label, t)}</p>
         <p class="hd-meta">
-          {#if rec.downSince}<span>{t('host_down.since', { time: sinceTime(rec.downSince, reach.now, t, i18n.locale) })}</span><span class="hd-sep">·</span>{/if}
-          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t)}</span>
+          {#if rec.lastOk}<span>{t('host_down.last_seen', { when: formatRelative(rec.lastOk, reach.now) })}</span><span class="hd-sep">·</span>{/if}
+          <span class="hd-status-line"><span class="hd-dot" class:pulse={rec.inFlight}></span>{statusLine(rec, reach.now, t, i18n.locale)}</span>
         </p>
         <div class="hd-actions">
-          <button type="button" class="hd-btn primary" onclick={() => retry(id)}>{t('host_down.try_again')}</button>
+          <button type="button" class="hd-btn primary" onclick={() => retry(id)}>{t('host_down.action.retry')}</button>
           {#if action === 'pair' && canPair}
-            <button type="button" class="hd-btn" aria-expanded={form === 'pair'} onclick={() => openForm('pair')}>{t('host_down.pair_again')}</button>
+            <button type="button" class="hd-btn" aria-expanded={form === 'pair'} onclick={() => openForm('pair')}>{t('host_down.action.pair_again')}</button>
           {:else if action === 'edit' && canEdit}
-            <button type="button" class="hd-btn" aria-expanded={form === 'edit'} onclick={() => openForm('edit')}>{t('host_down.edit_address')}</button>
+            <button type="button" class="hd-btn" aria-expanded={form === 'edit'} onclick={() => openForm('edit')}>{t('host_down.action.edit_address')}</button>
           {:else if action === 'tailscale'}
-            <button type="button" class="hd-btn" onclick={checkTailscale}>{t('host_down.check_tailscale')}</button>
+            <button type="button" class="hd-btn" onclick={checkTailscale}>{t('host_down.action.check_tailscale')}</button>
           {/if}
           {#if switchTo.length}
             <button type="button" class="hd-btn" aria-expanded={form === 'switch'}
-                    onclick={() => switchTo.length === 1 ? switchHost(switchTo[0]) : openForm('switch')}>{t('host_down.switch_host')}</button>
+                    onclick={() => switchTo.length === 1 ? switchHost(switchTo[0]) : openForm('switch')}>{t('host_down.action.switch_host')}</button>
           {/if}
           <button type="button" class="hd-btn" onclick={copyDiagnostics}>{t('host_down.copy_diagnostics')}</button>
         </div>
         {#if form === 'pair'}
           <form class="hd-form" onsubmit={e => { e.preventDefault(); savePair(); }}>
-            <input type="password" autocomplete="off" bind:value aria-label={t('host_down.pair_again')}
+            <input type="password" autocomplete="off" bind:value aria-label={t('host_down.action.pair_again')}
                    placeholder={id === PRIMARY ? t('host_down.token_or_link') : t('host_down.token')} />
-            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.pair_again')}</button>
+            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.action.pair_again')}</button>
           </form>
         {:else if form === 'edit'}
           <form class="hd-form" onsubmit={e => { e.preventDefault(); saveAddress(); }}>
-            <input type="url" autocomplete="off" bind:value aria-label={t('host_down.edit_address')} />
-            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.edit_address')}</button>
+            <input type="url" autocomplete="off" bind:value aria-label={t('host_down.action.edit_address')} />
+            <button type="submit" class="hd-btn" disabled={!value.trim()}>{t('host_down.action.edit_address')}</button>
           </form>
         {:else if form === 'switch'}
           <div class="hd-switch">
@@ -182,6 +186,13 @@
           </div>
         {/if}
         {#if formError}<p class="hd-error" role="alert">{formError}</p>{/if}
+        {#if rec.attempt}
+          <!-- The raw detail of the last attempt, closed by default; never the message itself. -->
+          <details class="hd-details">
+            <summary>{t('host_down.details')}</summary>
+            <code>{attemptLabel(rec.attempt)}</code>
+          </details>
+        {/if}
         {#if fallbackText}
           <textarea class="hd-diag" readonly rows="11" use:selectAll>{fallbackText}</textarea>
         {/if}
@@ -217,6 +228,12 @@
   background: transparent;
 }
 .hd-icon { flex: 0 0 auto; color: var(--washi-low); display: grid; place-items: center; }
+/* Shared with turn errors: info grey for most reasons, warning yellow where the user must act
+   (auth_expired, wrong_address). Never error red. */
+.host-down { --hd-warn: var(--current-ring); }
+.host-down.warning:not(.full) { border-color: color-mix(in srgb, var(--hd-warn) 55%, var(--ink-edge)); }
+.host-down.warning .hd-icon { color: var(--hd-warn); }
+.host-down.warning .hd-btn.primary { border-color: color-mix(in srgb, var(--hd-warn) 60%, var(--ink-edge)); }
 .hd-body { min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .full .hd-body { align-items: center; gap: 8px; }
 .hd-title { margin: 0; font: 600 14px/1.3 var(--font-ui); color: var(--washi); }
@@ -260,6 +277,10 @@
   font: 400 12px/1.2 var(--font-ui);
 }
 .hd-error { margin: 4px 0 0; color: var(--washi-dim); font-size: 12px; }
+.hd-details { margin-top: 6px; color: var(--washi-low); font-size: 11px; }
+.full .hd-details { align-self: center; }
+.hd-details summary { cursor: pointer; }
+.hd-details code { display: block; margin-top: 4px; font: 400 11px/1.35 var(--font-mono); color: var(--washi-dim); user-select: text; }
 .hd-diag {
   width: 100%;
   margin-top: 6px;

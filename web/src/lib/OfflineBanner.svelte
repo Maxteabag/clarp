@@ -12,7 +12,7 @@
       <path d="M7 18h10a4 4 0 0 0 1.6-.3M20.6 15A4 4 0 0 0 17.5 10 6 6 0 0 0 9 5.5M6.3 8.4A4.5 4.5 0 0 0 7 18" />
       <path d="M3 3l18 18" />
     </svg>
-    <span>{t('host_down.device_offline')}</span>
+    <span>{t('host_down.banner')}</span>
   </div>
 {/if}
 
