@@ -70,3 +70,16 @@ on main, so likely 217 or higher).
 No deviations from DESIGN.md except the details it left open: the undo route for forms is
 `/artifacts/{id}/submissions/{sid}/undo`, an undone submission id cannot be reused, and command
 words are checked before option matching on every request type.
+
+## Status (28 Nov 2026, 07:30)
+
+- Implemented and committed on feat/cards-host (kernel, Host routes, tests, contract 217 docs,
+  skills, voice vectors). An independent review (cards-host-review, /var/tmp/cards-host/review.md)
+  found 8 points; 1-4 and 6-8 are fixed. Point 5, commands also matching on text requests, is
+  kept on purpose and documented.
+- Review changes to the wire: an answer's queued message can be taken back only if the answer
+  was sent with `undo_ms`. An answer without a hold is not undoable, which also covers the
+  Host's own cards. A bad `undo_ms` on an HTML form submit is 400.
+- Not yet compiled: the build VM's disk is full (about 300 MB free). Handed to hazel-74f6 with
+  the cause (legacy /var/tmp/clarp-build copies are never evicted). A wake is set to compile,
+  run the final test pass and land once there is room.
