@@ -85,7 +85,7 @@ fn a_saved_legacy_antigravity_default_needs_an_explicit_launch_choice() {
     let mut d = Driver::with_settings(&host.base, settings);
     d.connect();
     assert!(!d.engine.quick_start_contact("Paula", "", "", ""));
-    assert!(d.engine.error().contains("Choose a harness"));
+    assert!(d.engine.error().contains("choose which tool"));
     assert_eq!(d.engine.last_backend(), "agy");
     assert!(host.requests("POST", "/agents").is_empty());
 }
