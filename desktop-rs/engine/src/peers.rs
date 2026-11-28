@@ -561,10 +561,15 @@ impl Engine {
                     Change::AgentMutated(s) => out.push(Change::AgentMutated(q(s))),
                     Change::AssignmentSucceeded(s) => out.push(Change::AssignmentSucceeded(q(s))),
                     Change::AssignmentRequested { session, automatic } => out.push(Change::AssignmentRequested { session: q(session), automatic }),
-                    Change::Notification { title, body } => {
-                        let title = if badges { all_hosts::titled(&title, &peer.label) } else { title };
-                        out.push(Change::Notification { title, body })
+                    Change::Notification(mut popup) => {
+                        if badges {
+                            popup.title = all_hosts::titled(&popup.title, &peer.label);
+                        }
+                        popup.session = q(popup.session);
+                        out.push(Change::Notification(popup))
                     }
+                    Change::NotificationRead(s) => out.push(Change::NotificationRead(q(s))),
+                    Change::NotificationSettings => out.push(Change::NotificationSettings),
                     Change::Roster | Change::Archive | Change::RosterFreshness | Change::Connection | Change::ServerInfo | Change::Error | Change::Rooms => {
                         roster_changed = true
                     }
