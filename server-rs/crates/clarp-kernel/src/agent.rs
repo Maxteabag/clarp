@@ -1622,14 +1622,10 @@ impl Agent {
                 work.record(AgentEvent::StartedAgain { at_ms: now_ms });
             }
             Command::HoldUnsentForTransit { turn } => {
-                let unsent = match &work.agent.live {
-                    Some(Turn::Starting(starting)) => starting.id == turn && !starting.ran_before,
-                    Some(Turn::Parked(waiting)) => {
-                        waiting.id == turn && !waiting.ran && waiting.wait.is_for_an_account()
-                    }
-                    _ => false,
-                };
-                if !work.transit_held || !unsent {
+                if !work.transit_held
+                    || !matches!(&work.agent.live, Some(Turn::Parked(waiting))
+                        if waiting.id == turn && !waiting.ran && waiting.wait.is_for_an_account())
+                {
                     return Err(Refusal::UnsentNotProven(turn));
                 }
                 work.record(AgentEvent::HeldUnsentForMove { turn });

@@ -437,6 +437,9 @@ pub enum Amend {
         model: String,
         effort: String,
     },
+    /// The journal has changed the Antigravity transport. Preserve the
+    /// model and effort the owner last chose while that transfer was waiting.
+    RetiredAgy,
     /// The voices it was given, as they are stored: one for each engine it has one for.
     Voice {
         provider: String,
@@ -4310,6 +4313,11 @@ impl Fleet {
                 }
             }
             Amend::Tool(backend) => record.backend = backend,
+            Amend::RetiredAgy => {
+                if record.backend == clarp_backend::LEGACY_AGY {
+                    record.backend = clarp_backend::agy_acp::ID.to_string();
+                }
+            }
             Amend::ToolChanged {
                 backend,
                 model,
