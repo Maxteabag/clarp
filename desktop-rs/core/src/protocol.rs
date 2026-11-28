@@ -560,7 +560,7 @@ pub struct Message {
     pub failure_kind: String,
     /// The Host's explanation of a failed turn on its failure or
     /// interrupted notice (`error`, feature `turn_error_explained`, Rust Host
-    /// contract 217): drawn as one card. `None` from an older Host.
+    /// contract 220): drawn as one card. `None` from an older Host.
     pub turn_error: Option<crate::turn_error::TurnError>,
 }
 
