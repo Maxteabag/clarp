@@ -3330,7 +3330,10 @@ impl Actor {
 /// Adds to a live turn's `error` the failure as every app draws it (feature
 /// `turn_error_explained`): its `reason`, `message` and `detail` stay for the apps that read
 /// only them.
-pub(crate) fn explain_into(error: &mut serde_json::Value, failure: &clarp_kernel::turn_error::Failure<'_>) {
+pub(crate) fn explain_into(
+    error: &mut serde_json::Value,
+    failure: &clarp_kernel::turn_error::Failure<'_>,
+) {
     if let (Some(error), serde_json::Value::Object(more)) = (
         error.as_object_mut(),
         clarp_kernel::turn_error::explained(failure),

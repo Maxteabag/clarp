@@ -730,19 +730,27 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         .map_or(summary, |told| told.summary.as_str());
     // The same failure as the chat draws it, for a list that shows its sentence (feature
     // `turn_error_explained`). No message is named: a list sends nothing again.
-    let explained = match status.last.as_ref().map(|last| (&last.outcome, last.ended_at_ms)) {
-        Some((Outcome::Failed { reason, kind: failure_kind }, ended_at_ms))
-            if kind == AgentStateKind::Interrupted =>
-        {
-            Some(clarp_kernel::turn_error::explained(&clarp_kernel::turn_error::Failure {
+    let explained = match status
+        .last
+        .as_ref()
+        .map(|last| (&last.outcome, last.ended_at_ms))
+    {
+        Some((
+            Outcome::Failed {
+                reason,
+                kind: failure_kind,
+            },
+            ended_at_ms,
+        )) if kind == AgentStateKind::Interrupted => Some(clarp_kernel::turn_error::explained(
+            &clarp_kernel::turn_error::Failure {
                 kind: failure_kind,
                 said: reason,
                 backend: &record.backend,
                 model: &record.model,
                 at_ms: ended_at_ms,
                 ..clarp_kernel::turn_error::Failure::default()
-            }))
-        }
+            },
+        )),
         _ => None,
     };
     // A turn that waits for an account keeps its place and is not thinking: it makes no
@@ -1866,16 +1874,20 @@ pub fn turn_error_of(
         },
     };
     let (kind, said, message_id, trace_id) = match &version.entry {
-        Entry::Notice(notice) if notice.code == Notice::TURN_FAILED || notice.code == "usage-limit" => (
-            if notice.code == "usage-limit" {
-                failures::USAGE_LIMIT.to_string()
-            } else {
-                notice.kind.clone().unwrap_or_default()
-            },
-            notice.text.as_str(),
-            notice.id.strip_prefix("marker-").unwrap_or(""),
-            notice.trace_id.as_deref().unwrap_or(""),
-        ),
+        Entry::Notice(notice)
+            if notice.code == Notice::TURN_FAILED || notice.code == "usage-limit" =>
+        {
+            (
+                if notice.code == "usage-limit" {
+                    failures::USAGE_LIMIT.to_string()
+                } else {
+                    notice.kind.clone().unwrap_or_default()
+                },
+                notice.text.as_str(),
+                notice.id.strip_prefix("marker-").unwrap_or(""),
+                notice.trace_id.as_deref().unwrap_or(""),
+            )
+        }
         Entry::Notice(notice) if notice.code == "turn-interrupted" => (
             interrupted(&notice.text, notice.kind.as_ref()),
             notice.text.as_str(),
@@ -1883,7 +1895,9 @@ pub fn turn_error_of(
             notice.trace_id.as_deref().unwrap_or(""),
         ),
         Entry::Imported(_)
-            if row["role"] == "assistant" && row["origin"] == "system" && row.get("error").is_none() =>
+            if row["role"] == "assistant"
+                && row["origin"] == "system"
+                && row.get("error").is_none() =>
         {
             let text = row["text"].as_str().unwrap_or("");
             let kind = row["failure_kind"].as_str().unwrap_or("").to_string();
@@ -1904,7 +1918,11 @@ pub fn turn_error_of(
     }
     // Only the user's own message can be sent again (`POST /turn-retry`): a goal's wake, an
     // agent's word or a schedule's prompt has no button for it.
-    let message_id = if sent_by_user(message_id) { message_id } else { "" };
+    let message_id = if sent_by_user(message_id) {
+        message_id
+    } else {
+        ""
+    };
     Some(explained(&Failure {
         kind: &kind,
         said,
@@ -1952,7 +1970,9 @@ pub fn log_response(
         .entries
         .iter()
         .filter_map(|version| match &version.entry {
-            Entry::Message(message) if message.origin != Origin::User || message.sender.is_some() => {
+            Entry::Message(message)
+                if message.origin != Origin::User || message.sender.is_some() =>
+            {
                 Some(message.id.as_str())
             }
             _ => None,

@@ -15,15 +15,15 @@
 //! A try at a time is kept with the fleet until it is sent (`KEPT`), so a Host started again
 //! in between still sends it. The schedules' runner looks for what is due.
 
+use axum::Extension;
+use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::HeaderMap;
-use axum::Extension;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
-use axum::Json;
 use clarp_kernel::conversation::Entry;
 use clarp_kernel::turn::Origin;
 use clarp_protocol::requests::SendRequest;
@@ -96,15 +96,20 @@ async fn retry(
             }
         )
     {
-        return ApiError::new(StatusCode::FORBIDDEN, clarp_kernel::devices::LIMITED_REFUSAL)
-            .into_response();
+        return ApiError::new(
+            StatusCode::FORBIDDEN,
+            clarp_kernel::devices::LIMITED_REFUSAL,
+        )
+        .into_response();
     }
     if principal == Principal::Tools {
         let turn = headers
             .get("x-clarp-turn")
             .and_then(|value| value.to_str().ok())
             .unwrap_or("none named");
-        eprintln!("clarp-host: /turn-retry for {session} {message_id} asked by an agent's tools (turn {turn})");
+        eprintln!(
+            "clarp-host: /turn-retry for {session} {message_id} asked by an agent's tools (turn {turn})"
+        );
     }
     let Some(member) = app.fleet.directory().named(session).cloned() else {
         return ApiError::new(StatusCode::NOT_FOUND, "no such agent").into_response();
@@ -114,7 +119,9 @@ async fn retry(
             Entry::Message(message) => message,
             _ => return ApiError::new(StatusCode::NOT_FOUND, "message not found").into_response(),
         },
-        Ok(None) => return ApiError::new(StatusCode::NOT_FOUND, "message not found").into_response(),
+        Ok(None) => {
+            return ApiError::new(StatusCode::NOT_FOUND, "message not found").into_response();
+        }
         Err(why) => return ApiError::from(why).into_response(),
     };
     // Only the user's own words go again as the user's.
@@ -149,7 +156,11 @@ async fn retry(
     // Sent now: a try planned for later is no longer wanted.
     let _ = app
         .fleet
-        .keep(KIND, planned_key(&member.record.agent_id, &message.id), None)
+        .keep(
+            KIND,
+            planned_key(&member.record.agent_id, &message.id),
+            None,
+        )
         .await;
     if compact {
         // The conversation is made shorter first; the message waits behind it.
@@ -171,7 +182,12 @@ async fn retry(
 
 /// The user's words, sent to the agent again as a new message of theirs. It waits behind a
 /// turn that runs (the compaction asked for just before, say).
-async fn send_again(app: &App, session: &str, message_id: &str, text: &str) -> Result<(), ApiError> {
+async fn send_again(
+    app: &App,
+    session: &str,
+    message_id: &str,
+    text: &str,
+) -> Result<(), ApiError> {
     let request = SendRequest {
         session: session.to_string(),
         text: text.to_string(),
@@ -188,7 +204,10 @@ async fn send_again(app: &App, session: &str, message_id: &str, text: &str) -> R
 
 /// Why a message is not to be sent again, if it is not: its turn still runs or waits, it has
 /// an answer, or it went again already. `None`: its turn failed or was cut off.
-async fn settled_otherwise(member: &crate::fleet::Member, message_id: &str) -> Option<&'static str> {
+async fn settled_otherwise(
+    member: &crate::fleet::Member,
+    message_id: &str,
+) -> Option<&'static str> {
     match member.agent.fate(message_id.to_string()).await {
         Ok(clarp_actor::TurnFate::Runs | clarp_actor::TurnFate::Waits) => {
             return Some("its turn still runs");
@@ -237,7 +256,14 @@ pub async fn run_due(app: &App) {
             );
             continue;
         }
-        if let Err(why) = send_again(app, &member.record.session, &planned.message_id, &planned.text).await {
+        if let Err(why) = send_again(
+            app,
+            &member.record.session,
+            &planned.message_id,
+            &planned.text,
+        )
+        .await
+        {
             eprintln!(
                 "clarp-host: the message {} of {} was not sent again at its time: {}",
                 planned.message_id,

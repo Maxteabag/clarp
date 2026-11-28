@@ -236,7 +236,9 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
         }
         // A session another process holds for a moment (a Codex thread with another
         // writer) is free again shortly: tried twice more, a few seconds apart.
-        failures::SESSION_LOCKED if !failed.in_call && (1..SESSION_LOCKED_TRIES).contains(&tries) => {
+        failures::SESSION_LOCKED
+            if !failed.in_call && (1..SESSION_LOCKED_TRIES).contains(&tries) =>
+        {
             Next::Retry {
                 after_ms: SESSION_LOCKED_BACKOFF_MS << (tries - 1),
                 resume: !failed.nothing_done,

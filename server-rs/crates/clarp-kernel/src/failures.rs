@@ -316,12 +316,15 @@ static REFUSED_RE: LazyLock<Regex> = LazyLock::new(|| {
 });
 // A session another process holds: Codex's "thread-store conflict: thread ... already has an
 // active writer".
-static SESSION_LOCKED_RE: LazyLock<Regex> =
-    LazyLock::new(|| pattern(r"already has an active writer|thread-store conflict|session is locked"));
+static SESSION_LOCKED_RE: LazyLock<Regex> = LazyLock::new(|| {
+    pattern(r"already has an active writer|thread-store conflict|session is locked")
+});
 // Claude Code 2.1.321: "Prompt is too long · the request is ~1050000 tokens (limit 1000000)
 // ...", with `terminal_reason` `prompt_too_long` on its result.
 static PROMPT_TOO_LONG_RE: LazyLock<Regex> = LazyLock::new(|| {
-    pattern(r"\bprompt is too long\b|context_length_exceeded|exceeds the context window|maximum context length")
+    pattern(
+        r"\bprompt is too long\b|context_length_exceeded|exceeds the context window|maximum context length",
+    )
 });
 static RUNNER_EXIT_RE: LazyLock<Regex> = LazyLock::new(|| {
     pattern(concat!(
@@ -608,8 +611,9 @@ fn sentence(kind: &str, model: &str) -> String {
              session and try again"
             .to_string(),
         REFUSED => "The model refused to answer (a safety filter blocked it)".to_string(),
-        SESSION_LOCKED => "The tool's session is busy in another process. Try again in a moment"
-            .to_string(),
+        SESSION_LOCKED => {
+            "The tool's session is busy in another process. Try again in a moment".to_string()
+        }
         AUTH => "Sign-in expired — could not refresh the account".to_string(),
         RUNNER_EXIT => "Agent process exited unexpectedly".to_string(),
         TIMEOUT => "Turn timed out — backend stopped responding".to_string(),

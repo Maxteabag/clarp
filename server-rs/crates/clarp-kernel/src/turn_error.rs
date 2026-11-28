@@ -75,7 +75,8 @@ static PROVIDER_DOWN_RE: LazyLock<Regex> = LazyLock::new(|| {
 // The Host's own sentence of a folder that is gone: "This agent's folder /x no longer exists".
 static FOLDER_SAID_RE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
-    Regex::new(r"folder (\S+) (?:no longer exists|is not a folder)").expect("a fixed pattern compiles")
+    Regex::new(r"folder (\S+) (?:no longer exists|is not a folder)")
+        .expect("a fixed pattern compiles")
 });
 // A reset as the Host's own row says it: "· resets 18:27", "· resets Wed 19:00".
 static HOST_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
@@ -93,8 +94,7 @@ static HOST_DATE_RESET_RE: LazyLock<Regex> = LazyLock::new(|| {
 // The zone a tool names after its reset: "(Europe/Oslo)".
 static NAMED_ZONE_RE: LazyLock<Regex> = LazyLock::new(|| {
     #[allow(clippy::expect_used)]
-    Regex::new(r"\(([A-Za-z_]+/[A-Za-z_/+-]+)\)")
-        .expect("a fixed pattern compiles")
+    Regex::new(r"\(([A-Za-z_]+/[A-Za-z_/+-]+)\)").expect("a fixed pattern compiles")
 });
 // A reset as a tool says it: "resets 10:10am (Europe/Oslo)", "resets Dec 2, 7pm", "try again
 // at 6:27 PM".
@@ -119,7 +119,8 @@ pub fn code_of(kind: &str, said: &str) -> &'static str {
     }
     // A turn that ended while it waited for an account ran out of usage, whatever its process
     // said: shown so, though the recovery reads it as the Python Host does.
-    if failures::is_account_wait_message(said) || failures::is_account_wait_message(raw_words(said)) {
+    if failures::is_account_wait_message(said) || failures::is_account_wait_message(raw_words(said))
+    {
         return "usage_limit";
     }
     if said.contains("No network for 15 minutes") {
@@ -191,7 +192,9 @@ fn billing(said: &str) -> bool {
 /// The tool's own words of a row that tells a failure: what follows the Host's sentence, or
 /// the whole when there is no sentence before it.
 pub fn raw_words(said: &str) -> &str {
-    said.split_once("\n\n").map_or(said, |(_, words)| words).trim()
+    said.split_once("\n\n")
+        .map_or(said, |(_, words)| words)
+        .trim()
 }
 
 /// How a backend is called to its user.
@@ -267,7 +270,12 @@ pub fn reset_words(at_ms: i64, said_at_ms: i64, zone: &jiff::tz::TimeZone) -> Op
         ),
         _ => Said::new(
             format!("{} {} {} {clock}", at.day(), at.strftime("%b"), at.year()),
-            format!("{}. {} {} kl. {clock}", at.day(), NB_MONTHS.get(month)?, at.year()),
+            format!(
+                "{}. {} {} kl. {clock}",
+                at.day(),
+                NB_MONTHS.get(month)?,
+                at.year()
+            ),
         ),
     })
 }
@@ -287,11 +295,17 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
     let written = jiff::Timestamp::from_millisecond(at_ms)
         .ok()?
         .to_zoned(zone.clone());
-    let months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    let months = [
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+    ];
     let (day, hour, minute): (Option<jiff::civil::Date>, i8, i8) =
         if let Some(found) = HOST_DATE_RESET_RE.captures(said) {
             let date: i8 = found.get(1)?.as_str().parse().ok()?;
-            let month = months.iter().position(|m| found.get(2).is_some_and(|f| f.as_str().eq_ignore_ascii_case(m)))?;
+            let month = months.iter().position(|m| {
+                found
+                    .get(2)
+                    .is_some_and(|f| f.as_str().eq_ignore_ascii_case(m))
+            })?;
             let month = i8::try_from(month + 1).ok()?;
             let year: i16 = match found.get(3) {
                 Some(year) => year.as_str().parse().ok()?,
@@ -299,17 +313,27 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
             };
             let hour = found.get(4)?.as_str().parse().ok()?;
             let minute = found.get(5)?.as_str().parse().ok()?;
-            (Some(jiff::civil::Date::new(year, month, date).ok()?), hour, minute)
+            (
+                Some(jiff::civil::Date::new(year, month, date).ok()?),
+                hour,
+                minute,
+            )
         } else if let Some(found) = HOST_RESET_RE.captures(said) {
             let hour = found.get(2)?.as_str().parse().ok()?;
             let minute = found.get(3)?.as_str().parse().ok()?;
             let day = match found.get(1) {
                 Some(name) => {
                     let names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-                    let wanted = i8::try_from(names.iter().position(|day| *day == name.as_str())?).ok()?;
+                    let wanted =
+                        i8::try_from(names.iter().position(|day| *day == name.as_str())?).ok()?;
                     let today = written.weekday().to_monday_zero_offset();
                     let ahead = (wanted - today).rem_euclid(7);
-                    Some(written.date().checked_add(jiff::Span::new().days(ahead)).ok()?)
+                    Some(
+                        written
+                            .date()
+                            .checked_add(jiff::Span::new().days(ahead))
+                            .ok()?,
+                    )
                 }
                 None => None,
             };
@@ -327,7 +351,9 @@ pub fn said_reset(said: &str, at_ms: i64, zone: &jiff::tz::TimeZone) -> Option<i
             }
             let day = match (found.get(1), found.get(2)) {
                 (Some(month), Some(date)) => {
-                    let month = months.iter().position(|m| month.as_str().eq_ignore_ascii_case(m))?;
+                    let month = months
+                        .iter()
+                        .position(|m| month.as_str().eq_ignore_ascii_case(m))?;
                     let month = i8::try_from(month + 1).ok()?;
                     let date: i8 = date.as_str().parse().ok()?;
                     let mut day = jiff::civil::Date::new(written.year(), month, date).ok()?;
@@ -401,7 +427,10 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
     let (account_en, account_nb) = if named.is_empty() {
         ("Your account".to_string(), "Kontoen din".to_string())
     } else {
-        (format!("Your {named} account"), format!("{named}-kontoen din"))
+        (
+            format!("Your {named} account"),
+            format!("{named}-kontoen din"),
+        )
     };
     let (at_en, at_nb) = if named.is_empty() {
         ("the provider".to_string(), "leverandøren".to_string())
@@ -417,8 +446,14 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
     let text = match code {
         "usage_limit" => match &reset {
             Some(when) => Said::new(
-                format!("{account_en} is out of usage until {}. Try again then, or switch model.", when.en),
-                format!("{account_nb} er tom for kvote til {}. Prøv igjen da, eller bytt modell.", when.nb),
+                format!(
+                    "{account_en} is out of usage until {}. Try again then, or switch model.",
+                    when.en
+                ),
+                format!(
+                    "{account_nb} er tom for kvote til {}. Prøv igjen da, eller bytt modell.",
+                    when.nb
+                ),
             ),
             None => Said::new(
                 format!("{account_en} is out of usage. Try again later, or switch model."),
@@ -442,24 +477,40 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
             "Denne gratismodellen fra OpenCode virker bare i OpenCodes egne apper. Velg en annen modell.",
         ),
         "connection" => Said::new(
-            format!("Lost the connection to {at_en}, and the Host's retries did not get through. Try again."),
-            format!("Forbindelsen til {at_nb} brøt, og Hostens nye forsøk kom ikke gjennom. Prøv igjen."),
+            format!(
+                "Lost the connection to {at_en}, and the Host's retries did not get through. Try again."
+            ),
+            format!(
+                "Forbindelsen til {at_nb} brøt, og Hostens nye forsøk kom ikke gjennom. Prøv igjen."
+            ),
         ),
         "network_gone" => Said::new(
             "This computer had no network for 15 minutes, so the turn stopped. Try again once it is online.",
             "Maskinen var uten nett i 15 minutter, så turen stoppet. Prøv igjen når den er på nett.",
         ),
         "provider_busy" => Said::new(
-            format!("{at_en} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model."),
-            format!("{at_nb} er overbelastet akkurat nå, og Hostens nye forsøk kom ikke gjennom. Prøv igjen om et minutt, eller bytt modell."),
+            format!(
+                "{at_en} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model."
+            ),
+            format!(
+                "{at_nb} er overbelastet akkurat nå, og Hostens nye forsøk kom ikke gjennom. Prøv igjen om et minutt, eller bytt modell."
+            ),
         ),
         "provider_down" => Said::new(
-            format!("The provider of {model_en} is unavailable right now. Try again later, or switch model."),
-            format!("Leverandøren av {model_nb} er nede akkurat nå. Prøv igjen senere, eller bytt modell."),
+            format!(
+                "The provider of {model_en} is unavailable right now. Try again later, or switch model."
+            ),
+            format!(
+                "Leverandøren av {model_nb} er nede akkurat nå. Prøv igjen senere, eller bytt modell."
+            ),
         ),
         "invalid_request" => Said::new(
-            format!("{at_en} rejected the conversation history. Start a fresh session with the same conversation and try again."),
-            format!("{at_nb} avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen."),
+            format!(
+                "{at_en} rejected the conversation history. Start a fresh session with the same conversation and try again."
+            ),
+            format!(
+                "{at_nb} avviste samtalehistorikken. Start en ny økt med samme samtale og prøv igjen."
+            ),
         ),
         "refused" => Said::new(
             "The model refused to answer (a safety filter blocked it). Rephrase, or switch model.",
@@ -512,8 +563,12 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
                 )
             } else {
                 Said::new(
-                    format!("This agent's folder {dir} no longer exists. Recreate it, or make a new agent in another folder."),
-                    format!("Mappen til agenten, {dir}, finnes ikke lenger. Opprett den igjen, eller lag en ny agent i en annen mappe."),
+                    format!(
+                        "This agent's folder {dir} no longer exists. Recreate it, or make a new agent in another folder."
+                    ),
+                    format!(
+                        "Mappen til agenten, {dir}, finnes ikke lenger. Opprett den igjen, eller lag en ny agent i en annen mappe."
+                    ),
                 )
             }
         }
@@ -531,13 +586,20 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
         ),
         _ => Said::new(
             format!("The turn failed at {at_en}. Try again, or switch model if it happens again."),
-            format!("Turen feilet hos {at_nb}. Prøv igjen, eller bytt modell hvis det skjer igjen."),
+            format!(
+                "Turen feilet hos {at_nb}. Prøv igjen, eller bytt modell hvis det skjer igjen."
+            ),
         ),
     };
 
     let severity = match code {
-        "usage_limit" | "account_plan" | "free_model_restricted" | "provider_busy"
-        | "refused" | "prompt_too_long" | "session_locked" => "warning",
+        "usage_limit"
+        | "account_plan"
+        | "free_model_restricted"
+        | "provider_busy"
+        | "refused"
+        | "prompt_too_long"
+        | "session_locked" => "warning",
         "ended_from_outside" | "interrupted" | "moved" => "info",
         _ => "error",
     };
@@ -558,9 +620,15 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
             if let (Some(at), Some(when)) = (resets_at_ms, &reset) {
                 if can_send {
                     let label = if when.en.contains(' ') {
-                        Said::new(format!("Try again {}", when.en), format!("Prøv igjen {}", when.nb))
+                        Said::new(
+                            format!("Try again {}", when.en),
+                            format!("Prøv igjen {}", when.nb),
+                        )
                     } else {
-                        Said::new(format!("Try again at {}", when.en), format!("Prøv igjen {}", when.nb))
+                        Said::new(
+                            format!("Try again at {}", when.en),
+                            format!("Prøv igjen {}", when.nb),
+                        )
                     };
                     let mut retry_at = action("retry_at", &label);
                     retry_at["at_ms"] = json!(at);
@@ -597,7 +665,8 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
             push(&mut actions, "copy_details", &copy, false);
         }
         "invalid_request" => {
-            push(&mut actions, 
+            push(
+                &mut actions,
                 "fresh_retry",
                 &Said::new("New session, try again", "Ny økt, prøv igjen"),
                 true,
@@ -610,9 +679,15 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
             // (`clarp_backend::Backend::shortens_with`); any other tool starts a fresh session
             // that opens with the Host's shorter record of the conversation.
             let (id, label) = if failure.backend == "claude" {
-                ("compact_retry", Said::new("Compact and continue", "Komprimer og fortsett"))
+                (
+                    "compact_retry",
+                    Said::new("Compact and continue", "Komprimer og fortsett"),
+                )
             } else {
-                ("fresh_retry", Said::new("New session, try again", "Ny økt, prøv igjen"))
+                (
+                    "fresh_retry",
+                    Said::new("New session, try again", "Ny økt, prøv igjen"),
+                )
             };
             push(&mut actions, id, &label, true);
             push(&mut actions, "switch_model", &switch, false);
@@ -628,9 +703,14 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
         .captures(said)
         .and_then(|found| found.get(1))
         .map(|dir| dir.as_str().to_string())
-        .or_else(|| failures::missing_folder(said).map(|dir| {
-            dir.strip_prefix(clarp_spool::NOT_A_FOLDER).unwrap_or(dir).trim().to_string()
-        }))
+        .or_else(|| {
+            failures::missing_folder(said).map(|dir| {
+                dir.strip_prefix(clarp_spool::NOT_A_FOLDER)
+                    .unwrap_or(dir)
+                    .trim()
+                    .to_string()
+            })
+        })
         .unwrap_or_default();
     let key = match code {
         "usage_limit" if reset.is_some() => "error.usage_limit_until".to_string(),
@@ -674,9 +754,16 @@ pub fn placeholders(key: &str) -> &'static [&'static str] {
         "error.account_plan" => &["backend", "model"],
         "error.provider_down" => &["model"],
         "error.folder_missing" => &["folder"],
-        "error.usage_limit" | "error.billing" | "error.auth" | "error.connection"
-        | "error.provider_busy" | "error.invalid_request" | "error.timeout"
-        | "error.runner_exit" | "error.session_locked" | "error.unknown" => &["backend"],
+        "error.usage_limit"
+        | "error.billing"
+        | "error.auth"
+        | "error.connection"
+        | "error.provider_busy"
+        | "error.invalid_request"
+        | "error.timeout"
+        | "error.runner_exit"
+        | "error.session_locked"
+        | "error.unknown" => &["backend"],
         _ => &[],
     }
 }
@@ -716,7 +803,8 @@ fn copy_text(
     detail: &str,
     zone: &jiff::tz::TimeZone,
 ) -> String {
-    let mut out = String::from("A Clarp agent turn failed. Diagnose it and tell me what to change.\n\n");
+    let mut out =
+        String::from("A Clarp agent turn failed. Diagnose it and tell me what to change.\n\n");
     let _ = writeln!(out, "Code: {code}");
     if !failure.backend.is_empty() {
         let _ = writeln!(out, "Backend: {}", failure.backend);
@@ -730,7 +818,11 @@ fn copy_text(
     if failure.at_ms > 0
         && let Ok(at) = jiff::Timestamp::from_millisecond(failure.at_ms)
     {
-        let _ = writeln!(out, "At: {}", at.to_zoned(zone.clone()).strftime("%Y-%m-%d %H:%M %Z"));
+        let _ = writeln!(
+            out,
+            "At: {}",
+            at.to_zoned(zone.clone()).strftime("%Y-%m-%d %H:%M %Z")
+        );
     }
     let _ = writeln!(out, "Clarp told the user: {}", text.en);
     if !detail.is_empty() {
@@ -767,12 +859,23 @@ mod tests {
         let said = "Invalid response.create payload: Invalid 'input[29].call_id': string too long. \
                     Expected a string with maximum length 64, but got a string with length 71 instead.";
         let error = explained_in(
-            &Failure { said, backend: "codex", model: "gpt-6.1", message_id: "u1", ..Failure::default() },
+            &Failure {
+                said,
+                backend: "codex",
+                model: "gpt-6.1",
+                message_id: "u1",
+                ..Failure::default()
+            },
             &oslo(),
         );
         assert_eq!(error["code"], "invalid_request");
         assert_eq!(ids(&error), ["fresh_retry", "switch_model", "copy_details"]);
-        assert!(error["text"]["nb"].as_str().unwrap_or("").starts_with("Codex avviste"));
+        assert!(
+            error["text"]["nb"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("Codex avviste")
+        );
         assert_eq!(error["detail"], said);
     }
 
@@ -832,7 +935,10 @@ mod tests {
             &oslo(),
         );
         assert_eq!(error["resets_at_ms"], ms("2026-11-27T09:10:00Z"));
-        assert_eq!(error["detail"], "You've hit your 5-hour limit · resets 10:10am (Europe/Oslo)");
+        assert_eq!(
+            error["detail"],
+            "You've hit your 5-hour limit · resets 10:10am (Europe/Oslo)"
+        );
     }
 
     #[test]
@@ -840,11 +946,19 @@ mod tests {
         let at = ms("2026-11-28T10:00:00Z");
         let zone = oslo();
         assert_eq!(
-            said_reset("You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)", at, &zone),
+            said_reset(
+                "You've hit your 5-hour limit · resets 6:27pm (Europe/Oslo)",
+                at,
+                &zone
+            ),
             Some(ms("2026-11-28T17:27:00Z"))
         );
         assert_eq!(
-            said_reset("You've hit your weekly limit · resets Dec 2, 7pm (Europe/Oslo)", at, &zone),
+            said_reset(
+                "You've hit your weekly limit · resets Dec 2, 7pm (Europe/Oslo)",
+                at,
+                &zone
+            ),
             Some(ms("2026-12-02T18:00:00Z"))
         );
         assert_eq!(
@@ -902,17 +1016,44 @@ mod tests {
     #[test]
     fn the_rest_of_the_real_failures_read_as_their_codes() {
         let cases = [
-            ("Connection lost — retries exhausted.\n\nAPI Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)\nclaude exited with code 1", "connection"),
-            ("agy exited rc=1: status=ERROR: Your previous response was blocked by content safety filters", "refused"),
-            ("thread/resume failed: thread 01a1 already has an active writer (code -32600)", "session_locked"),
-            ("Prompt is too long · the request is ~1050000 tokens (limit 1000000)", "prompt_too_long"),
-            ("exceeded retry limit, last status: 429 Too Many Requests", "provider_busy"),
+            (
+                "Connection lost — retries exhausted.\n\nAPI Error: Can't reach the API server — check your internet or DNS (EAI_AGAIN)\nclaude exited with code 1",
+                "connection",
+            ),
+            (
+                "agy exited rc=1: status=ERROR: Your previous response was blocked by content safety filters",
+                "refused",
+            ),
+            (
+                "thread/resume failed: thread 01a1 already has an active writer (code -32600)",
+                "session_locked",
+            ),
+            (
+                "Prompt is too long · the request is ~1050000 tokens (limit 1000000)",
+                "prompt_too_long",
+            ),
+            (
+                "exceeded retry limit, last status: 429 Too Many Requests",
+                "provider_busy",
+            ),
             ("claude exited with code 143", "runner_exit"),
-            ("Waiting for a claude account with available usage", "usage_limit"),
+            (
+                "Waiting for a claude account with available usage",
+                "usage_limit",
+            ),
             ("claude reported an error", "unknown"),
-            ("API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy", "refused"),
-            (r#"{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}"#, "prompt_too_long"),
-            ("stream disconnected: {\"type\":\"function_call\",\"call_id\":\"call_1\"} connection reset", "connection"),
+            (
+                "API Error: Claude Code is unable to respond to this request, which appears to violate our Usage Policy",
+                "refused",
+            ),
+            (
+                r#"{"error":{"type":"invalid_request_error","message":"context_length_exceeded"}}"#,
+                "prompt_too_long",
+            ),
+            (
+                "stream disconnected: {\"type\":\"function_call\",\"call_id\":\"call_1\"} connection reset",
+                "connection",
+            ),
         ];
         for (said, code) in cases {
             assert_eq!(code_of("", said), code, "{said}");
@@ -921,7 +1062,11 @@ mod tests {
 
     #[test]
     fn no_message_means_no_retry() {
-        let error = explained(&Failure { said: "claude exited with code 1", backend: "claude", ..Failure::default() });
+        let error = explained(&Failure {
+            said: "claude exited with code 1",
+            backend: "claude",
+            ..Failure::default()
+        });
         assert_eq!(ids(&error), ["copy_details"]);
     }
 
@@ -932,9 +1077,21 @@ mod tests {
                 "usage_limit" | "billing" => "usage_limit",
                 other => other,
             };
-            let error = explained(&Failure { kind, said: "x", backend: "codex", message_id: "u", ..Failure::default() });
-            assert!(!error["text"]["en"].as_str().unwrap_or("").is_empty(), "{code}");
-            assert!(!error["text"]["nb"].as_str().unwrap_or("").is_empty(), "{code}");
+            let error = explained(&Failure {
+                kind,
+                said: "x",
+                backend: "codex",
+                message_id: "u",
+                ..Failure::default()
+            });
+            assert!(
+                !error["text"]["en"].as_str().unwrap_or("").is_empty(),
+                "{code}"
+            );
+            assert!(
+                !error["text"]["nb"].as_str().unwrap_or("").is_empty(),
+                "{code}"
+            );
         }
     }
 }
