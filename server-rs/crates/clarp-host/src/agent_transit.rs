@@ -596,14 +596,13 @@ pub(crate) async fn start(app: &App, asked: &Fields) -> Result<String, Refusal> 
         .cloned()
         .filter(|member| !member.record.is_janitor)
         .ok_or_else(|| Refusal::Plain(ApiError::new(StatusCode::NOT_FOUND, "no such agent")))?;
-    start_for(app, member, asked, false).await
+    start_for(app, member, asked).await
 }
 
 async fn start_for(
     app: &App,
     member: Arc<crate::fleet::Member>,
     asked: &Fields,
-    preserve_selection: bool,
 ) -> Result<String, Refusal> {
     let before = member.record.clone();
     let request = optional(asked, "request_id")?
@@ -690,14 +689,43 @@ async fn start_for(
             return Err(refused(StatusCode::CONFLICT, "messages_waiting"));
         }
     }
-    let id = crate::ids::uuid();
+    let old_row = catalogue["providers"]
+        .get(&before.backend)
+        .unwrap_or(&Value::Null);
+    let shown = Shown {
+        backend: backend_shown(&row, &backend),
+        model: model_shown(&row, &model),
+        old_backend: backend_shown(old_row, &before.backend),
+        old_model: model_shown(old_row, &before.model),
+    };
+    let goal = Goal {
+        id: crate::ids::uuid(),
+        backend,
+        model,
+        effort,
+        preserve_selection: false,
+        tool_version: row["cli_version"].as_str().and_then(version_in),
+        shown,
+    };
+    begin(app, member, goal, request).await
+}
+
+async fn begin(
+    app: &App,
+    member: Arc<crate::fleet::Member>,
+    goal: Goal,
+    request: Option<(String, String)>,
+) -> Result<String, Refusal> {
+    let before = member.record.clone();
+    let same_backend = before.backend == goal.backend;
+    let id = goal.id.clone();
     let now = app.clock.now_ms();
     let state = json!({
         "agent_id": before.agent_id,
         "session": before.session,
         "transit_id": id,
-        "backend": backend,
-        "model": model,
+        "backend": goal.backend,
+        "model": goal.model,
         "phase": if same_backend { "switching" } else { "reading" },
         "error": null,
         "previous_backend": before.backend,
@@ -718,25 +746,6 @@ async fn start_for(
         json!({"type": "agent-roster", "kind": "agent-transit", "session": before.session}),
         now,
     );
-    let old_row = catalogue["providers"]
-        .get(&before.backend)
-        .cloned()
-        .unwrap_or(Value::Null);
-    let shown = Shown {
-        backend: backend_shown(&row, &backend),
-        model: model_shown(&row, &model),
-        old_backend: backend_shown(&old_row, &before.backend),
-        old_model: model_shown(&old_row, &before.model),
-    };
-    let goal = Goal {
-        id: id.clone(),
-        backend,
-        model,
-        effort,
-        preserve_selection,
-        tool_version: row["cli_version"].as_str().and_then(version_in),
-        shown,
-    };
     let app = app.clone();
     let (prepared, ready) = tokio::sync::oneshot::channel();
     tokio::spawn(async move {
@@ -799,12 +808,26 @@ async fn retire_legacy_agent(app: &App, member: Arc<crate::fleet::Member>) -> Re
             .map_err(|why| format!("{why:?}"))?;
         return Ok(());
     }
-    let asked = Fields::from_iter([
-        ("backend".to_string(), json!(clarp_backend::agy_acp::ID)),
-        ("model".to_string(), json!(member.record.model)),
-        ("effort".to_string(), json!(member.record.effort)),
-    ]);
-    start_for(app, member, &asked, true)
+    // This transfer keeps the native conversation and the saved selection.
+    // Discovery can be cold or unavailable, so it cannot fence retirement.
+    // ACP validates the model on the first ordinary launch after the transfer.
+    let record = &member.record;
+    let model = crate::fleet::non_empty(&record.model).unwrap_or_else(|| "default".into());
+    let goal = Goal {
+        id: crate::ids::uuid(),
+        backend: clarp_backend::agy_acp::ID.to_string(),
+        model: record.model.clone(),
+        effort: record.effort.clone(),
+        preserve_selection: true,
+        tool_version: None,
+        shown: Shown {
+            backend: "Antigravity (ACP)".to_string(),
+            old_backend: "Antigravity".to_string(),
+            old_model: model.clone(),
+            model,
+        },
+    };
+    begin(app, member, goal, None)
         .await
         .map_err(|why| why.answered().1.to_string())?;
     Ok(())
