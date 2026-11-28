@@ -8173,6 +8173,12 @@ msgctxt "team"
 msgid "Leader"
 msgstr "Líder"
 
+#. Teams page, header button showing the current layout of the team list: teams nested under their parent team (adjective); clicking switches to Flat
+#. context: team layout
+msgctxt "team layout"
+msgid "Grouped"
+msgstr "Agrupada"
+
 #. chat list, filter chip above the chats: shows the chats whose agent has finished its work (state "finished", not a button that confirms)
 #. context: triage filter
 msgctxt "triage filter"

@@ -78,7 +78,7 @@ export component Teams inherits Rectangle {
             Button {
                 text: root.grouped
                     // i18n: Teams page, header button showing the current layout of the team list: teams nested under their parent team (adjective); clicking switches to Flat
-                    ? @tr("Grouped")
+                    ? @tr("team layout" => "Grouped")
                     // i18n: Teams page, header button showing the current layout of the team list: all teams in one plain list (adjective); clicking switches to Grouped
                     : @tr("Flat");
                 // i18n: Teams page, accessibility label of the Grouped/Flat button (an action: switch between nested and flat team list)

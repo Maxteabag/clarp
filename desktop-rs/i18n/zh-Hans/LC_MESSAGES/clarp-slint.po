@@ -440,7 +440,7 @@ msgstr "无法继续读取产物：{}。按 End 重试。"
 #. Settings page and Ctrl+K, the line under the preference “Confirm stop and release” saying what it does.
 msgid ""
 "Ask before Stop agent (Ctrl+.) or Release agent interrupt or let go of an agent"
-msgstr "在“停止智能体”（Ctrl+.）或“释放智能体”打断或放开智能体之前先询问"
+msgstr "停止智能体（Ctrl+.）或释放智能体前先确认"
 
 #. processes panel note after asking a helper agent to stop; {} is its name
 msgid "Asked {} to stop."
@@ -1978,7 +1978,7 @@ msgstr "字号"
 
 #. font picker title; {} is the reading theme's name
 msgid "Font · {} theme"
-msgstr "字体 · {} 主题"
+msgstr "字体 · 主题：{}"
 
 #. chat menu, Snooze choice: quiet for one hour
 msgid "For an hour"
@@ -2215,7 +2215,7 @@ msgstr "未使用的进程保持常驻的时长。"
 
 #. Settings page and Ctrl+K, the line under the preference “Density” saying what it does.
 msgid "How much padding rows and lists get: compact fits more, spacious breathes"
-msgstr "行和列表的内边距：精简可容纳更多内容，宽松更透气"
+msgstr "调整行和列表的间距：紧凑模式可显示更多内容，宽松模式留白更多"
 
 #. Settings page and Ctrl+K, the line under the preference “Double-press window” saying what it does.
 msgid "How quickly a key must be pressed twice to count as a double press"
@@ -2525,7 +2525,7 @@ msgstr "聊天列表中的按键"
 
 #. Keys help (?), title elsewhere; {} is the key context's name (e.g. Settings, Updates)
 msgid "Keys in {}"
-msgstr "{} 中的按键"
+msgstr "{}快捷键"
 
 #. Keys help (?), title while the keyboard is on an artifact card in the chat
 msgid "Keys on a card"
@@ -2852,7 +2852,7 @@ msgstr "模型"
 #. Orchestrator dialog, label over the field that names a model to use instead of the provider's default (noun)
 #. Orchestrator dialog, accessibility label of the model override field (noun)
 msgid "Model override"
-msgstr "替代模型"
+msgstr "指定模型"
 
 #. font picker, accessibility label of the checkbox that lists only fixed-width (monospace) fonts
 #. font picker, label beside the checkbox that lists only fixed-width (monospace) fonts
@@ -2874,7 +2874,7 @@ msgstr "常驻进程上限"
 
 #. backend picker, last step, tooltip of the icon button that moves the agent, with its conversation, to the chosen backend and model (verb)
 msgid "Move"
-msgstr "移动"
+msgstr "迁移"
 
 #. Settings > Keyboard, information row label (an action); the value is the keys that move between panes
 msgid "Move between panes"
@@ -3067,7 +3067,7 @@ msgstr "下一个需要处理的智能体"
 #. Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
 #. Vim mode, the which-key panel: what the keys "<Space> a" do in the chat and the explorer
 msgid "Next attention"
-msgstr "下一个待处理"
+msgstr "下一项待处理"
 
 #. chat list, accessibility label of the small numbered badge on a chat row: its place in the queue of chats that need the user's attention; {} is the number (1 is next)
 msgid "Next attention, number {}"
@@ -5647,11 +5647,11 @@ msgstr "转写模型"
 
 #. Settings > Experiments, tool explanations status: explanations being written; {} is how many
 msgid "Translating · {}"
-msgstr "正在翻译 · {}"
+msgstr "正在生成工具说明 · {} 项"
 
 #. Settings > Experiments, tool explanations status: explanations waiting their turn; {} is how many
 msgid "Translating · {} queued"
-msgstr "正在翻译 · {} 个排队中"
+msgstr "正在生成工具说明 · {} 项排队中"
 
 #. form card in the chat, button after "The form could not be loaded.": loads the form again (verb)
 msgid "Try again"
@@ -6273,7 +6273,7 @@ msgstr[0] "{n} 年后"
 
 #. warning above the composer, after "out of credits": when the included usage comes back; {} is a duration ("2h 5m")
 msgid "included usage resets in {}"
-msgstr "包含的用量将在{}后重置"
+msgstr "套餐内用量将在 {}后重置"
 
 #. agent status pill, shown in capitals where the script has them: the agent's turn was stopped before it finished (a state)
 msgid "interrupted"
@@ -6690,7 +6690,7 @@ msgstr "{0}… 再按一次即为 {1}"
 #. All agents overview, line beside the title; {n} is how many agents are running (adjective)
 msgid "{n} active"
 msgid_plural "{n} active"
-msgstr[0] "{n} 个活跃"
+msgstr[0] "活跃智能体：{n}"
 
 #. agent row's background-work indicator, part of its accessibility label ("… running"); {n} is how many background jobs (shell commands, watchers) the agent runs
 msgid "{n} background job"
@@ -8007,6 +8007,12 @@ msgstr "关"
 msgctxt "team"
 msgid "Leader"
 msgstr "负责人"
+
+#. Teams page, header button showing the current layout of the team list: teams nested under their parent team (adjective); clicking switches to Flat
+#. context: team layout
+msgctxt "team layout"
+msgid "Grouped"
+msgstr "分组"
 
 #. chat list, filter chip above the chats: shows the chats whose agent has finished its work (state "finished", not a button that confirms)
 #. context: triage filter
