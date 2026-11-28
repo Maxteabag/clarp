@@ -32,11 +32,22 @@ fn a_peer_repair_is_committed_only_after_the_expected_host_answers() {
 
     moved.control("/__control/server-id", serde_json::json!({"server_id":"renamed-peer", "previous_server_ids":["fake-host-2"]}));
     d.engine.select("@fake-host-2/nova");
+    let nova_pane = d.engine.panes().active_pane_id().to_owned();
+    d.engine.with_panes(|tree| tree.split_active("vertical", "@fake-host-2/tia"));
+    let tia_pane = d.engine.panes().active_pane_id().to_owned();
+    d.engine.with_panes(|tree| tree.split_active("horizontal", &selected));
+    let primary_pane = d.engine.panes().active_pane_id().to_owned();
     d.engine.repair_peer(&peer.base, &moved.base, "123456", true);
     d.until("saved peer address replaced", |e| e.saved_hosts().iter().any(|h| h.url == moved.base));
     assert!(!d.engine.saved_hosts().iter().any(|h| h.url == peer.base));
     assert_eq!(d.engine.base_url(), primary.base);
-    assert_eq!(d.engine.selected_session(), "@renamed-peer/nova");
+    assert_eq!(d.engine.selected_session(), selected);
+    assert_eq!(d.engine.panes().active_pane_id(), primary_pane);
+    for (pane, expected) in [(nova_pane, "@renamed-peer/nova"), (tia_pane, "@renamed-peer/tia")] {
+        d.engine.with_panes(|tree| tree.focus_pane(&pane));
+        assert_eq!(d.engine.selected_session(), expected);
+        assert_eq!(d.engine.transcript_image_host(expected), Some(moved.base.as_str()));
+    }
     assert_eq!(d.engine.live_epoch(&primary.base), epoch);
     assert!(primary.requests("POST", "/pairing/exchange").is_empty());
     assert_eq!(moved.requests("POST", "/pairing/exchange").len(), 2);

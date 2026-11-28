@@ -479,7 +479,7 @@ impl Engine {
     }
 
     fn pump_peer_repairs(&mut self) {
-        let mut remapped_selection = None;
+        let mut renamed = Vec::new();
         for peer in &mut self.peers.list {
             let Some(candidate) = &mut peer.repair else { continue };
             if candidate.pump().is_empty() { continue; }
@@ -488,11 +488,8 @@ impl Engine {
             let mut accepted = peer.repair.take().expect("live repair candidate");
             accepted.repair_identity = None;
             self.changes.push(Change::PeerRepaired(peer.url.clone()));
-            if peer.server_id != accepted.server_id
-                && let Some((id, session)) = all_hosts::split(&self.selected)
-                && id == peer.server_id
-            {
-                remapped_selection = Some(all_hosts::qualify(&accepted.server_id, session));
+            if !peer.server_id.is_empty() && peer.server_id != accepted.server_id {
+                renamed.push((peer.server_id.clone(), accepted.server_id.clone()));
             }
             let new_url = accepted.base_url.clone();
             if peer.url != new_url {
@@ -514,7 +511,9 @@ impl Engine {
             peer.engine = accepted;
             self.changes.extend([Change::Roster, Change::Hosts]);
         }
-        if let Some(session) = remapped_selection { self.select(&session); }
+        for (old, new) in renamed {
+            self.with_panes(|tree| tree.remap_peer_sessions(&old, &new));
+        }
     }
 
     pub fn switch_to_host_content(&mut self, url: &str) {
