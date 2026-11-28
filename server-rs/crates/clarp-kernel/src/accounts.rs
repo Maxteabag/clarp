@@ -361,6 +361,8 @@ pub struct Pool {
     quiet_checks: u32,
     /// A confirmed login change overlapped the outstanding selector request.
     login_changed_while_asking: bool,
+    /// Codex qualifies only the models included in a selector request.
+    qualify_requested_models: bool,
     /// When the account has usage again for each model, as the tool of a turn of that model
     /// said in this recovery (the latest said): a fact of the machine's one login, so every
     /// waiting turn of the model waits for it, also one that was stopped with that turn or
@@ -371,6 +373,13 @@ pub struct Pool {
 impl Pool {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn for_codex() -> Self {
+        Self {
+            qualify_requested_models: true,
+            ..Self::default()
+        }
     }
 
     /// A pool whose turns parked for their plan end after `checks` answers without their
@@ -640,7 +649,9 @@ impl Pool {
         // tool names, from now.
         let released = self.released_at_reset.remove(&key);
         if self.recovering {
-            self.attempts[trigger].plan |= plan;
+            if self.qualify_requested_models {
+                self.attempts[trigger].plan |= plan;
+            }
             if released {
                 self.attempts[trigger].parked = true;
                 self.note_park(trigger, now_ms);
@@ -741,7 +752,7 @@ impl Pool {
         let (_, mut effects) = self.carried(true, since_ms, &[turn.agent.to_owned()], now);
         effects.extend(self.register(turn, now).1);
         if let Some(at) = self.at(turn.agent) {
-            self.attempts[at].plan = plan;
+            self.attempts[at].plan = self.qualify_requested_models && plan;
         }
         if let Some(reset) = reset {
             self.out_until(turn.agent, turn.trace, reset, now);
@@ -1129,7 +1140,9 @@ impl Pool {
         // "All" covers the request that was sent. A different model may have
         // joined the pool while the selector ran.
         let verdict = match verdict {
-            Verdict::All => Verdict::Only(self.checked_models.iter().cloned().collect()),
+            Verdict::All if self.qualify_requested_models => {
+                Verdict::Only(self.checked_models.iter().cloned().collect())
+            }
             other => other,
         };
         self.after(verdict, now_ms, &mut out);
@@ -1152,7 +1165,11 @@ impl Pool {
                 let unserved = served
                     .as_ref()
                     .is_none_or(|served| !served.contains(&attempt.model));
-                if attempt.plan && unserved && self.checked_models.contains(&attempt.model) {
+                if attempt.plan
+                    && unserved
+                    && (!self.qualify_requested_models
+                        || self.checked_models.contains(&attempt.model))
+                {
                     attempt.unserved_checks += 1;
                     if let Some(at) = self.at(&attempt.agent) {
                         self.attempts[at].unserved_checks = attempt.unserved_checks;
@@ -1424,7 +1441,7 @@ mod tests {
 
     #[test]
     fn a_selector_answer_releases_covered_waiters_when_a_new_model_arrives() {
-        let mut pool = Pool::new();
+        let mut pool = Pool::for_codex();
         let reset = Some(3_600_000);
         pool.carry_turn(starting("a", "1"), 0, false, reset, 1);
         pool.carry_turn(starting("b", "2"), 0, false, None, 1);
@@ -1444,7 +1461,7 @@ mod tests {
 
     #[test]
     fn a_confirmed_switch_requalifies_waiters_and_discards_the_previous_logins_answer() {
-        let mut pool = Pool::new().ending_plans_after(PLAN_CHECKS_HERE);
+        let mut pool = Pool::for_codex().ending_plans_after(PLAN_CHECKS_HERE);
         pool.carry_turn(starting("a", "1"), 0, false, Some(3_600_000), 1);
         pool.carry_turn(starting("b", "2"), 0, false, None, 1);
         pool.carry_turn(of_model("c", "3", "unsupported"), 0, true, None, 1);
@@ -1465,7 +1482,7 @@ mod tests {
 
     #[test]
     fn a_resumed_turn_refused_again_waits_for_requalification() {
-        let mut pool = Pool::new();
+        let mut pool = Pool::for_codex();
         pool.carry_turn(starting("a", "1"), 0, false, None, 1);
         let asking = pool.fired(Timer::Recovery, 2);
         assert_eq!(pool.answered(Verdict::All, 3), [resume("a")]);
