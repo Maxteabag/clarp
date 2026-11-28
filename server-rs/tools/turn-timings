@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""How responsive a turn is, per backend, measured on a disposable Host. Run by hand, never a gate.
+"""Summarize a recorded turn-timings run. Live experiments require the attested ai-swarm Docker fixture.
+
+Only report is available here. Legacy runner reference follows.
 
     server-rs/tools/turn-timings run    [--backends codex,claude,agy] [--codex-lane] [--claude-lane] [--rounds N] [--cases LIST]
                                         [--bin DIR] [--out DIR] [--model ROW=MODEL ...]
@@ -1655,7 +1657,9 @@ def main() -> int:
     again = sub.add_parser("report")
     again.add_argument("run_dir")
     args = parser.parse_args()
-    return run(args) if args.command == "run" else report(args)
+    if args.command == "run":
+        parser.error("legacy experiment disabled; use clarp-test-host with an attested ai-swarm Docker fixture")
+    return report(args)
 
 
 if __name__ == "__main__":

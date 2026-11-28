@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""The battle test of an installed Rust Host: real messages, around the clock, each one audited.
+"""Read recorded soak evidence. Live experiments require the attested ai-swarm Docker fixture.
+
+Only report is available here. Legacy runner reference follows.
 
     server-rs/tools/soak run     [--host ADDR:PORT] [--session S] [--every SECONDS] [--evidence FILE]
                                  [--rounds N] [--turn-timeout SECONDS]
@@ -599,7 +601,9 @@ def main() -> int:
             command.add_argument("--cwd", default="~/clarp-host-soak")
             command.add_argument("--unit", default="clarp-host.service")
     args = parser.parse_args()
-    return {"run": run, "restart": restart, "report": report}[args.command](args)
+    if args.command != "report":
+        parser.error("legacy experiment disabled; use clarp-test-host with an attested ai-swarm Docker fixture")
+    return report(args)
 
 
 if __name__ == "__main__":
