@@ -22,6 +22,9 @@ use clarp_engine::search::SearchResults;
 
 use crate::switcher::Item;
 use crate::{App, pump_now};
+use clarp_core::tr;
+
+// i18n-screen: search
 
 /// Rows message search lists.
 pub const LIMIT: usize = 50;
@@ -67,8 +70,9 @@ pub fn items(engine: &mut Engine, query: &str, limit: usize) -> (Vec<Item>, Sear
         .map(|hit| {
             let snippet: String = hit.snippet.iter().map(|s| if s.mark { format!("**{}**", escape(&s.text)) } else { escape(&s.text) }).collect();
             let when = clarp_core::time_format::chat_stamp(hit.epoch_ms, &now);
-            let who = if hit.role == "user" { "you" } else { "agent" };
-            let cached = if hit.source == Source::Cache { " · cached" } else { "" };
+            let who = author(&hit.role);
+            // i18n: search result line: the hit came from this computer's cache (lowercase, after " · ")
+            let cached = if hit.source == Source::Cache { format!(" · {}", tr!("cached")) } else { String::new() };
             Item::message(format!("{}{SEPARATOR}{}", hit.session, hit.id), format!("{} · {who} · {when}{cached}", engine.chat_name(&hit.session)), snippet)
         })
         .collect();
@@ -83,8 +87,15 @@ pub fn items(engine: &mut Engine, query: &str, limit: usize) -> (Vec<Item>, Sear
         items.push(Item {
             kind: crate::switcher::Kind::Command,
             target: LOAD_OLDER.to_owned(),
-            label: if loading { format!("Loading older messages of {name}…") } else { format!("Load older messages of {name}") },
-            detail: "Search them too: this chat has more than is loaded here".to_owned(),
+            label: if loading {
+                // i18n: search, row while the open chat's older messages load; {} is the chat's name
+                tr!("Loading older messages of {}…", name)
+            } else {
+                // i18n: search, row that loads the open chat's older messages to search them too; {} is the chat's name
+                tr!("Load older messages of {}", name)
+            },
+            // i18n: search, detail under the load-older row
+            detail: tr!("Search them too: this chat has more than is loaded here"),
             key: String::new(),
             group: "message",
             description: String::new(),
@@ -106,17 +117,21 @@ pub fn load_older(app: &Rc<App>) {
 
 /// What was searched, said plainly: only what this computer holds.
 pub fn note(results: &SearchResults) -> String {
-    let chats = |n: usize| if n == 1 { "1 chat".to_owned() } else { format!("{n} chats") };
-    let mut note = format!(
-        "Searched {} loaded and {} cached on this computer. Messages never loaded here are not searched: the Host has no message search yet.",
+    // i18n: search note: a number of chats; {n} is the count
+    let chats = |n: usize| tr!("{n} chat" | "{n} chats" % n);
+    // i18n: search note under the results when the Host cannot search: {0} loaded chats ("3 chats"), {1} cached chats
+    let mut note = tr!(
+        "Searched {0} loaded and {1} cached on this computer. Messages never loaded here are not searched: the Host has no message search yet.",
         chats(results.loaded_chats),
         chats(results.cached_chats)
     );
     if results.cache_reading {
-        note.insert_str(0, "Reading cached chats… ");
+        // i18n: search note, before the rest while the cached chats are read
+        note.insert_str(0, &format!("{} ", tr!("Reading cached chats…")));
     }
     if !results.cache_error.is_empty() {
-        note.push_str(&format!(" The cache could not be read: {}", results.cache_error));
+        // i18n: search note: this computer's chat cache could not be read; {} is the reason
+        note.push_str(&format!(" {}", tr!("The cache could not be read: {}", results.cache_error)));
     }
     note
 }
@@ -173,7 +188,23 @@ fn listed(names: &[String]) -> String {
     match names {
         [] => String::new(),
         [one] => one.clone(),
-        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+        [rest @ .., last] => {
+            // i18n: separator between items of a short inline list ("2 files, 1 search"); keep the trailing space where the language uses one
+            let separator = tr!("list separator" => ", ");
+            // i18n: names joined, the last with "and" ("laptop, studio and elitebook"); {0} the names before, {1} the last
+            tr!("{0} and {1}", rest.join(&separator), last)
+        }
+    }
+}
+
+/// Who wrote a hit, for its line: "you" or "agent".
+fn author(role: &str) -> String {
+    if role == "user" {
+        // i18n: search result line: the user wrote this message (lowercase pronoun)
+        tr!("search hit" => "you")
+    } else {
+        // i18n: search result line: an agent wrote this message (lowercase noun)
+        tr!("search hit" => "agent")
     }
 }
 
@@ -181,7 +212,7 @@ fn listed(names: &[String]) -> String {
 pub struct Found {
     pub items: Vec<Item>,
     pub note: String,
-    pub empty: &'static str,
+    pub empty: String,
 }
 
 /// Message search's rows for `query`: the Hosts' hits where they search,
@@ -189,22 +220,31 @@ pub struct Found {
 pub fn found(engine: &mut Engine, query: &str) -> Found {
     if !engine.host_search_offered() {
         let (items, results) = items(engine, query, LIMIT);
-        return Found { items, note: note(&results), empty: EMPTY };
+        // i18n: search, empty state: nothing matched in the messages this computer holds
+        return Found { items, note: note(&results), empty: tr!("No match in the messages loaded on this computer") };
     }
     let results = engine.host_search_results();
     let words = query.trim();
     if words.is_empty() {
-        return Found { items: Vec::new(), note: String::new(), empty: HOST_PROMPT };
+        // i18n: search, before anything is typed: what the search does
+        return Found { items: Vec::new(), note: String::new(), empty: tr!("Type words to search every chat") };
     }
     let answered = results.query == words && results.answered;
     // The primary cannot search but a paired Host can: its chats are
     // searched as this computer holds them.
     let primary_local = !engine.host_search_offered_for("");
     let local = |engine: &mut Engine| -> Vec<Item> { items(engine, query, LIMIT).0.into_iter().filter(|i| i.target != LOAD_OLDER).collect() };
-    let where_ = if results.hosts > 1 { format!("on {} Hosts", results.hosts) } else { "on the Host".to_owned() };
     if !answered {
         // Until the Hosts answer the words: what this computer holds.
-        return Found { items: local(engine), note: format!("Searching every chat {where_}…"), empty: SEARCHING };
+        let note = if results.hosts > 1 {
+            // i18n: search note while several Hosts are asked; {} is how many Hosts
+            tr!("Searching every chat on {} Hosts…", results.hosts)
+        } else {
+            // i18n: search note while the Host is asked
+            tr!("Searching every chat on the Host…")
+        };
+        // i18n: search, shown in the list while the Hosts are asked
+        return Found { items: local(engine), note, empty: tr!("Searching every chat…") };
     }
     let now = chrono::Local::now();
     let mut items: Vec<Item> = results
@@ -213,7 +253,7 @@ pub fn found(engine: &mut Engine, query: &str) -> Found {
         .map(|hit| {
             let snippet: String = hit.snippet.iter().map(|s| if s.mark { format!("**{}**", escape(&s.text)) } else { escape(&s.text) }).collect();
             let when = clarp_core::time_format::chat_stamp(hit.epoch_ms, &now);
-            let who = if hit.role == "user" { "you" } else { "agent" };
+            let who = author(&hit.role);
             let known = engine.chat_name(&hit.session);
             let name = if (known == hit.session || known.is_empty()) && !hit.name.is_empty() { hit.name.clone() } else { known };
             let badge = if results.hosts > 1 { engine.host_badge(&hit.session) } else { String::new() };
@@ -226,8 +266,15 @@ pub fn found(engine: &mut Engine, query: &str) -> Found {
         items.push(Item {
             kind: crate::switcher::Kind::Command,
             target: LOAD_MORE.to_owned(),
-            label: if loading { "Loading more messages…".to_owned() } else { "Load more messages".to_owned() },
-            detail: "Older matches, from every chat".to_owned(),
+            label: if loading {
+                // i18n: search, row while older matches load
+                tr!("Loading more messages…")
+            } else {
+                // i18n: search, row that asks the Hosts for older matches (imperative)
+                tr!("Load more messages")
+            },
+            // i18n: search, detail under the load-more row
+            detail: tr!("Older matches, from every chat"),
             key: String::new(),
             group: "message",
             description: String::new(),
@@ -240,21 +287,32 @@ pub fn found(engine: &mut Engine, query: &str) -> Found {
         items.extend(local(engine));
     }
     let mut said: Vec<String> = Vec::new();
-    said.push(if results.hosts > 1 { format!("Searched every chat on {} Hosts.", results.hosts) } else { "Searched every chat on the Host.".to_owned() });
+    said.push(if results.hosts > 1 {
+        // i18n: search note under the results; {} is how many Hosts were searched
+        tr!("Searched every chat on {} Hosts.", results.hosts)
+    } else {
+        // i18n: search note under the results
+        tr!("Searched every chat on the Host.")
+    });
     if !results.partial.is_empty() {
         // Once, quietly: some older rows may not be found yet.
-        said.push(format!("Older history is still being indexed on {}: some older messages are not found yet.", listed(&results.partial)));
+        // i18n: search note: a Host still indexes old messages; {} names the Host or Hosts
+        said.push(tr!("Older history is still being indexed on {}: some older messages are not found yet.", listed(&results.partial)));
     }
     for error in &results.errors {
-        said.push(format!("Not searched: {error}."));
+        // i18n: search note: a Host could not be searched; {} is the Host and its reason ("laptop: could not be reached")
+        said.push(tr!("Not searched: {}.", error));
     }
     if !results.without.is_empty() {
-        said.push(format!("{} cannot search messages: its chats are not searched.", listed(&results.without)));
+        // i18n: search note: these Hosts cannot search messages; {} names the Host or Hosts
+        said.push(tr!("{} cannot search messages: its chats are not searched.", listed(&results.without)));
     }
     if primary_local {
-        said.push("This Host cannot search messages: its chats are searched as loaded on this computer.".to_owned());
+        // i18n: search note: the Host cannot search, so its chats are searched as this computer holds them
+        said.push(tr!("This Host cannot search messages: its chats are searched as loaded on this computer."));
     }
-    Found { items, note: said.join(" "), empty: HOST_EMPTY }
+    // i18n: search, empty state: no message anywhere has the typed words
+    Found { items, note: said.join(" "), empty: tr!("No message in any chat has these words") }
 }
 
 /// A chosen message, until the chat shows it.
