@@ -129,6 +129,82 @@ fn an_old_message_is_found_by_its_words_and_a_removed_chat_never_again() {
 }
 
 #[test]
+fn a_chats_search_tells_how_many_match_and_where_each_stands_in_log_order() {
+    let place = Place::new("message-search-positions");
+    let host = place.start();
+    let info = host.get("/server-info");
+    let features = info["capabilities"]["features"].as_array().unwrap();
+    assert!(features.contains(&json!("search_positions")), "{info}");
+    let ada = host.new_agent("Ada");
+    let ben = host.new_agent("Ben");
+    // Each message is answered by a reply that repeats it: two matching rows a message.
+    host.send(&ada, "Oslo in the morning", "o-1");
+    wait_for("Ada's first answer", || host.state(&ada) == "done");
+    host.send(&ada, "Bergen at noon", "o-2");
+    wait_for("Ada's second answer", || host.conversation(&ada).len() >= 4);
+    host.send(&ada, "Oslofjorden at night", "o-3");
+    wait_for("Ada's third answer", || host.conversation(&ada).len() >= 6);
+    host.send(&ben, "Oslo for Ben", "o-4");
+    wait_for("Ben's answer", || host.state(&ben) == "done");
+    found(&host, &format!("q=oslo&session={ada}"), 4);
+
+    // Where each of Ada's four matches stands, in the order of her /log, beside the page.
+    let placed = search(&host, &format!("q=oslo&session={ada}&positions=1&limit=1"));
+    assert_eq!(placed["total"], 4, "{placed}");
+    assert_eq!(placed["positions_truncated"], false, "{placed}");
+    assert_eq!(placed["hits"].as_array().unwrap().len(), 1, "{placed}");
+    assert!(placed["next_before"].is_string(), "{placed}");
+    let positions = placed["positions"].as_array().unwrap();
+    let placed_ids = ids(positions);
+    let log_ids: Vec<String> = host
+        .turns(&ada)
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_string())
+        .filter(|id| placed_ids.contains(id))
+        .collect();
+    assert_eq!(placed_ids.len(), 4, "{placed}");
+    assert_eq!(placed_ids, log_ids, "oldest first, as /log has them");
+    // The newest is the page's hit, with its revision and time.
+    let newest = positions.last().unwrap();
+    let hit = &placed["hits"][0];
+    assert_eq!(newest["message_id"], hit["message_id"], "{placed}");
+    assert_eq!(newest["revision"], hit["revision"], "{placed}");
+    assert_eq!(newest["timestamp"], hit["timestamp"], "{placed}");
+
+    // One chat's search counts without positions; a search of every chat does neither.
+    let counted = search(&host, &format!("q=oslo&session={ada}"));
+    assert_eq!(counted["total"], 4, "{counted}");
+    assert!(counted.get("positions").is_none(), "{counted}");
+    let everyone = search(&host, "q=oslo");
+    assert!(everyone.get("total").is_none(), "{everyone}");
+    assert!(everyone.get("positions").is_none(), "{everyone}");
+    // An agent the Host does not have has none.
+    let nobody = search(&host, "q=oslo&session=nobody-0000&positions=1");
+    assert_eq!(nobody["total"], 0, "{nobody}");
+    assert_eq!(nobody["positions"], json!([]), "{nobody}");
+
+    // Positions need one chat, and a value that says yes or no.
+    for query in [
+        "q=oslo&positions=1".to_string(),
+        format!("q=oslo&session={ada}&positions=maybe"),
+    ] {
+        let (status, said) = host.ask("GET", &format!("/search?{query}"), None);
+        assert_eq!(status, 400, "{query}: {said}");
+    }
+
+    // The agents' tool says the same.
+    let tool = tool_search_with(
+        &host,
+        &place,
+        None,
+        true,
+        &["oslo", "--session", &ada, "--positions"],
+    );
+    assert_eq!(tool["total"], 4, "{tool}");
+    assert_eq!(ids(tool["positions"].as_array().unwrap()), placed_ids);
+}
+
+#[test]
 fn a_search_while_history_is_read_says_partial_and_then_finds_it() {
     let place = Place::new("message-search-partial");
     let host = place.start();
@@ -149,9 +225,21 @@ fn a_search_while_history_is_read_says_partial_and_then_finds_it() {
 /// What an agent's tool finds: `clarp-admin search`, with its turn where it has one, and with
 /// the agents' tools token alone (the owner's token where `owner` says so).
 fn tool_search(host: &Host, place: &Place, turn: Option<&str>, owner: bool, words: &str) -> Value {
+    tool_search_with(host, place, turn, owner, &[words])
+}
+
+/// `clarp-admin search` with these arguments.
+fn tool_search_with(
+    host: &Host,
+    place: &Place,
+    turn: Option<&str>,
+    owner: bool,
+    args: &[&str],
+) -> Value {
     let mut command = sealed_command(&place.root, env!("CARGO_BIN_EXE_clarp-host"));
     command
-        .args(["tool", "clarp-admin", "search", words])
+        .args(["tool", "clarp-admin", "search"])
+        .args(args)
         .current_dir(&place.root)
         .env("CLARP_HOST_ADDR", &host.address)
         .env_remove("CLARP_SESSION")
@@ -253,6 +341,11 @@ fn an_agent_finds_what_its_turn_may_read_of_log_and_no_more() {
     assert_eq!(answered.status, 403);
     let said: Value = serde_json::from_slice(&answered.body).unwrap();
     assert_eq!(said["error"], "bound_conversation", "{said}");
+    // Nor are where her matches stand told to him.
+    let placed = format!("{path}&positions=1");
+    let answered = fetch(&host, &host.token, "GET", &placed, &as_ben, b"");
+    assert_eq!(answered.status, 403);
+    assert!(!String::from_utf8_lossy(&answered.body).contains("positions"));
     // Another Host finds nothing of hers either.
     let peer = [("X-Clarp-Peer", "elsewhere")];
     let answered = fetch(&host, &host.token, "GET", "/search?q=customer", &peer, b"");
