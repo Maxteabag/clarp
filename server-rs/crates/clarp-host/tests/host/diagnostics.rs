@@ -29,6 +29,16 @@ fn diagnostics_capture_is_opt_in_private_and_persists_across_restart() {
         403
     );
     let health = h.get("/diagnostics/health");
+    let observed = &health["host_health"];
+    assert_eq!(observed["instance_id"], h.get("/host/start")["instance"]);
+    assert!(observed["observed_at_ms"].as_i64().is_some_and(|ms| ms > 0));
+    let fs = &observed["data_filesystem"];
+    assert!(fs["total_bytes"].as_u64().is_some_and(|total| total > 0));
+    assert!(fs["available_bytes"].as_u64() <= fs["total_bytes"].as_u64());
+    let commits = &observed["slow_sqlite_commits"];
+    assert_eq!(commits["threshold_ms"], 2000);
+    assert_eq!(commits["window_ms"], 60000);
+    assert!(commits["covered_ms"].as_u64().is_some_and(|ms| ms <= 60000));
     assert_eq!(health["ready"], health["checks"]["stt_ready"]);
     assert_eq!(health["checks"]["ffmpeg_ready"], true);
     assert!(health["tts_queue"]["in_flight"].is_number());
