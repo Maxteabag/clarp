@@ -53,6 +53,15 @@ describe('turn errors', () => {
     expect(apart.actionable).toBeNull();
   });
 
+  it('a retry_at whose time has passed is a plain retry without at_ms', () => {
+    const usage = row('marker-u4').error;
+    const at = usage.actions[0].at_ms;
+    expect(errorActions(usage, at - 1)[0].id).toBe('retry_at');
+    const [plain] = errorActions(usage, at);
+    expect([plain.id, said(plain.label, true), said(plain.label, false)]).toEqual(['retry', 'Prøv igjen', 'Try again']);
+    expect(retryBody(usage, 'tt-codex', plain)).toEqual({ session: 'tt-codex', message_id: 'u4' });
+  });
+
   it('the live failure is the newest card', () => {
     const plan = planTurnErrors(rows, { key: 'live', error: fixture.live_turn_op.turn.error });
     expect(plan.actionable).toBe('live');

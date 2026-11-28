@@ -105,7 +105,9 @@ pub(crate) fn finish(error: &TurnError, id: &str, session: &str, plan: &Plan, en
     let copied = COPIED.with(|c| c.borrow().get(&open_key).is_some_and(|at| at.elapsed() < COPIED_FOR));
     let mut note = (String::new(), false);
     let mut actions = Vec::new();
-    for action in &error.actions {
+    let now = chrono::Utc::now().timestamp_millis();
+    refresh_at(session, error.next_change_ms(now), now);
+    for action in &error.actions_at(now) {
         let shown = match action.id.as_str() {
             // The desktop has no sign-in of its own for a backend.
             "sign_in" => false,
@@ -143,6 +145,29 @@ pub(crate) fn finish(error: &TurnError, id: &str, session: &str, plan: &Plan, en
     card.note = note.0.into();
     card.note_failed = note.1;
     card
+}
+
+thread_local! {
+    /// The times a chat is drawn again for a `retry_at` that turns into a
+    /// plain retry (`<session>␟<ms>`), set once each.
+    static DUE: RefCell<HashSet<String>> = RefCell::default();
+}
+
+/// Draws `session` again when a card's scheduled retry time passes (within
+/// a day; a later one is caught by any redraw before then).
+fn refresh_at(session: &str, at: Option<i64>, now: i64) {
+    let Some(at) = at.filter(|at| *at - now < 86_400_000) else { return };
+    let key = format!("{session}\u{1f}{at}");
+    if !DUE.with(|d| d.borrow_mut().insert(key.clone())) {
+        return;
+    }
+    let session = session.to_owned();
+    slint::Timer::single_shot(Duration::from_millis((at - now).max(0) as u64 + 50), move || {
+        DUE.with(|d| d.borrow_mut().remove(&key));
+        if let Some(app) = crate::app() {
+            app.refresh(&[Change::Conversation(session)]);
+        }
+    });
 }
 
 /// What decides whether a drawn card changed.
@@ -209,7 +234,7 @@ pub(crate) fn open(app: &App, window: &AppWindow, key: &str) -> bool {
             }
         }
         id if clarp_core::turn_error::retries(id) => {
-            let pressed: Option<Action> = error.actions.iter().find(|a| a.id == id).cloned();
+            let pressed: Option<Action> = error.actions_at(chrono::Utc::now().timestamp_millis()).into_iter().find(|a| a.id == id);
             if let Some(pressed) = pressed {
                 app.engine.borrow_mut().turn_retry(session, &error, &pressed);
             }

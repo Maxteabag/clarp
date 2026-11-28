@@ -128,3 +128,35 @@ fn norwegian_locales() {
         assert!(!turn_error::norwegian_locale(name), "{name}");
     }
 }
+
+#[test]
+fn a_retry_at_whose_time_has_passed_is_a_plain_retry() {
+    let rows = rows();
+    let usage = rows.iter().find(|r| r.id == "marker-u4").unwrap().turn_error.clone().unwrap();
+    let at = usage.actions[0].at_ms.unwrap();
+    let before = usage.actions_at(at - 1);
+    assert_eq!((before[0].id.as_str(), before[0].label.get(true)), ("retry_at", "Prøv igjen kl. 18:27"));
+    assert_eq!(usage.next_change_ms(at - 1), Some(at));
+    let after = usage.actions_at(at);
+    assert_eq!((after[0].id.as_str(), after[0].label.get(true), after[0].label.get(false)), ("retry", "Prøv igjen", "Try again"));
+    assert_eq!(usage.retry_body("tt-codex", &after[0]).unwrap(), json!({"session": "tt-codex", "message_id": "u4"}), "no at_ms in the past");
+    assert_eq!(usage.next_change_ms(at), None);
+}
+
+#[test]
+fn interrupted_is_a_quiet_card_with_try_again() {
+    let notice = Message::from_json(json!({"id": "n1", "role": "system", "kind": "notice", "origin": "system", "text": "Turn interrupted",
+        "error": {"code": "interrupted", "severity": "info", "text": {"en": "The turn was cut off before it finished. Send the message again.", "nb": "Turen ble avbrutt før den var ferdig. Send meldingen på nytt."},
+            "actions": [{"id": "retry", "label": {"en": "Try again", "nb": "Prøv igjen"}}], "message_id": "u9", "fingerprint": "interrupted:claude:1"}}).as_object().unwrap());
+    let error = notice.turn_error.clone().expect("a turn-interrupted notice carries it too");
+    assert_eq!((error.code.as_str(), error.severity.as_str()), ("interrupted", "info"));
+    assert_eq!(error.actions_at(0)[0].id, "retry");
+    assert_eq!(turn_error::plan(&[notice], None).actionable.as_deref(), Some("n1"));
+}
+
+#[test]
+fn prompt_too_long_off_claude_offers_a_fresh_session() {
+    let error = TurnError::from_json(&json!({"code": "prompt_too_long", "severity": "warning", "text": {"en": "Too long."}, "message_id": "u1",
+        "actions": [{"id": "fresh_retry", "label": {"en": "New session, try again"}}, {"id": "switch_model", "label": {"en": "Switch"}}]})).unwrap();
+    assert_eq!(error.retry_body("s", &error.actions[0]).unwrap(), json!({"session": "s", "message_id": "u1", "fresh": true}));
+}

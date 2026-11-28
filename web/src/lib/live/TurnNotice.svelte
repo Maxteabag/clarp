@@ -13,8 +13,17 @@
   let states = $state({});
   let note = $state('');
   let noteFailed = $state(false);
+  // A scheduled retry's time passing turns it into a plain Try again.
+  let now = $state(Date.now());
+  $effect(() => {
+    const next = explained && (explained.actions || []).filter(a => a && a.id === 'retry_at')
+      .map(a => a.at_ms || explained.resets_at_ms).filter(t => t > now).sort((a, b) => a - b)[0];
+    if (!next) return;
+    const id = setTimeout(() => { now = Date.now(); }, Math.min(next - now + 50, 2 ** 31 - 1));
+    return () => clearTimeout(id);
+  });
   let actions = $derived(explained
-    ? errorActions(explained).filter(a => !isRetry(a.id) || (actionable && explained.message_id && session))
+    ? errorActions(explained, now).filter(a => !isRetry(a.id) || (actionable && explained.message_id && session))
     : []);
   let meta = $derived(explained ? [explained.backend, explained.model, explained.trace_id].filter(Boolean).join(' · ') : '');
 

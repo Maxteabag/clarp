@@ -250,9 +250,18 @@ export function said(words, nb = prefersNorwegian()) {
   return String((nb ? words.nb || words.en : words.en || words.nb) || '');
 }
 
-/** The buttons the web draws for an explained error: known ids only. */
-export function errorActions(error) {
-  return (Array.isArray(error && error.actions) ? error.actions : []).filter(a => a && KNOWN_ACTIONS.has(a.id));
+/** The buttons the web draws for an explained error at `now`: known ids only,
+ * and a `retry_at` whose time has passed as a plain Try again (no `at_ms`). */
+export function errorActions(error, now = Date.now()) {
+  const out = [];
+  for (const a of Array.isArray(error && error.actions) ? error.actions : []) {
+    if (!a || !KNOWN_ACTIONS.has(a.id)) continue;
+    const at = a.at_ms || error.resets_at_ms;
+    const action = a.id === 'retry_at' && at && at <= now
+      ? { id: 'retry', label: { en: 'Try again', nb: 'Prøv igjen' } } : a;
+    if (!out.some(o => o.id === action.id)) out.push(action);
+  }
+  return out;
 }
 
 /** `POST /turn-retry`'s body for `action`, or null when it sends nothing. */

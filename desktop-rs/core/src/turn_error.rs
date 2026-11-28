@@ -139,6 +139,33 @@ impl TurnError {
         })
     }
 
+    /// The buttons as they read at `now_ms`: a `retry_at` whose time has
+    /// passed is a plain Try again (the window has reset; a card kept since
+    /// then must not offer a time in the past), and sends no `at_ms`.
+    pub fn actions_at(&self, now_ms: i64) -> Vec<Action> {
+        let mut out: Vec<Action> = Vec::with_capacity(self.actions.len());
+        for action in &self.actions {
+            let action = match action.at_ms.or(self.resets_at_ms) {
+                Some(at) if action.id == "retry_at" && at <= now_ms => Action {
+                    id: "retry".into(),
+                    label: Words { en: "Try again".into(), nb: "Prøv igjen".into() },
+                    at_ms: None,
+                    backend: String::new(),
+                },
+                _ => action.clone(),
+            };
+            if !out.iter().any(|a| a.id == action.id) {
+                out.push(action);
+            }
+        }
+        out
+    }
+
+    /// When the next `retry_at` turns into a plain retry, if one waits.
+    pub fn next_change_ms(&self, now_ms: i64) -> Option<i64> {
+        self.actions.iter().filter(|a| a.id == "retry_at").filter_map(|a| a.at_ms.or(self.resets_at_ms)).filter(|at| *at > now_ms).min()
+    }
+
     /// The sentence in the device's language.
     pub fn sentence(&self, norwegian: bool) -> &str {
         self.text.get(norwegian)
