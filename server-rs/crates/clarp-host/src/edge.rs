@@ -3319,6 +3319,25 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     // "After revision 0" is how a client that has nothing yet asks: it gets the newest page.
     let after = query.after_revision.filter(|revision| *revision > 0);
     let older = query.before.is_some();
+    let asked = |name: &str| match name {
+        "delivery_since" => query.delivery_since.as_deref(),
+        "delivery_until" => query.delivery_until.as_deref(),
+        "delivery_stop_generation" => query.delivery_stop_generation.as_deref(),
+        "delivery_bootstrap" => query.delivery_bootstrap.as_deref(),
+        "delivery_runtime_release" => query.delivery_runtime_release.as_deref(),
+        "delivery_runtime_instance" => query.delivery_runtime_instance.as_deref(),
+        _ => None,
+    };
+    let delivery = clarp_kernel::delivery::Query::read(asked);
+    let scope = clarp_kernel::delivery::Scope {
+        server_id: app.server_id.clone(),
+        agent_id: member.record.agent_id.clone(),
+        release: clarp_kernel::delivery::IN_PROCESS_RELEASE.to_string(),
+        instance: app.hub.epoch().to_string(),
+    };
+    // Opening reads need the glance and accepted-send overlay. Their existing path also
+    // preserves cursor-error precedence. Combine only the ordinary newest-page request.
+    let mut joined = None;
     let (page, replace) = if let Some(revision) = after {
         let page = member.agent.after(revision, limit, which).await?;
         // A client that holds another conversation must drop what it has.
@@ -3334,17 +3353,37 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
         }
         (older.unwrap_or_default(), false)
     } else {
-        (member.agent.tail(limit, which).await?, false)
+        if member.agent.view().broken.is_none()
+            && let Ok(query) = &delivery
+        {
+            let captured = member
+                .agent
+                .tail_delivery(limit, which, query.clone(), scope.clone())
+                .await?;
+            joined = Some((
+                captured.view,
+                captured.receipts,
+                captured.fields,
+                captured.generation,
+            ));
+            (captured.page, false)
+        } else {
+            (member.agent.tail(limit, which).await?, false)
+        }
     };
     // A send kept while the agent is opened is where its send will put it (issue 935).
-    let page = if older {
+    let page = if older || joined.is_some() {
         page
     } else {
         with_kept(&member, page, after).await
     };
     // This view may have advanced since the actor returned the page. It only
     // supplies conversation identity. The page owns the cursor for its rows.
-    let status = &member.agent.view().status;
+    let observed = joined
+        .as_ref()
+        .map(|(v, _, _, _)| v.clone())
+        .unwrap_or_else(|| member.agent.view());
+    let status = &observed.status;
     let replace = replace
         || (after.is_some()
             && policy.is_some_and(|policy| {
@@ -3366,28 +3405,20 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     // The delivery of the user sends: their rows, the scope and the generation, and a page of
     // the feed where the client asks for one. This Host owns its turns itself: it answers in
     // the in-process mode, under an instance of this start of the Host.
-    let asked = |name: &str| match name {
-        "delivery_since" => query.delivery_since.as_deref(),
-        "delivery_until" => query.delivery_until.as_deref(),
-        "delivery_stop_generation" => query.delivery_stop_generation.as_deref(),
-        "delivery_bootstrap" => query.delivery_bootstrap.as_deref(),
-        "delivery_runtime_release" => query.delivery_runtime_release.as_deref(),
-        "delivery_runtime_instance" => query.delivery_runtime_instance.as_deref(),
-        _ => None,
-    };
-    let delivery = clarp_kernel::delivery::Query::read(asked)
-        .map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
-    let scope = clarp_kernel::delivery::Scope {
-        server_id: app.server_id.clone(),
-        agent_id: member.record.agent_id.clone(),
-        release: clarp_kernel::delivery::IN_PROCESS_RELEASE.to_string(),
-        instance: app.hub.epoch().to_string(),
-    };
     let turns = match answer["turns"].take() {
         Value::Array(turns) => turns,
         _ => Vec::new(),
     };
-    let (turns, fields) = member.agent.delivery(turns, delivery, scope).await?;
+    let (turns, fields) = if let Some((_, receipts, fields, generation)) = joined {
+        let mut turns = turns;
+        clarp_kernel::delivery::annotate_page(&scope.agent_id, &mut turns, generation, |trace| {
+            receipts.get(trace).cloned()
+        });
+        (turns, fields)
+    } else {
+        let delivery = delivery.map_err(|why| ApiError::new(StatusCode::BAD_REQUEST, why))?;
+        member.agent.delivery(turns, delivery, scope).await?
+    };
     answer["turns"] = Value::Array(turns);
     if let Some(answer) = answer.as_object_mut() {
         answer.extend(fields);

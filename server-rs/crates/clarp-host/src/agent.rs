@@ -189,7 +189,22 @@ mod while_busy;
 use clarp_kernel::while_busy::{Done as BusyDone, WhileBusy};
 pub use while_busy::{Busy, Plan};
 
+pub(crate) struct TailDelivery {
+    pub generation: i64,
+    pub page: Page,
+    pub view: Arc<View>,
+    pub receipts: std::collections::HashMap<String, Value>,
+    pub fields: serde_json::Map<String, Value>,
+}
+
 enum Ask {
+    TailDelivery {
+        limit: usize,
+        which: Which,
+        query: clarp_kernel::delivery::Query,
+        scope: clarp_kernel::delivery::Scope,
+        answer: Answer<TailDelivery>,
+    },
     /// What the launch of a Claude lane's turn asks of the agent's thread.
     ClaudeLane(claude_lane::Ask),
     /// A Codex chat turn found no lane place free and reached no lane: it runs in a process of
@@ -667,6 +682,7 @@ impl Ask {
             Self::Note { .. } => "Note",
             Self::KeeperEvents { .. } => "KeeperEvents",
             Self::GoalEvents { .. } => "GoalEvents",
+            Self::TailDelivery { .. } => "TailDelivery",
             Self::Tail { .. } => "Tail",
             Self::After { .. } => "After",
             Self::Before { .. } => "Before",
@@ -1548,6 +1564,23 @@ impl AgentHandle {
     /// written now.
     pub async fn note(&self, id: String, text: String) -> Result<bool, Unavailable> {
         self.ask(|answer| Ask::Note { id, text, answer }).await
+    }
+
+    pub(crate) async fn tail_delivery(
+        &self,
+        limit: usize,
+        which: Which,
+        query: clarp_kernel::delivery::Query,
+        scope: clarp_kernel::delivery::Scope,
+    ) -> Result<TailDelivery, Unavailable> {
+        self.ask(|answer| Ask::TailDelivery {
+            limit,
+            which,
+            query,
+            scope,
+            answer,
+        })
+        .await
     }
 
     pub async fn tail(&self, limit: usize, which: Which) -> Result<Page, Unavailable> {
@@ -4703,6 +4736,40 @@ impl Worker {
                 answered(reworded, answer)?
             }
             Ask::Note { id, text, answer } => answered(actor.note(&id, &text, now), answer)?,
+            Ask::TailDelivery {
+                limit,
+                which,
+                query,
+                scope,
+                answer,
+            } => {
+                let which = actor.chat_of(which, now);
+                let result = actor.tail_of(limit, which).map(|page| {
+                    let mut receipts = std::collections::HashMap::new();
+                    for row in &page.entries {
+                        let trace = match &row.entry {
+                            Entry::Message(m) => m.trace_id.as_deref(),
+                            Entry::Imported(i) if i.row["role"] == "user" => {
+                                i.row["trace_id"].as_str()
+                            }
+                            _ => None,
+                        };
+                        if let Some(trace) = trace
+                            && let Some(receipt) = actor.delivery_receipt(trace)
+                        {
+                            receipts.insert(trace.to_owned(), receipt);
+                        }
+                    }
+                    TailDelivery {
+                        generation: actor.delivery_stop_generation(),
+                        page,
+                        view: self.view.borrow().clone(),
+                        receipts,
+                        fields: actor.delivery(&mut [], &query, &scope),
+                    }
+                });
+                return read(result, answer);
+            }
             Ask::Tail {
                 limit,
                 which,
@@ -7296,6 +7363,7 @@ fn refuse_for(
             Ok(Ask::Tail { answer, .. } | Ask::After { answer, .. }) => {
                 drop(answer.send(Err(refusal())));
             }
+            Ok(Ask::TailDelivery { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Before { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Label { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RetireLabel { answer, .. }) => drop(answer.send(Err(refusal()))),
