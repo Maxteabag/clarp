@@ -11,6 +11,7 @@ pub mod audio_journal;
 pub mod availability;
 pub mod avatar_motion;
 pub mod catalog;
+pub mod chat_preview;
 pub mod chat_view;
 pub mod conversation;
 pub mod coordination;

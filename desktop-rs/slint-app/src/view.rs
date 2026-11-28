@@ -294,7 +294,8 @@ pub(crate) fn one_line(text: &str) -> String {
 /// `host_offset_ms`: the row's Host clock minus this machine's, for the
 /// wait in its availability line.
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str, host_offset_ms: i64) -> ChatRow {
-    let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
+    let last = row.preview();
+    let preview = one_line(if !last.is_empty() { &last } else { &row.working_directory });
     let activity = row_activity(row, clarp_core::availability::Clock::now(host_offset_ms));
     let mut chat = ChatRow {
         session: row.session.clone().into(),

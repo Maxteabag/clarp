@@ -26,6 +26,10 @@ pub struct Agent {
     /// The latest messages' previews as plain text (the Host's markdown
     /// stripped once, on arrival, not on every chat-list rebuild).
     pub last_message: String,
+    /// What the last message holds as a kind and its values (feature
+    /// `chat_preview_parts`), worded when the row is drawn
+    /// (`chat_preview::line`); None from an older Host.
+    pub last_message_preview: Option<Object>,
     pub last_completed_message: String,
     pub conversation_id: String,
     pub voice_id: String,
@@ -136,6 +140,7 @@ impl Default for Agent {
             latest_state: String::new(),
             status_text: String::new(),
             last_message: String::new(),
+            last_message_preview: None,
             last_completed_message: String::new(),
             conversation_id: String::new(),
             voice_id: String::new(),
@@ -213,6 +218,7 @@ impl Agent {
             avatar_symbol: s("avatar_symbol"),
             status_text: s("status_text"),
             last_message: crate::decision_receipt::preview_line(&s("last_message")),
+            last_message_preview: object.get("last_message_preview").and_then(Value::as_object).cloned(),
             last_completed_message: crate::decision_receipt::preview_line(&s("last_completed_message")),
             conversation_id: s("conversation_id"),
             voice_id: s("voice_id"),
@@ -302,6 +308,7 @@ impl Agent {
                 "avatar_symbol" => self.avatar_symbol = new.avatar_symbol.clone(),
                 "status_text" => self.status_text = new.status_text.clone(),
                 "last_message" => self.last_message = new.last_message.clone(),
+                "last_message_preview" => self.last_message_preview = new.last_message_preview.clone(),
                 "last_completed_message" => self.last_completed_message = new.last_completed_message.clone(),
                 "conversation_id" => self.conversation_id = new.conversation_id.clone(),
                 "voice_id" => self.voice_id = new.voice_id.clone(),

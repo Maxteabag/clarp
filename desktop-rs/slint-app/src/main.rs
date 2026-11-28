@@ -222,7 +222,7 @@ impl App {
                 unread: r.unread,
                 name: r.name.clone(),
                 backend: r.backend.clone(),
-                last_message: r.last_message.clone(),
+                last_message: r.preview(),
                 working_directory: r.working_directory.clone(),
             })
             .collect();

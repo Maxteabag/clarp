@@ -2010,7 +2010,12 @@ impl Engine {
                     self.mutate_roster(|r| r.clear_unread(&session));
                 } else {
                     let title = event.get("persona").and_then(Value::as_str).unwrap_or(&session).to_owned();
-                    self.changes.push(Change::Notification { title, body: clarp_core::decision_receipt::preview_line(&json::string(event, "preview")) });
+                    let body = event
+                        .get("preview_parts")
+                        .and_then(Value::as_object)
+                        .and_then(clarp_core::chat_preview::line)
+                        .unwrap_or_else(|| clarp_core::decision_receipt::preview_line(&json::string(event, "preview")));
+                    self.changes.push(Change::Notification { title, body });
                 }
             }
             "server-version" => {
