@@ -377,6 +377,7 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
     }
     if notify && let Some(member) = app.fleet.directory().janitor(id) {
         app.pusher.turn_done(crate::pusher::TurnDone {
+            order: crate::pusher::Order::observe(app.clock.now_ms()),
             // Hotseat exhaustion receipts carry neither a badge nor an unread chat item.
             badge: false,
             unread: false,

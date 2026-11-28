@@ -4651,36 +4651,37 @@ impl Fleet {
             &[crate::pusher::display_name(helper)],
         );
         let notification_id = format!("helper-{}-{now}", helper.agent_id);
-        self.works.hub.publish(
-            serde_json::json!({
-                "type": "user-notification",
-                "event": Event::HelperReport.id(),
-                "notification_id": notification_id,
-                "agent_id": maker.agent_id,
-                "session": maker.session,
-                "persona": maker.persona,
-                "origin": "agent",
-                "reason": "helper_report",
-                "helper_agent_id": helper.agent_id,
-                "helper_session": helper.session,
-                "cause_message_id": "",
-                "source_message_id": "",
-                "preview": body.english(),
-                "body_loc_key": body.key,
-                "body_loc_args": body.args,
-                "done_ts": now,
-                "badge": false,
-                "unread": false,
-                "push": true,
-                "alert": true,
-                "muted": false,
-            }),
-            now,
-        );
+        let order = crate::pusher::Order::observe(now);
+        let mut told = serde_json::json!({
+            "type": "user-notification",
+            "event": Event::HelperReport.id(),
+            "notification_id": notification_id,
+            "agent_id": maker.agent_id,
+            "session": maker.session,
+            "persona": maker.persona,
+            "origin": "agent",
+            "reason": "helper_report",
+            "helper_agent_id": helper.agent_id,
+            "helper_session": helper.session,
+            "cause_message_id": "",
+            "source_message_id": "",
+            "preview": body.english(),
+            "body_loc_key": body.key,
+            "body_loc_args": body.args,
+            "done_ts": now,
+            "badge": false,
+            "unread": false,
+            "push": true,
+            "alert": true,
+            "muted": false,
+        });
+        order.event(&mut told);
+        self.works.hub.publish(told, now);
         let mut extra = serde_json::Map::new();
         extra.insert("helper_agent_id".into(), serde_json::json!(helper.agent_id));
         extra.insert("helper_session".into(), serde_json::json!(helper.session));
         self.works.pusher.turn_done(crate::pusher::TurnDone {
+            order,
             session: maker.session.clone(),
             persona: maker.persona.clone(),
             notification_id,
@@ -5060,9 +5061,14 @@ impl Fleet {
             self.publish();
         }
         if announce {
-            self.works.hub.publish(wire::focus(&record), self.now_ms());
+            let now = self.now_ms();
+            let order = crate::pusher::Order::observe(now);
+            let mut focus = wire::focus(&record);
+            order.boundary(&mut focus);
+            self.works.hub.publish(focus, now);
             // The chat is open on a device: the phones take its notifications down.
             self.works.pusher.read(crate::pusher::Read {
+                order,
                 session: record.session.clone(),
                 decision_id: String::new(),
             });

@@ -178,6 +178,7 @@ pub fn display_name(record: &crate::fleet::AgentRecord) -> &str {
 /// A finished turn the user is told of.
 #[derive(Debug, Clone, Default)]
 pub struct TurnDone {
+    pub order: Order,
     pub badge: bool,
     pub unread: bool,
     pub session: String,
@@ -229,7 +230,7 @@ pub struct Requested {
     /// desk: its chat was not opened and it still waits ([`ESCALATE_AFTER`]).
     pub escalated: bool,
     /// When it was handed over, by the Host's clock: a chat opened after it saw it.
-    pub asked_at_ms: i64,
+    pub order: Order,
 }
 
 /// How long a request the desk held back waits for its chat to be opened before the phones
@@ -316,9 +317,54 @@ enum Job {
 /// takes its notifications down on every phone.
 #[derive(Debug, Clone, Default)]
 pub struct Read {
+    pub order: Order,
     pub session: String,
     /// The request that was answered, dismissed or withdrawn. Empty: the chat was read.
     pub decision_id: String,
+}
+
+/// Host observation order. Only compare wire values within one Host generation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Order {
+    at_ms: i64,
+    seq: u64,
+}
+
+impl Order {
+    pub fn observe(at_ms: i64) -> Self {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static SEQ: AtomicU64 = AtomicU64::new(1);
+        Self {
+            at_ms,
+            seq: SEQ.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+
+    fn put(self, v: &mut Value, read: bool) {
+        static EPOCH: std::sync::LazyLock<String> =
+            std::sync::LazyLock::new(|| crate::ids::hex(16));
+        if self.seq == 0 {
+            return;
+        }
+        v["order_epoch"] = serde_json::json!(&*EPOCH);
+        v[if read {
+            "read_through_ms"
+        } else {
+            "event_at_ms"
+        }] = self.at_ms.into();
+        v[if read {
+            "read_through_seq"
+        } else {
+            "event_seq"
+        }] = self.seq.into();
+    }
+
+    pub fn event(self, v: &mut Value) {
+        self.put(v, false);
+    }
+    pub fn boundary(self, v: &mut Value) {
+        self.put(v, true);
+    }
 }
 
 /// The way to the pusher's thread. Handing it something never waits.
@@ -455,7 +501,7 @@ impl Waiting {
                         if asked.escalated {
                             // Its chat was opened since, or it was answered, changed or ran
                             // out: the desk had it, and the phones are not told.
-                            if reads.opened_since(&asked.session, asked.asked_at_ms)
+                            if reads.opened_since(&asked.session, asked.order)
                                 || !still_waits(&works, asked, now)
                             {
                                 continue;
@@ -472,9 +518,7 @@ impl Waiting {
                         continue;
                     }
                     match &job {
-                        Job::Read(read) if !reads.due(read, works.clock.now_ms()) => continue,
-                        Job::Turn(done, _) => reads.alerted(&done.session),
-                        Job::Request(asked) => reads.alerted(&asked.session),
+                        Job::Read(read) if !reads.due(read) => continue,
                         _ => {}
                     }
                     let (job, told) = match job {
@@ -554,7 +598,6 @@ fn desk_present(works: &Works) -> bool {
 fn escalate_later(works: &Works, jobs: &mpsc::Sender<Job>, asked: &Requested) {
     let later = Requested {
         escalated: true,
-        asked_at_ms: works.clock.now_ms(),
         ..asked.clone()
     };
     let jobs = jobs.clone();
@@ -629,33 +672,31 @@ impl RingAlerts {
 /// beside any other, and it is not a reading of the chat.
 #[derive(Default)]
 struct Reads {
-    /// The chats with nothing shown of them since their last read push.
-    cleared: std::collections::HashSet<String>,
     /// The requests whose end was pushed.
     ended: std::collections::HashSet<String>,
     /// When each chat was last opened or read on some device.
-    opened: std::collections::HashMap<String, i64>,
+    opened: std::collections::HashMap<String, Order>,
 }
 
 impl Reads {
-    fn alerted(&mut self, session: &str) {
-        self.cleared.remove(session);
-    }
-
-    fn due(&mut self, read: &Read, now_ms: i64) -> bool {
+    fn due(&mut self, read: &Read) -> bool {
         if read.decision_id.is_empty() {
-            self.opened.insert(read.session.clone(), now_ms);
-            self.cleared.insert(read.session.clone())
+            let previous = self.opened.entry(read.session.clone()).or_default();
+            if read.order <= *previous {
+                return false;
+            }
+            *previous = read.order;
+            true
         } else {
             self.ended.insert(read.decision_id.clone())
         }
     }
 
     /// Whether the chat was opened or read at or after this moment.
-    fn opened_since(&self, session: &str, at_ms: i64) -> bool {
+    fn opened_since(&self, session: &str, order: Order) -> bool {
         self.opened
             .get(session)
-            .is_some_and(|opened| *opened >= at_ms)
+            .is_some_and(|opened| *opened >= order)
     }
 }
 
@@ -749,7 +790,7 @@ fn called(works: &Works, rung: &Rung) -> Value {
 /// a picture of the agent's own.
 fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a str) {
     let (avatar_url, avatar_custom) = face;
-    match job {
+    let (mut value, id): (Value, &str) = match job {
         Job::Turn(told, _) => {
             let mut payload = push::turn_done(&Told {
                 persona: &told.persona,
@@ -819,7 +860,14 @@ fn payload<'a>(job: &'a Job, server_id: &str, face: (&str, bool)) -> (Value, &'a
             }),
             &rung.ring.ring_id,
         ),
+    };
+    match job {
+        Job::Turn(done, _) => done.order.event(&mut value),
+        Job::Request(asked) => asked.order.event(&mut value),
+        Job::Read(read) if read.decision_id.is_empty() => read.order.boundary(&mut value),
+        _ => {}
     }
+    (value, id)
 }
 
 /// Freeze ownership at submission; revalidate it when a queued ring is sent.
@@ -1157,50 +1205,122 @@ fn deliver(works: &Works, job: &Job, targets: Targets<'_>) -> Counted {
 mod read_tests {
     use super::*;
 
-    fn read(session: &str, decision_id: &str) -> Read {
+    fn read(session: &str, decision_id: &str, at: i64) -> Read {
         Read {
+            order: Order { at_ms: at, seq: 1 },
             session: session.to_string(),
             decision_id: decision_id.to_string(),
         }
     }
 
     #[test]
-    fn a_chat_read_is_sent_once_until_something_is_shown_of_it_again() {
+    fn delayed_reads_preserve_the_observed_boundary_and_a_later_decision_escalates() {
         let mut reads = Reads::default();
-        assert!(reads.due(&read("vera", ""), 1_000));
-        // Nothing was shown since: the same push says nothing new.
-        assert!(!reads.due(&read("vera", ""), 2_000));
-        assert!(reads.due(&read("ola", ""), 2_000));
-        reads.alerted("vera");
-        // Shown again a moment later: read at once, it is sent at once.
-        assert!(reads.due(&read("vera", ""), 2_100));
+        let first = read("vera", "", 1000);
+        let decision = Order {
+            at_ms: 2000,
+            seq: 2,
+        };
+        // A read observed at t1 arrives in the worker at t3, after the decision at t2.
+        assert!(reads.due(&first));
+        assert!(!reads.opened_since("vera", decision));
+        let newer = read("vera", "", 3000);
+        assert!(reads.due(&newer));
+        assert!(!reads.due(&first));
+        assert!(reads.opened_since("vera", newer.order));
+    }
+
+    #[test]
+    fn delayed_chat_read_leaves_the_newer_alert_even_in_the_same_millisecond() {
+        let stamp = |seq| Order { at_ms: 1000, seq };
+        let alert = |seq| {
+            payload(
+                &Job::Turn(
+                    TurnDone {
+                        order: stamp(seq),
+                        session: "vera".into(),
+                        ..Default::default()
+                    },
+                    None,
+                ),
+                "host-1",
+                ("", false),
+            )
+            .0
+        };
+        let clear = |id: &str| {
+            payload(
+                &Job::Read(Read {
+                    order: stamp(2),
+                    session: "vera".into(),
+                    decision_id: id.into(),
+                }),
+                "host-1",
+                ("", false),
+            )
+            .0
+        };
+        let (a, b, r) = (alert(1), alert(3), clear(""));
+        assert_eq!(a["order_epoch"], r["order_epoch"]);
+        assert_eq!(b["order_epoch"], r["order_epoch"]);
+        assert_eq!(a["event_at_ms"], r["read_through_ms"]);
+        assert_eq!(b["event_at_ms"], r["read_through_ms"]);
+        assert_eq!(
+            (
+                a["event_seq"].as_u64(),
+                r["read_through_seq"].as_u64(),
+                b["event_seq"].as_u64()
+            ),
+            (Some(1), Some(2), Some(3))
+        );
+        let data = |v| clarp_kernel::fcm::data(v, &Value::Null, "", 9999).unwrap();
+        assert_eq!(data(&a)["event_seq"], "1");
+        assert_eq!(data(&b)["event_seq"], "3");
+        assert_eq!(data(&r)["read_through_seq"], "2");
+        assert_eq!(data(&r)["read_through_ms"], "1000");
+        assert!(clear("d1").get("read_through_seq").is_none());
     }
 
     #[test]
     fn two_cards_in_one_chat_are_each_taken_down_once_and_neither_reads_the_chat() {
         let mut reads = Reads::default();
-        assert!(reads.due(&read("vera", "d1"), 1_000));
+        assert!(reads.due(&read("vera", "d1", 1_000)));
         assert!(
-            reads.due(&read("vera", "d2"), 1_100),
+            reads.due(&read("vera", "d2", 1_100)),
             "another card, at once"
         );
         assert!(
-            !reads.due(&read("vera", "d1"), 1_200),
+            !reads.due(&read("vera", "d1", 1_200)),
             "the same card again"
         );
         // A card's end is no reading of the chat: a real read after it is still sent, and
         // the chat was not opened by it.
-        assert!(!reads.opened_since("vera", 0));
-        assert!(reads.due(&read("vera", ""), 1_300));
-        assert!(reads.opened_since("vera", 1_300));
+        assert!(!reads.opened_since("vera", Order { at_ms: 0, seq: 1 }));
+        assert!(reads.due(&read("vera", "", 1_300)));
+        assert!(reads.opened_since(
+            "vera",
+            Order {
+                at_ms: 1_300,
+                seq: 1
+            }
+        ));
     }
 
     #[test]
     fn a_held_card_reaches_the_phones_unless_its_chat_was_opened_or_it_changed() {
         let mut reads = Reads::default();
         // Card d2 was held for the desk at 1 000; d1 in the same chat was answered after.
-        assert!(reads.due(&read("vera", "d1"), 1_500));
-        assert!(!reads.opened_since("vera", 1_000), "d2 goes to the phones");
+        assert!(reads.due(&read("vera", "d1", 1_500)));
+        assert!(
+            !reads.opened_since(
+                "vera",
+                Order {
+                    at_ms: 1_000,
+                    seq: 1
+                }
+            ),
+            "d2 goes to the phones"
+        );
         assert!(waits(("pending", 1, None), 1, 2_000));
         assert!(
             !waits(("pending", 2, None), 1, 2_000),
@@ -1210,8 +1330,14 @@ mod read_tests {
         assert!(!waits(("pending", 1, Some(1_999)), 1, 2_000), "it ran out");
         assert!(waits(("pending", 1, Some(2_001)), 1, 2_000));
         // Its chat opened after it was held: the desk had it.
-        assert!(reads.due(&read("vera", ""), 1_800));
-        assert!(reads.opened_since("vera", 1_000));
+        assert!(reads.due(&read("vera", "", 1_800)));
+        assert!(reads.opened_since(
+            "vera",
+            Order {
+                at_ms: 1_000,
+                seq: 1
+            }
+        ));
     }
 
     #[test]

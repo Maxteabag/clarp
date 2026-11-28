@@ -661,6 +661,7 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
                         .to_string()
                 };
                 let done = TurnDone {
+                    order: crate::pusher::Order::observe(app.clock.now_ms()),
                     badge: false,
                     unread: false,
                     session: said("session"),

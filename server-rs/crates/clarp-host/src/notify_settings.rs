@@ -220,9 +220,12 @@ pub(crate) async fn chat_read(
     };
     let record = &member.record;
     let now = app.clock.now_ms();
-    let told = chat_read_event(record, now);
+    let order = crate::pusher::Order::observe(now);
+    let mut told = chat_read_event(record, now);
+    order.boundary(&mut told);
     app.hub.publish(told.clone(), now);
     app.pusher.read(Read {
+        order,
         session: record.session.clone(),
         decision_id: String::new(),
     });

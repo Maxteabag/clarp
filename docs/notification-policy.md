@@ -171,7 +171,7 @@ global `call` choice, which is `rings.enabled`.
   `<name> asks` / `Open Clarp to answer.` with no `options`, no `response_type` and no
   answering category: a tap opens the card.
 - A chat read and the end of a request are different pushes. A chat read
-  (`read-<session>`) is sent when something was shown of the chat since its last one. A
+  (`read-<session>`) advances the read-through boundary. A
   request's end (`read-decision-<decision_id>`) is sent once for that request, beside any
   other card's, and is no reading of the chat.
 - A request held for the desk is pushed after three minutes only if its chat was not opened
@@ -431,6 +431,13 @@ answered, dismissed or withdrawn, every phone gets:
 
 `decision_id` only for a request. APNs: push type `background`, priority 5,
 collapse id `read-<session>` for a chat read and `read-decision-<decision_id>` for a request's end. FCM: the same as string data, priority NORMAL.
-The phone removes that chat's delivered notifications, or that request's. A chat's read
-push is sent only when something was shown of the chat since its last one; a request's end
-is sent once for that request.
+
+For a chat read, compare `(read_through_ms, read_through_seq)` with the displayed
+notification's `(event_at_ms, event_seq)` as integer pairs in lexicographic order.
+Scope comparisons to the same Host instance, session and opaque `order_epoch` (one per Host
+process lifetime). APNs and SSE use JSON integers. FCM uses decimal strings. Record the
+maximum boundary. Remove a displayed notification or suppress a late alert only when its
+order is at or below that boundary. Preserve it if either order is missing or malformed or
+the epochs differ. Use the sequence to break ties within a millisecond. Thus reading A,
+displaying B and then receiving A's delayed read leaves B visible. A read with `decision_id`
+clears only the matching card and leaves the chat boundary unchanged.

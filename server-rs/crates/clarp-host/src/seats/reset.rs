@@ -270,6 +270,7 @@ async fn tell(app: &App, janitor: &str, told: &[String], tool: &str, text: &str,
     let directory = app.fleet.directory();
     if let Some(member) = directory.janitor(janitor) {
         app.pusher.turn_done(crate::pusher::TurnDone {
+            order: crate::pusher::Order::observe(app.clock.now_ms()),
             badge: false,
             unread: false,
             session: member.record.session.clone(),

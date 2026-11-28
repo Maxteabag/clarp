@@ -1612,8 +1612,12 @@ fn push_request(app: &App, artifact: &Value) {
         told["body_loc_key"] = serde_json::json!(loc.key);
         told["body_loc_args"] = serde_json::json!(loc.args);
     }
-    app.hub.publish(told, app.clock.now_ms());
+    let now = app.clock.now_ms();
+    let order = crate::pusher::Order::observe(now);
+    order.event(&mut told);
+    app.hub.publish(told, now);
     app.pusher.requested(Requested {
+        order,
         agent_id: asker.to_string(),
         response_type,
         options,
@@ -1653,6 +1657,7 @@ fn approval_options(yes: &str, no: &str) -> Vec<Value> {
 /// phone, wherever it was answered.
 fn push_ended(app: &App, member: &crate::fleet::Member, decision_id: &str) {
     app.pusher.read(crate::pusher::Read {
+        order: Default::default(),
         session: member.record.session.clone(),
         decision_id: decision_id.to_string(),
     });

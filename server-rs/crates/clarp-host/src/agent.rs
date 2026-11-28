@@ -4383,10 +4383,13 @@ impl Worker {
                     told["event"] = json!(event.id());
                     told["alert"] = json!(alert);
                     told["message_id"] = told["source_message_id"].clone();
+                    let order = crate::pusher::Order::observe(now);
+                    order.event(&mut told);
                     let (body_loc, extra) = crate::pusher::preview_keys(record, &told);
                     // A phone that is not listening is pushed to, when the rule says so.
                     if told["push"] == true && alert {
                         self.setup.pusher.turn_done(TurnDone {
+                            order,
                             badge: true,
                             unread: true,
                             session: record.session.clone(),
@@ -6939,12 +6942,15 @@ impl Worker {
                 told["event"] = json!(event.id());
                 told["alert"] = json!(alert);
                 told["message_id"] = told["source_message_id"].clone();
+                let order = crate::pusher::Order::observe(now);
+                order.event(&mut told);
                 let (body_loc, extra) = crate::pusher::preview_keys(&record, &told);
                 // A phone that is not listening is pushed to, when the rule says so. With a
                 // sound when the agent still waits for an answer from the user.
                 if told["push"] == true && alert {
                     alert_queued = true;
                     self.setup.pusher.turn_done(TurnDone {
+                        order,
                         badge: told["badge"] == true,
                         unread: told["unread"] == true,
                         session: record.session.clone(),
@@ -6994,9 +7000,10 @@ impl Worker {
             told["alert"] = json!(alert);
             if alert {
                 alert_queued = true;
-                self.setup
-                    .pusher
-                    .turn_done(crate::pusher::failed(&record, &told));
+                let mut push = crate::pusher::failed(&record, &told);
+                push.order = crate::pusher::Order::observe(now);
+                push.order.event(&mut told);
+                self.setup.pusher.turn_done(push);
             } else {
                 // Switched off, or a muted agent's: the chat is marked unread, and no popup.
                 // Apps from before this event pop up any `user-notification` whatever its
@@ -7037,7 +7044,7 @@ impl Worker {
                 // A job of the agent's own that ended is told the owner, where they want it:
                 // once for each run and how it ended.
                 if event.at >= self.born_ms
-                    && let Some(done) = wire::job_notification(&record, job, event.at)
+                    && let Some(mut done) = wire::job_notification(&record, job, event.at)
                 {
                     let key = done["notification_id"].as_str().unwrap_or("").to_owned();
                     let event = clarp_kernel::notify_events::Event::JobDone;
@@ -7045,9 +7052,10 @@ impl Worker {
                     if self.jobs_alerted.insert(key)
                         && crate::notify_settings::alerts_in(directory.as_deref(), event, &record)
                     {
-                        self.setup
-                            .pusher
-                            .turn_done(crate::pusher::job_done(&record, &done));
+                        let mut push = crate::pusher::job_done(&record, &done);
+                        push.order = crate::pusher::Order::observe(now);
+                        push.order.event(&mut done);
+                        self.setup.pusher.turn_done(push);
                         hub.publish(done, now);
                     }
                 }
