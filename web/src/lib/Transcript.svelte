@@ -22,6 +22,7 @@
   } from '../stores/conversations.svelte.js';
   import { live, liveFor, liveRequested, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
+  import { PRIMARY, isDown, reach } from '../stores/reach.svelte.js';
 
   let { session, active = true } = $props();
 
@@ -44,7 +45,18 @@
   // started is not drawn. The policy the rows were read under says it, else the snapshot.
   let visibility = $derived(conv.coordination?.visibility || statusFor(session).coordination_visibility || '');
   let liveHidden = $derived(hidesLiveTurn(visibility, liveState && liveState.turn));
-  let liveItems = $derived(liveState && !liveHidden ? currentTurnItems(liveState) : []);
+  // While the serving Host does not answer, nothing it last said runs on: a running item's time
+  // stops where the Host was last heard (no timer counts on), and live data takes over again
+  // when it is back (docs/design/host-not-answering.md).
+  let silentSince = $derived(isDown(PRIMARY)
+    ? (reach.hosts[PRIMARY]?.lastOk || reach.hosts[PRIMARY]?.downSince || 0) : 0);
+  let liveItems = $derived.by(() => {
+    const items = liveState && !liveHidden ? currentTurnItems(liveState) : [];
+    if (!silentSince) return items;
+    const end = silentSince + (liveState?.skewMs || 0);
+    return items.map(i => ((i.status === 'running' || i.status === 'pending') && i.started_at_ms && !i.ended_at_ms
+      ? { ...i, ended_at_ms: Math.max(i.started_at_ms, end) } : i));
+  });
   // Every live event replaces liveItems; the hidden set and the live block's
   // position only change now and then. Both keep their identity (a set) or
   // value (a number) between events, so the turn filter, the merged timeline

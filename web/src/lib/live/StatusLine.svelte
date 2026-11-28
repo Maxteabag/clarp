@@ -6,12 +6,15 @@
   import { createDelayedStatus } from '@core/delayed-status.js';
   import { live, liveFor, rosterActivity } from '../../stores/live.svelte.js';
   import { statusFor } from '../../stores/app.svelte.js';
+  import { PRIMARY, isDown } from '../../stores/reach.svelte.js';
   import { stopAgentTurn } from '../../stores/send.svelte.js';
 
   let { session } = $props();
 
   let skewMs = $derived(liveFor(session)?.skewMs || 0);
-  let activity = $derived(live.enabled
+  // While the serving Host does not answer, its last live activity is not happening now: no line,
+  // no timer (docs/design/host-not-answering.md). It comes back with the Host's live data.
+  let activity = $derived(isDown(PRIMARY) ? null : live.enabled
     ? rosterActivity(session) || activityFromStatus(statusFor(session))
     : activityFromStatus(statusFor(session)));
   let target = $derived.by(() => {

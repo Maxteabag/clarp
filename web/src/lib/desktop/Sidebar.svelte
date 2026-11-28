@@ -53,19 +53,22 @@
     return mergeChats(groups, new Set(listedHostIds())).map(row => {
       const remote = row.hostId === PRIMARY ? null : others.find(h => h.id === row.hostId);
       const s = remote ? row.status : statusFor(row.sid);
+      const hostDown = isDown(remote ? remote.id : SERVING);
       return {
         ...row,
         remote,
         current: !remote && row.sid === app.session,
-        busy: !!s.busy,
+        // A Host that does not answer: what it last said is not happening now, so nothing working.
+        busy: !!s.busy && !hostDown,
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         unread: !remote && isUserNotificationUnread(row.sid),
         // Its Host does not answer: the row stays, dimmed, with an offline dot.
-        hostDown: isDown(remote ? remote.id : SERVING),
+        hostDown,
         // Another Host's portraits need that Host's sign-in; the bundled ones are this app's.
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         // A moved agent's row says where it went (contract 125).
-        line: movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
+        line: hostDown ? (movedLine(s.moved) || '')
+          : movedLine(s.moved) || shortActivityText(s) || shortActivityPhase(s)
               || (s.busy ? 'Working' : 'Idle'),
       };
     });

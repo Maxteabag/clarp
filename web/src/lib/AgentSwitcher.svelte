@@ -37,18 +37,20 @@
       const remote = row.hostId === PRIMARY ? null : others.find(h => h.id === row.hostId);
       const s = remote ? row.status : statusFor(row.sid);
       const isCurrent = !remote && row.sid === app.session;
-      const isBusy = !!s.busy;
+      // A Host that does not answer: what it last said is not happening now, so nothing working.
+      const hostDown = isDown(remote ? remote.id : SERVING);
+      const isBusy = !!s.busy && !hostDown;
       const isUnread = !remote && isUserNotificationUnread(row.sid);
       return {
         key: row.key, sid: row.sid, name: row.name, remote,
-        hostDown: isDown(remote ? remote.id : SERVING),
+        hostDown,
         avatar: remote ? resolveAvatarUrl({}, row.name) : avatarUrl(row.name, row.sid),
         host: remote ? hostBadgeFor(row.sid, remote.serverId || remote.id, s) : hostBadgeFor(row.sid),
         cls: isCurrent ? 'current' : isBusy ? 'busy' : isUnread ? 'unread' : '',
         text: s.moved ? movedLine(s.moved)
           : isCurrent ? 'current'
           : isBusy ? (shortActivityPhase(s) || 'working')
-          : isUnread ? 'new' : 'idle',
+          : isUnread ? 'new' : hostDown ? '' : 'idle',
       };
     });
   });

@@ -23,7 +23,7 @@
   let nothingSaved = $derived(isDown(PRIMARY) && !conversation(session).turns.length);
 </script>
 
-<section id={active ? 'history' : undefined} class="history" class:hidden={!active}
+<section id={active ? 'history' : undefined} class="history" class:hidden={!active} class:host-silent={isDown(PRIMARY)}
          aria-label="Conversation" aria-hidden={active ? undefined : 'true'}>
   <header class="history-head">
     <AgentIdentity {session} onTap={onTapAgent} onHold={onHoldAgent} />
@@ -68,4 +68,7 @@
 
 <style>
 .host-down-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; }
+/* Its Host does not answer: nothing pulses as if it were still working. */
+.host-silent :global(.lv-dot), .host-silent :global(.lv-label), .host-silent :global(.tool-status),
+.host-silent :global(.activity-dot), .host-silent :global(.banner-spinner) { animation: none !important; }
 </style>
