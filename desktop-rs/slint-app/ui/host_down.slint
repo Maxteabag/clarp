@@ -60,40 +60,63 @@ export global HostDownBridge {
     callback close();
 
     public pure function title(panel: HostDownPanel) -> string {
+        // i18n: Host-down panel, title and status line for ~2 s when the Host answers again (state, not a button)
         if (panel.back) { return @tr("host_down.status.back_online" => "Back online"); }
+        // i18n: Host-down panel title when this computer has no network at all (statement)
         if (panel.reason == "device_offline") { return @tr("host_down.device_offline.title" => "This device is offline"); }
+        // i18n: Host-down panel title; {0} is the Host's name; the device must be paired with it again (statement)
         if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.title" => "{0} needs pairing again", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; the saved address now leads elsewhere (statement)
         if (panel.reason == "wrong_address") { return @tr("host_down.wrong_address.title" => "{0} isn't at this address", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; the computer answers but Clarp is not running (statement)
         if (panel.reason == "server_stopped") { return @tr("host_down.server_stopped.title" => "{0} isn't answering", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; Tailscale seems off on this device (statement)
         if (panel.reason == "tailscale_off") { return @tr("host_down.tailscale_off.title" => "{0} isn't answering", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; its computer seems off or asleep (statement)
         if (panel.reason == "host_asleep") { return @tr("host_down.host_asleep.title" => "{0} isn't answering", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; no answer for an unknown reason (statement)
         return @tr("host_down.unknown.title" => "{0} isn't answering", panel.host);
     }
     public pure function body(panel: HostDownPanel) -> string {
+        // i18n: Host-down panel, sentence under the title when this computer has no network
         if (panel.reason == "device_offline") { return @tr("host_down.device_offline.body" => "Clarp will reconnect when the network is back."); }
+        // i18n: Host-down panel, sentence under the title; {0} is the Host's name
         if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.body" => "This device is no longer signed in to {0}.", panel.host); }
+        // i18n: Host-down panel, sentence under the title when the Host is not at its saved address
         if (panel.reason == "wrong_address") { return @tr("host_down.wrong_address.body" => "The address may have changed."); }
+        // i18n: Host-down panel, sentence under the title: the computer is reachable but the Clarp program is not running
         if (panel.reason == "server_stopped") { return @tr("host_down.server_stopped.body" => "The computer is on, but Clarp isn't running on it."); }
+        // i18n: Host-down panel, sentence under the title: the Tailscale VPN seems disconnected on this computer
         if (panel.reason == "tailscale_off") { return @tr("host_down.tailscale_off.body" => "Tailscale doesn't seem to be connected on this device."); }
+        // i18n: Host-down panel, sentence under the title: the Host's computer seems switched off or sleeping
         if (panel.reason == "host_asleep") { return @tr("host_down.host_asleep.body" => "The computer seems to be off or asleep."); }
+        // i18n: Host-down panel, sentence under the title; {0} is the Host's name
         return @tr("host_down.unknown.body" => "{0} isn't responding right now.", panel.host);
     }
     public pure function status-line(panel: HostDownPanel) -> string {
+        // i18n: Host-down panel, title and status line for ~2 s when the Host answers again (state, not a button)
         if (panel.back || panel.status == "back") { return @tr("host_down.status.back_online" => "Back online"); }
+        // i18n: Host-down panel, quiet status line; {0} is when the next automatic try is, e.g. 'in 30 seconds'
         if (panel.status == "retry") { return @tr("host_down.status.retry_in" => "Trying again {0}", panel.retry-in); }
+        // i18n: Host-down panel, quiet status line while the app is trying to reach the Host on its own
         return @tr("host_down.status.reconnecting" => "Reconnecting automatically…");
     }
     public pure function last-seen(panel: HostDownPanel) -> string {
         if (panel.last-seen == "") { return ""; }
+        // i18n: Host-down panel, beside the title; {0} is a relative time such as '2 hours ago'
         return @tr("host_down.last_seen" => "Last answered {0}", panel.last-seen);
     }
     public pure function action-label(action: string) -> string {
+        // i18n: Host-down panel, button (verb): opens pairing to sign this device in to the Host again
         if (action == "pair") { return @tr("host_down.action.pair_again" => "Pair again"); }
+        // i18n: Host-down panel, button (verb): opens the connection page to change the Host's address
         if (action == "address") { return @tr("host_down.action.edit_address" => "Edit address"); }
+        // i18n: Host-down panel, button (verb): opens the Tailscale admin page to check the connection
         if (action == "tailscale") { return @tr("host_down.action.check_tailscale" => "Check Tailscale"); }
         return "";
     }
     public pure function list-row(row: HostDownRow) -> string {
+        // i18n: chat list, quiet row for a Host that does not answer (opens its panel); {0} is the Host's name, {1} a relative time such as '2 hours ago'
         return @tr("host_down.list_row" => "{0} isn't answering · {1}", row.host, row.when);
     }
 }
@@ -142,6 +165,7 @@ component Actions inherits HorizontalLayout {
     spacing: 6px;
     alignment: start;
     TextButton {
+        // i18n: Host-down panel, button (verb): try to reach the Host again now
         text: @tr("host_down.action.retry" => "Try again");
         accessible-id: "host-down-try:" + root.panel.url;
         clicked => { HostDownBridge.try-again(root.panel.url); }
@@ -152,11 +176,13 @@ component Actions inherits HorizontalLayout {
         clicked => { HostDownBridge.act(root.panel.url, root.panel.action); }
     }
     if root.panel.switch: TextButton {
+        // i18n: Host-down panel, button (verb): open the list of saved Hosts to use another
         text: @tr("host_down.action.switch_host" => "Switch Host");
         accessible-id: "host-down-switch";
         clicked => { HostDownBridge.switch-host(); }
     }
     TextButton {
+        // i18n: Host-down panel, button (verb): copies a short private-data-free report to the clipboard
         text: @tr("host_down.copy_diagnostics" => "Copy diagnostics");
         accessible-id: "host-down-copy:" + root.panel.url;
         clicked => { HostDownBridge.copy-diagnostics(root.panel.url); }
@@ -169,11 +195,13 @@ component Details inherits VerticalLayout {
     property <bool> open;
     spacing: 2px;
     Text {
+        // i18n: Host-down panel, closed disclosure label (noun) that reveals how the last attempt ended
         text: (root.open ? "▾ " : "▸ ") + @tr("host_down.details" => "Details");
         color: Palette.faint;
         font-size: 11 * Look.unit;
         accessible-role: button;
         accessible-id: "host-down-details";
+        // i18n: Host-down panel, closed disclosure label (noun) that reveals how the last attempt ended
         accessible-label: @tr("host_down.details" => "Details");
         accessible-action-default => { root.open = !root.open; }
         TouchArea { mouse-cursor: pointer; clicked => { root.open = !root.open; } }
@@ -255,6 +283,7 @@ export component HostDownPage inherits Rectangle {
     if root.closable: TextButton {
         x: parent.width - self.width - 16px;
         y: 16px;
+        // i18n: Host-down full page, button (verb) at the top right: closes the page
         text: @tr("Close");
         clicked => { HostDownBridge.close(); }
     }
@@ -341,11 +370,13 @@ export component DeviceOfflineBanner inherits Rectangle {
     border-color: Palette.border;
     accessible-role: text;
     accessible-id: "device-offline";
+    // i18n: thin banner across the top of the window when this computer has no network (statement)
     accessible-label: @tr("host_down.banner" => "This device is offline");
     HorizontalLayout {
         alignment: center;
         spacing: 6px;
         VerticalLayout { alignment: center; DownIcon { kind: "cloud-off"; width: 14px; height: 14px; } }
+        // i18n: thin banner across the top of the window when this computer has no network (statement)
         Text { text: @tr("host_down.banner" => "This device is offline"); color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
 }
@@ -363,5 +394,6 @@ export component HostDownToast inherits Rectangle {
     accessible-role: text;
     accessible-id: "host-down-toast";
     accessible-label: toast-text.text;
+    // i18n: Host-down panel, toast after Copy diagnostics (past participle: the report was copied)
     toast-text := Text { text: @tr("host_down.copied" => "Diagnostics copied"); color: Palette.chrome-text; font-size: 12 * Look.unit; }
 }

@@ -6,7 +6,7 @@
 use std::cell::RefCell;
 use std::time::Duration;
 
-use clarp_core::host_down;
+use clarp_core::i18n::{self, format};
 use clarp_engine::Change;
 use clarp_engine::host_down::{HostDownStatus, HostDownView};
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -27,9 +27,30 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
-/// When it last answered, relative ("2 hours ago"); "" when never known.
+/// `{when}`: how long ago, through the locale formatter ("2 hours ago"),
+/// made each time the panel is drawn so a language change shows at once.
+fn ago(at_ms: i64) -> String {
+    let seconds = (now_ms() - at_ms) / 1000;
+    if seconds < 45 {
+        // i18n: Host-down panel and chat-list row, {when} in "Last answered {when}" / "{host} isn't answering · {when}" for under a minute ago (adverb phrase, lower case: it sits mid-sentence)
+        return clarp_core::tr!("host_down.when.now" => "just now");
+    }
+    format::relative(i18n::current(), -seconds)
+}
+
+/// `{in}` of "Trying again {in}": the next probe, at most a minute off.
+fn within(left: Duration) -> String {
+    let seconds = (left.as_secs() + u64::from(left.subsec_nanos() > 0)).max(1) as i64;
+    if seconds < 45 {
+        // i18n: Host-down panel, status line, {in} in "Trying again {in}": the next automatic try is {n} seconds away
+        return clarp_core::tr!("host_down.status.retry_in.seconds" => "in {n} second" | "in {n} seconds" % seconds);
+    }
+    format::relative(i18n::current(), seconds)
+}
+
+/// When it last answered, relative; "" when never known.
 fn last_seen(view: &HostDownView) -> String {
-    view.last_ok_ms.map(|at| host_down::ago(now_ms() - at)).unwrap_or_default()
+    view.last_ok_ms.map(ago).unwrap_or_default()
 }
 
 /// The panel's fields for the window: codes and times; the words are
@@ -37,7 +58,7 @@ fn last_seen(view: &HostDownView) -> String {
 pub fn panel(view: &HostDownView) -> HostDownPanel {
     let (status, retry_in) = match view.status {
         HostDownStatus::Reconnecting => ("reconnecting", String::new()),
-        HostDownStatus::RetryIn(left) => ("retry", host_down::within(left)),
+        HostDownStatus::RetryIn(left) => ("retry", within(left)),
         HostDownStatus::BackOnline => ("back", String::new()),
     };
     HostDownPanel {
@@ -87,7 +108,7 @@ pub fn apply(app: &App, window: &AppWindow, changes: &[Change]) {
         .map(|view| HostDownRow {
             url: view.url.clone().into(),
             host: view.label.clone().into(),
-            when: host_down::ago(now_ms() - view.last_ok_ms.unwrap_or(view.since_ms)).into(),
+            when: ago(view.last_ok_ms.unwrap_or(view.since_ms)).into(),
         })
         .collect();
     bridge.set_rows(ModelRc::new(VecModel::from(rows)));

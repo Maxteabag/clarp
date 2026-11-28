@@ -15,39 +15,15 @@ use sha2::{Digest, Sha256};
 // ---- words and times ------------------------------------------------------
 //
 // The panel's words are the apps' own (`host_down.*` keys in the shared
-// spec; on the desktop `@tr(...)` in host_down.slint). Here: the codes, and
-// the English diagnostics text, which stays English everywhere.
+// spec; on the desktop `@tr(...)` in host_down.slint, times through
+// `i18n::format`). Here: the codes, and the English diagnostics text, which
+// stays English everywhere and outside the catalog.
 
 /// How long `Back online` shows before the panel goes.
 pub const BACK_ONLINE_FOR: Duration = Duration::from_secs(2);
 
 /// A probe waits this long for the Host's answer.
 pub const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-
-/// "2 hours ago" for `{when}` (`host_down.last_seen`, `host_down.list_row`),
-/// and the one place the desktop words a relative time until its locale
-/// formatter lands (desktop-rs docs/i18n.md): clarp-i18n swaps this out.
-pub fn ago(elapsed_ms: i64) -> String {
-    let seconds = (elapsed_ms / 1000).max(0);
-    let unit = |n: i64, one: &str| if n == 1 { format!("1 {one} ago") } else { format!("{n} {one}s ago") };
-    match seconds {
-        0..45 => "just now".to_owned(),
-        45..3600 => unit((seconds / 60).max(1), "minute"),
-        3600..86_400 => unit(seconds / 3600, "hour"),
-        _ => unit(seconds / 86_400, "day"),
-    }
-}
-
-/// "in 30 seconds" for `{in}` (`host_down.status.retry_in`); see `ago`.
-pub fn within(left: Duration) -> String {
-    let seconds = (left.as_secs() + u64::from(left.subsec_nanos() > 0)).max(1);
-    if seconds < 60 {
-        if seconds == 1 { "in 1 second".to_owned() } else { format!("in {seconds} seconds") }
-    } else {
-        let minutes = seconds.div_ceil(60);
-        if minutes == 1 { "in 1 minute".to_owned() } else { format!("in {minutes} minutes") }
-    }
-}
 
 // ---- reasons ----------------------------------------------------------------
 
@@ -506,19 +482,6 @@ mod tests {
         }
         assert_eq!(Reason::ServerStopped.icon(), "plug");
         assert_eq!(Reason::HostAsleep.icon(), "moon");
-    }
-
-    #[test]
-    fn relative_times_read_naturally() {
-        assert_eq!(ago(10_000), "just now");
-        assert_eq!(ago(60_000), "1 minute ago");
-        assert_eq!(ago(25 * 60_000), "25 minutes ago");
-        assert_eq!(ago(2 * 3_600_000 + 5), "2 hours ago");
-        assert_eq!(ago(26 * 3_600_000), "1 day ago");
-        assert_eq!(within(Duration::from_millis(4200)), "in 5 seconds");
-        assert_eq!(within(Duration::from_secs(1)), "in 1 second");
-        assert_eq!(within(Duration::from_secs(60)), "in 1 minute");
-        assert_eq!(within(Duration::from_secs(90)), "in 2 minutes");
     }
 
     #[test]

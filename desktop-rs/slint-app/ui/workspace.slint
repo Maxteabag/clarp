@@ -959,6 +959,7 @@ export component Pane inherits Rectangle {
             stop-notice: root.pane.stop-notice;
             busy: root.pane.busy;
             can-send: root.pane.can-send;
+            // i18n: chat composer, note in place of sending while the chat's Host does not answer; {0} is the Host's name
             read-only-note: root.pane.read-only-host == "" ? "" : @tr("host_down.read_only" => "Showing saved messages. You can send again when {0} is back.", root.pane.read-only-host);
             transcribing: root.pane.transcribing;
             recording: root.pane.recording;
