@@ -610,6 +610,22 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
     error
 }
 
+/// The names of the placeholders of a sentence's key, in the order its catalog strings take
+/// them (`docs/turn-errors.md`, Catalog keys): what a push's `body_loc_args` are read from
+/// (`params`). `time` is `params.time_ms`, said by the app in its locale.
+pub fn placeholders(key: &str) -> &'static [&'static str] {
+    match key {
+        "error.usage_limit_until" => &["backend", "time"],
+        "error.account_plan" => &["backend", "model"],
+        "error.provider_down" => &["model"],
+        "error.folder_missing" => &["folder"],
+        "error.usage_limit" | "error.billing" | "error.auth" | "error.connection"
+        | "error.provider_busy" | "error.invalid_request" | "error.timeout"
+        | "error.runner_exit" | "error.session_locked" | "error.unknown" => &["backend"],
+        _ => &[],
+    }
+}
+
 /// Equal for the same failure: its code, its backend, and its words with every number taken
 /// out (a reset time, an index, a request id differ from one to the next).
 pub fn fingerprint(code: &str, backend: &str, detail: &str) -> String {
