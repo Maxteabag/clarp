@@ -1570,57 +1570,56 @@ async fn post_decision(
         .get(crate::turn_identity::HEADER)
         .map(|token| token.to_str().unwrap_or_default());
     let data = object(&body)?;
-    if principal == Principal::Tools
-        && let Some((id, action)) = rest.trim_matches('/').rsplit_once('/')
-    {
-        match action {
-            "resolve" if turn.is_none() => {
-                return Err(refused(
-                    StatusCode::FORBIDDEN,
-                    "verified turn identity required",
-                ));
-            }
-            "dismiss" => return Err(refused(StatusCode::FORBIDDEN, "owner dismissal required")),
-            "withdraw" => {
-                let member = crate::turn_identity::presented(&app, turn).await?;
-                let session = data.get("session").and_then(Value::as_str).map(str::trim);
-                if !member.is_some_and(|member| session == Some(member.record.session.as_str())) {
-                    return Err(refused(
-                        StatusCode::FORBIDDEN,
-                        "only the requesting agent may withdraw",
-                    ));
-                }
-            }
-            _ => {}
-        }
-        if let Some(member) = Fleet::holding(&app, id).asker(id) {
-            let reader = crate::bound_privacy::reader_of(&app, Some(&principal), &headers).await?;
-            if !crate::bound_privacy::may_read(&reader, &member.record) {
-                return Err(crate::bound_privacy::words_refused(&member.record.persona));
-            }
-        }
-    }
-    Ok(Json(decide(&app, &rest, turn, &data).await?))
+    Ok(Json(
+        decide(&app, &rest, turn, Some(&principal), &data).await?,
+    ))
 }
 
 /// Ends a request: the user answers or discards it, the agent takes it back. `rest` is what
 /// follows `/decisions/`: the request's id and `/resolve`, `/dismiss` or `/withdraw`.
 /// `turn`: the token the caller presents as an agent's turn (`X-Clarp-Turn`, or what the call
-/// of a tool carries), where it presents one. Answers the body of the answer.
+/// of a tool carries), where it presents one. The direct HTTP principal is absent when a
+/// Host tool calls this internally. Answers the body of the answer.
 pub(crate) async fn decide(
     app: &App,
     rest: &str,
     turn: Option<&str>,
+    principal: Option<&Principal>,
     data: &Map<String, Value>,
 ) -> Result<Value, ApiError> {
-    let rest = rest.trim_matches('/');
-    let found = ["resolve", "dismiss", "withdraw"]
-        .iter()
-        .find_map(|action| Some((rest.strip_suffix(&format!("/{action}"))?, *action)));
+    let found = rest
+        .trim_matches('/')
+        .rsplit_once('/')
+        .filter(|(_, action)| matches!(*action, "resolve" | "dismiss" | "withdraw"));
     let Some((decision_id, action)) = found else {
         return Err(ApiError::plain(StatusCode::NOT_FOUND, "not found"));
     };
     let decision_id = decision_id.trim_matches('/').to_string();
+    let tool_caller = if principal == Some(&Principal::Tools) {
+        if action == "dismiss" {
+            return Err(refused(StatusCode::FORBIDDEN, "owner dismissal required"));
+        }
+        let caller = crate::turn_identity::presented(app, turn)
+            .await?
+            .ok_or_else(|| {
+                let why = if action == "withdraw" {
+                    "only the requesting agent may withdraw"
+                } else {
+                    "verified turn identity required"
+                };
+                refused(StatusCode::FORBIDDEN, why)
+            })?;
+        let session = data.get("session").and_then(Value::as_str).map(str::trim);
+        if action == "withdraw" && session != Some(caller.record.session.as_str()) {
+            return Err(refused(
+                StatusCode::FORBIDDEN,
+                "only the requesting agent may withdraw",
+            ));
+        }
+        Some(caller)
+    } else {
+        None
+    };
     let mut want = match action {
         "resolve" => {
             let on_behalf = data
@@ -1660,7 +1659,10 @@ pub(crate) async fn decide(
             };
             // Whose turn asks, where one says it is a turn: a token that names nobody is
             // refused, and an agent never answers as the user.
-            let caller = crate::turn_identity::presented(app, turn).await?;
+            let caller = match &tool_caller {
+                Some(caller) => Some(Arc::clone(caller)),
+                None => crate::turn_identity::presented(app, turn).await?,
+            };
             if caller.is_some() && on_behalf_session.is_none() {
                 let why = "agent resolution requires on_behalf_session";
                 return Err(refused(StatusCode::FORBIDDEN, why));
@@ -1726,6 +1728,14 @@ pub(crate) async fn decide(
     let Some(member) = fleet.asker(&decision_id) else {
         return Err(refused(StatusCode::CONFLICT, "decision not found"));
     };
+    // Authorize the same holder and decision id that the actor will use. A second
+    // lookup could apply privacy to a different request or find no holder at all.
+    if let Some(caller) = &tool_caller {
+        let reader = crate::bound_privacy::Reader::agent(&caller.record);
+        if !crate::bound_privacy::may_read(&reader, &member.record) {
+            return Err(crate::bound_privacy::words_refused(&member.record.persona));
+        }
+    }
     // The message the answer becomes is spoken only where something on this Host could speak
     // the agent, as a send is (issue 802).
     if let Want::Resolve {
