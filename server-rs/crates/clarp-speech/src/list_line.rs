@@ -195,7 +195,7 @@ patterns! {
     EMPHASIS_STAR = r"\*(\S(?:[^*]*?\S)?)\*";
     EMPHASIS_UNDERSCORE = r"(^|[^\p{L}\p{N}_])_(\S(?:[^_]*?\S)?)_($|[^\p{L}\p{N}_])";
     HTML_TAG = r"(?i)</?(?:br|p|div|span|details|summary|b|i|em|strong|u|s|del|ins|mark|sub|sup|kbd|small|code|pre|a|img|hr|center|font|h[1-6]|ul|ol|li|table|thead|tbody|tr|td|th|blockquote)\b[^>]*/?>";
-    ESCAPED = r"\\([\\`*_{}\[\]()#+\-.!|~>])";
+    ESCAPED = r"\\([\\`*_{}\[\]()#+\-.!|~>])|[\x{E001}\x{E002}]";
     SPACES = r"\s+";
     SPACE_BEFORE_PUNCT = r"\s+([,.;:!?])";
 }
@@ -224,39 +224,59 @@ struct Held {
     code: usize,
 }
 
-/// Where an escaped mark stands while the marks around it are read: a character of the
-/// private use area of its own, so that no pattern takes it for a mark.
-const ESCAPE_BASE: u32 = 0xF000;
-
-/// Markdown's escapes, each as a character no pattern reads ([`ESCAPE_BASE`]).
-fn protect(text: &str) -> String {
-    ESCAPED
-        .replace_all(text, |caps: &Captures| {
-            let mark = caps[1].chars().next().unwrap_or(' ');
-            char::from_u32(ESCAPE_BASE + u32::from(mark)).map_or_else(String::new, String::from)
-        })
-        .into_owned()
-}
-
-/// The escaped marks, back as the marks they are.
-fn restore(text: &str) -> String {
-    text.chars()
-        .map(|c| {
-            let at = u32::from(c);
-            if (ESCAPE_BASE..ESCAPE_BASE + 0x80).contains(&at) {
-                char::from_u32(at - ESCAPE_BASE).unwrap_or(c)
-            } else {
-                c
-            }
-        })
-        .collect()
-}
-
-/// A text on one line, its runs of white space one space, its escaped marks as written.
+/// A text on one line, its runs of white space one space.
 fn one_line(text: &str) -> String {
-    let s = restore(text);
-    let s = SPACES.replace_all(s.trim(), " ");
+    let s = SPACES.replace_all(text.trim(), " ");
     SPACE_BEFORE_PUNCT.replace_all(&s, "$1").into_owned()
+}
+
+const SPAN_START: char = '\u{E001}';
+const SPAN_END: char = '\u{E002}';
+
+fn save_span(words: &str, out: &mut String, kept: &mut Vec<String>) {
+    out.push(SPAN_START);
+    out.push_str(&kept.len().to_string());
+    out.push(SPAN_END);
+    kept.push(words.to_owned());
+}
+
+/// Keep escaped punctuation and literal occurrences of the two markers outside the
+/// Markdown passes, just like inline code.
+fn protect_prose(text: &str, out: &mut String, kept: &mut Vec<String>) {
+    let mut at = 0;
+    for captures in ESCAPED.captures_iter(text) {
+        let Some(found) = captures.get(0) else {
+            continue;
+        };
+        out.push_str(&text[at..found.start()]);
+        let literal = captures.get(1).map_or(found.as_str(), |mark| mark.as_str());
+        save_span(literal, out, kept);
+        at = found.end();
+    }
+    out.push_str(&text[at..]);
+}
+
+/// Render a piece of the protected line. Captions and file names can contain the same
+/// literal spans as the surrounding words.
+fn shown_inline(text: &str, kept: &[String]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(open) = rest.find(SPAN_START) {
+        let after = &rest[open + SPAN_START.len_utf8()..];
+        let Some(close) = after.find(SPAN_END) else {
+            break;
+        };
+        let end = open + SPAN_START.len_utf8() + close + SPAN_END.len_utf8();
+        out.push_str(&rest[..open]);
+        let saved = after[..close]
+            .parse::<usize>()
+            .ok()
+            .and_then(|i| kept.get(i));
+        out.push_str(saved.map_or(&rest[open..end], String::as_str));
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    one_line(&out)
 }
 
 /// One line of prose, its marks taken out. Images and links to kept files are counted into
@@ -265,7 +285,7 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     // Inline code is words as written: no mark inside it is read, a backslash in it included.
     // It is taken out of the line as written, before any escape is read, and put back last.
     let mut kept: Vec<String> = Vec::new();
-    let mut s = protect(&take_inline_code(line, &mut kept));
+    let mut s = protect_inline(line, &mut kept);
     if REFERENCE.is_match(&s) || RULE.is_match(&s) || TABLE_DIVIDER.is_match(&s) {
         return String::new();
     }
@@ -296,7 +316,7 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     }
     s = IMAGE
         .replace_all(&s, |caps: &Captures| {
-            held.images.push(one_line(&caps[1]));
+            held.images.push(shown_inline(&caps[1], &kept));
             String::new()
         })
         .into_owned();
@@ -312,7 +332,7 @@ fn plain_line(line: &str, held: &mut Held) -> String {
                 } else {
                     text.clone()
                 };
-                linked_files.push(one_line(&named));
+                linked_files.push((text.clone(), named));
             }
             words += 1;
             text
@@ -328,41 +348,28 @@ fn plain_line(line: &str, held: &mut Held) -> String {
     // A line that is only links to kept files is those files.
     if !linked_files.is_empty() && words == linked_files.len() {
         let mut rest = s.clone();
-        for name in &linked_files {
-            rest = rest.replacen(name.as_str(), "", 1);
+        for (label, _) in &linked_files {
+            rest = rest.replacen(label.as_str(), "", 1);
         }
         if rest
             .chars()
             .all(|c| c.is_whitespace() || ",;·|-–—".contains(c))
         {
-            held.files.extend(linked_files);
+            held.files.extend(
+                linked_files
+                    .into_iter()
+                    .map(|(_, name)| shown_inline(&name, &kept)),
+            );
             return String::new();
         }
     }
-    // The inline code, back as it was written.
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s.as_str();
-    while let Some(open) = rest.find('\u{E001}') {
-        out.push_str(&rest[..open]);
-        let after = &rest[open + '\u{E001}'.len_utf8()..];
-        let Some(close) = after.find('\u{E002}') else {
-            rest = after;
-            break;
-        };
-        let index: usize = after[..close].parse().unwrap_or(usize::MAX);
-        out.push_str(kept.get(index).map_or("", String::as_str));
-        rest = &after[close + '\u{E002}'.len_utf8()..];
-    }
-    out.push_str(rest);
-    one_line(&out)
+    shown_inline(&s, &kept)
 }
 
-/// A line as written with each span of inline code (a run of backticks, the code, and a run of
-/// as many) taken out into `kept`, trimmed and as written, and a mark in its place that names it.
-/// A run with no run of as many after it is no code: its backticks stay as they are. A backtick
-/// after a backslash that is not itself escaped opens nothing: it stays, with its backslash, for
-/// the escapes to read.
-fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
+/// Protect literal code spans and the surrounding prose's escapes. A code span ends at a
+/// run of the opening width. An unmatched run stays literal, and an escaped backtick never
+/// opens a span.
+fn protect_inline(line: &str, kept: &mut Vec<String>) -> String {
     let run_at = |text: &str, at: usize| text[at..].bytes().take_while(|b| *b == b'`').count();
     let mut out = String::with_capacity(line.len());
     let mut at = 0;
@@ -374,7 +381,7 @@ fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
             .take_while(|b| *b == b'\\')
             .count();
         if slashes % 2 == 1 {
-            out.push_str(&line[at..=open]);
+            protect_prose(&line[at..=open], &mut out, kept);
             at = open + 1;
             continue;
         }
@@ -392,11 +399,10 @@ fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
             }
             look = start + run;
         }
-        out.push_str(&line[at..open]);
+        protect_prose(&line[at..open], &mut out, kept);
         match close {
             Some(close) if close > body => {
-                kept.push(line[body..close].trim().to_string());
-                out.push_str(&format!("\u{E001}{}\u{E002}", kept.len() - 1));
+                save_span(line[body..close].trim(), &mut out, kept);
                 at = close + width;
             }
             _ => {
@@ -405,7 +411,7 @@ fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
             }
         }
     }
-    out.push_str(&line[at..]);
+    protect_prose(&line[at..], &mut out, kept);
     out
 }
 
@@ -678,15 +684,10 @@ mod tests {
     #[test]
     fn every_pattern_compiles_and_inline_code_pairs_its_backticks() {
         assert_eq!(read("plain words").unwrap().english(), "plain words");
-        let mut kept = Vec::new();
-        let made = take_inline_code("a `x` b ``y ` z`` c ` d", &mut kept);
-        assert_eq!(kept, ["x", "y ` z"]);
-        assert_eq!(made, "a \u{E001}0\u{E002} b \u{E001}1\u{E002} c ` d");
-        // A backslash in code is code; an escaped backtick opens no code.
-        let mut kept = Vec::new();
-        let made = take_inline_code("x \\`y `a\\*b` \\\\`c`", &mut kept);
-        assert_eq!(kept, ["a\\*b", "c"]);
-        assert_eq!(made, "x \\`y \u{E001}0\u{E002} \\\\\u{E001}1\u{E002}");
+        assert_eq!(
+            read("a `x` b ``y ` z`` c ` d").unwrap().english(),
+            "a x b y ` z c ` d"
+        );
         assert_eq!(
             read("x \\`y `a\\*b` \\\\`c`").unwrap().english(),
             "x `y a\\*b \\c"

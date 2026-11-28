@@ -380,6 +380,42 @@
         "kind": "text",
         "text": "A `b c"
       }
+    },
+    {
+      "name": "an image caption keeps its literal inline code",
+      "text": "![Plot of `x\\*y`](clarp-media://asset/chart)",
+      "en": "Image: Plot of x\\*y",
+      "part": {
+        "kind": "image",
+        "caption": "Plot of x\\*y"
+      }
+    },
+    {
+      "name": "a file name rendered as inline code is still a file",
+      "text": "[`report.pdf`](clarp-media://asset/report)",
+      "en": "File: report.pdf",
+      "part": {
+        "kind": "file",
+        "name": "report.pdf"
+      }
+    },
+    {
+      "name": "an escaped sign in the name of a file stays literal",
+      "text": "[\\*report.pdf](clarp-media://asset/report)",
+      "en": "File: *report.pdf",
+      "part": {
+        "kind": "file",
+        "name": "*report.pdf"
+      }
+    },
+    {
+      "name": "literal private-use characters survive beside inline code",
+      "text": "A \ue0010\ue002, \uf02a and `one`.",
+      "en": "A \ue0010\ue002, \uf02a and one.",
+      "part": {
+        "kind": "text",
+        "text": "A \ue0010\ue002, \uf02a and one."
+      }
     }
   ]
 }
