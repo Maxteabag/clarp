@@ -118,6 +118,7 @@ fn prepare(
 /// `within` at most.
 pub async fn ask(
     routing_root: &Path,
+    shim: &Path,
     backend: &str,
     question: &Question,
     cwd: &Path,
@@ -138,7 +139,7 @@ pub async fn ask(
         None => None,
     };
     let _prompt_file = prepare(routing_root, backend, &mut launch, &question.prompt)?;
-    let printed = run(&launch, cwd, within, (backend, &question.prompt)).await;
+    let printed = run(shim, &launch, cwd, within, (backend, &question.prompt)).await;
     tool.answered(&routing_result(backend, within, printed)?)
         .map_err(Unanswered::NoAnswer)
 }
@@ -244,7 +245,7 @@ pub(crate) async fn read_on(
     let _login = crate::pool::Service::use_login(app, tool)
         .await
         .map_err(|_| Unanswered::NotStarted("The login lock is unavailable".into()))?;
-    read(tool, reading, within).await
+    read(&app.config.shim, tool, reading, within).await
 }
 
 /// Has a tool read something and answer in a shape it is given, for `within` at most:
@@ -253,6 +254,7 @@ pub(crate) async fn read_on(
 /// with where the tool has such a way ([`clarp_backend::Backend::reads`]); a tool that has
 /// none is asked as for any question, there, with the shape in words.
 pub async fn read(
+    shim: &Path,
     backend: &str,
     reading: &Reading,
     within: Duration,
@@ -301,7 +303,7 @@ pub async fn read(
             match given.try_for_each(|(name, holds)| std::fs::write(place.join(name), holds)) {
                 Ok(()) => {
                     let asked = (backend, prompt.as_str());
-                    run_with(&launch, &works_in, within, Some(&apart.keeps), asked).await
+                    run_with(shim, &launch, &works_in, within, Some(&apart.keeps), asked).await
                 }
                 Err(error) => Err(Unanswered::NotStarted(error.to_string())),
             }
@@ -317,6 +319,7 @@ pub async fn read(
                     at_home(&mut launch);
                     let _prompt_file = prepare(place, backend, &mut launch, &question.prompt)?;
                     run_with(
+                        shim,
                         &launch,
                         &works_in,
                         within,
@@ -337,16 +340,18 @@ pub async fn read(
 /// printed. `asked`: the tool's name and the question it was given, which a failure's words
 /// are held against.
 async fn run(
+    shim: &Path,
     launch: &Launch,
     cwd: &Path,
     within: Duration,
     asked: (&str, &str),
 ) -> Result<String, Unanswered> {
-    run_with(launch, cwd, within, None, asked).await
+    run_with(shim, launch, cwd, within, None, asked).await
 }
 
 /// The same; `keeps`: the only variables of the Host's environment the tool is left with.
 async fn run_with(
+    shim: &Path,
     launch: &Launch,
     cwd: &Path,
     within: Duration,
@@ -361,14 +366,19 @@ async fn run_with(
             cwd.display()
         )));
     }
+    // Keep a configured relative path relative to the Host, before setting
+    // the child's scratch directory. A bare executable name still uses PATH.
+    let shim_path =
+        (launch.program == "clarp-shim" && shim.is_relative() && shim.components().count() > 1)
+            .then(|| std::path::absolute(shim))
+            .transpose()
+            .map_err(|error| Unanswered::NotStarted(error.to_string()))?;
     let program = if launch.program == "clarp-shim" {
-        std::env::current_exe()
-            .map(|exe| exe.with_file_name("clarp-shim"))
-            .map_err(|error| Unanswered::NotStarted(error.to_string()))?
+        shim_path.as_deref().unwrap_or(shim)
     } else {
-        PathBuf::from(&launch.program)
+        Path::new(&launch.program)
     };
-    let mut command = crate::child::one_off(&program, keeps);
+    let mut command = crate::child::one_off(program, keeps);
     command
         .process_group(0)
         .args(&launch.args)
@@ -382,7 +392,7 @@ async fn run_with(
     }
     let mut child = command
         .spawn()
-        .map_err(|error| Unanswered::NotStarted(format!("{}: {error}", launch.program)))?;
+        .map_err(|error| Unanswered::NotStarted(format!("{}: {error}", program.display())))?;
     let _group = child
         .id()
         .map(|pid| ChildGroup(nix::unistd::Pid::from_raw(pid as i32)));
@@ -471,12 +481,28 @@ mod tests {
         let here = std::env::temp_dir();
         let short = Duration::from_millis(300);
         assert_eq!(
-            ask(&here, "abacus", &question, &here, short).await,
+            ask(
+                &here,
+                Path::new("clarp-shim"),
+                "abacus",
+                &question,
+                &here,
+                short
+            )
+            .await,
             Err(Unanswered::NoSuchTool("abacus".to_string()))
         );
         // The stand-in tool of the tests has turns and no single questions.
         assert_eq!(
-            ask(&here, "scripted", &question, &here, short).await,
+            ask(
+                &here,
+                Path::new("clarp-shim"),
+                "scripted",
+                &question,
+                &here,
+                short
+            )
+            .await,
             Err(Unanswered::NoSuchTool("scripted".to_string()))
         );
     }
@@ -496,15 +522,16 @@ mod tests {
     #[tokio::test]
     async fn a_tool_is_run_once_with_its_question_and_for_no_longer_than_it_is_given() {
         let here = std::env::temp_dir();
+        let shim = Path::new("clarp-shim");
         let long = Duration::from_secs(20);
         // It reads its question on standard input and is given what its launch names.
         let echo = shell("printf '%s: ' \"$ASKED_AS\"; cat", "Whom is this for?");
         assert_eq!(
-            run(&echo, &here, long, ("sh", "Whom is this for?")).await,
+            run(shim, &echo, &here, long, ("sh", "Whom is this for?")).await,
             Ok("a question: Whom is this for?".to_string())
         );
         // It runs where it is told to.
-        let place = run(&shell("pwd -P", ""), &here, long, ("sh", ""))
+        let place = run(shim, &shell("pwd -P", ""), &here, long, ("sh", ""))
             .await
             .unwrap();
         assert_eq!(
@@ -517,7 +544,8 @@ mod tests {
         let words = |asked: &'static str, line: &str| {
             let said = shell(line, asked);
             async move {
-                let Err(Unanswered::Failed(failed)) = run(&said, at, long, ("sh", asked)).await
+                let Err(Unanswered::Failed(failed)) =
+                    run(shim, &said, at, long, ("sh", asked)).await
                 else {
                     panic!("a tool that ended badly answered");
                 };
@@ -542,6 +570,7 @@ mod tests {
         // One that does not answer in its time is given up, at that time.
         let began = std::time::Instant::now();
         let slow = run(
+            shim,
             &shell("sleep 20", ""),
             &here,
             Duration::from_millis(300),
@@ -556,7 +585,8 @@ mod tests {
             program: "/nowhere/no-such-tool".to_string(),
             ..shell("", "")
         };
-        let Err(Unanswered::NotStarted(why)) = run(&missing, &here, long, ("sh", "")).await else {
+        let Err(Unanswered::NotStarted(why)) = run(shim, &missing, &here, long, ("sh", "")).await
+        else {
             panic!("a tool that is not there ran");
         };
         assert!(why.starts_with("/nowhere/no-such-tool: "), "{why}");

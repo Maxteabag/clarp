@@ -178,8 +178,13 @@ fn legacy_fleet(name: &str, archived: bool) -> (Place, Host, String) {
                 && current["busy"] == false
         });
     };
+    // The catalog sees another model during startup. The same-store
+    // retirement must still carry the exact selection to the ACP actor.
+    let partial_models = place.root.join("partial-models");
+    std::fs::write(&partial_models, "").unwrap();
     let host = open_antigravity(&place);
     migrated(&host);
+    std::fs::remove_file(&partial_models).unwrap();
     let after = row(&host);
     for key in [
         "agent_id",
