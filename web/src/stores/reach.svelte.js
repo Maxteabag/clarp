@@ -305,7 +305,8 @@ async function probeServing() {
     clearTimeout(timer);
     noteFail(PRIMARY, fetchFailure({
       timedOut, sameOrigin: true, ms: Date.now() - t0,
-      tailnetName: location.hostname.toLowerCase().endsWith('.ts.net'),
+      // Tailscale's https front answers 502 for a stopped Host; plain http to the name refuses.
+      tailnetName: location.protocol === 'https:' && location.hostname.toLowerCase().endsWith('.ts.net'),
     }));
     return;
   }

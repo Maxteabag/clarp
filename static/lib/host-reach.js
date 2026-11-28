@@ -224,7 +224,7 @@ export function schemeOf(url) {
  */
 export function fetchFailure({ timedOut = false, sameOrigin = false, ms = 0, tailnetName = false } = {}) {
   if (timedOut) return { kind: 'timeout', ms };
-  // Except a *.ts.net name: Tailscale's own front answers 502 when Clarp behind it is stopped,
+  // Except a *.ts.net name over https: Tailscale's own front answers 502 when Clarp behind it is stopped,
   // so a request to it that fails by itself means the name or its route is gone, which is
   // Tailscale not connected on this device.
   if (sameOrigin && tailnetName) return { kind: 'network', ms, tailnetName: true };
