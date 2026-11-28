@@ -368,7 +368,11 @@ fn take_inline_code(line: &str, kept: &mut Vec<String>) -> String {
     let mut at = 0;
     while let Some(found) = line[at..].find('`') {
         let open = at + found;
-        let slashes = line[at..open].bytes().rev().take_while(|b| *b == b'\\').count();
+        let slashes = line[at..open]
+            .bytes()
+            .rev()
+            .take_while(|b| *b == b'\\')
+            .count();
         if slashes % 2 == 1 {
             out.push_str(&line[at..=open]);
             at = open + 1;
@@ -683,7 +687,10 @@ mod tests {
         let made = take_inline_code("x \\`y `a\\*b` \\\\`c`", &mut kept);
         assert_eq!(kept, ["a\\*b", "c"]);
         assert_eq!(made, "x \\`y \u{E001}0\u{E002} \\\\\u{E001}1\u{E002}");
-        assert_eq!(read("x \\`y `a\\*b` \\\\`c`").unwrap().english(), "x `y a\\*b \\c");
+        assert_eq!(
+            read("x \\`y `a\\*b` \\\\`c`").unwrap().english(),
+            "x `y a\\*b \\c"
+        );
         assert_eq!(
             read("**bold** and __strong__ and `**kept**`")
                 .unwrap()
