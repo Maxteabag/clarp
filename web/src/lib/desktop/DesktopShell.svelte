@@ -6,6 +6,7 @@
   // size like any other pane. Everything about the rail's width lives here —
   // pixel bounds, the narrow-window rule, the user's collapse preference and
   // the saved width. Sidebar.svelte only renders.
+  import { t } from '../../stores/i18n.svelte.js';
   import { untrack } from 'svelte';
   import { PaneGroup, Pane, PaneResizer } from 'paneforge';
   import PaneNode from './PaneNode.svelte';
@@ -140,7 +141,7 @@
     >
       <Sidebar {collapsed} {forced} onToggle={toggle} {onOpenOverview} />
     </Pane>
-    <PaneResizer class="rail-resizer" disabled={forced} {onDraggingChange} aria-label="Resize sidebar" />
+    <PaneResizer class="rail-resizer" disabled={forced} {onDraggingChange} aria-label={t('panes.resize_sidebar')} />
     <Pane id="workspace" class="workspace" order={2} minSize={30}>
       <PaneNode node={panesState.tree.root} {onTapAgent} {onHoldAgent} />
     </Pane>

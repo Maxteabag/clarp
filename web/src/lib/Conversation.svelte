@@ -1,6 +1,7 @@
 <script>
   // The transcript pane: header, banner, turns. Identical on both platforms,
   // so it stays shared; the shells differ in what surrounds it, not in this.
+  import { t } from '../stores/i18n.svelte.js';
   import AgentBanner from './AgentBanner.svelte';
   import AgentIdentity from './AgentIdentity.svelte';
   import ChatChoicesMenu from './ChatChoicesMenu.svelte';
@@ -24,7 +25,7 @@
 </script>
 
 <section id={active ? 'history' : undefined} class="history" class:hidden={!active} class:host-silent={unheard(PRIMARY)}
-         aria-label="Conversation" aria-hidden={active ? undefined : 'true'}>
+         aria-label={t('conversation.label')} aria-hidden={active ? undefined : 'true'}>
   <header class="history-head">
     <AgentIdentity {session} onTap={onTapAgent} onHold={onHoldAgent} />
     {#if showConnDot}<ConnDot />{/if}
@@ -33,9 +34,8 @@
         id={active ? 'historyToolsToggle' : undefined}
         class="history-btn"
         class:active={toolActivityFor(session) === 'always'}
-        aria-label="Toggle tools"
-        title={toolActivityFor(session) === 'always' ? 'Every tool call in view (Tool activity in Chat settings or the chat\'s … menu)'
-          : 'Tool calls grouped (Tool activity in Chat settings or the chat\'s … menu)'}
+        aria-label={t('conversation.toggle_tools')}
+        title={t(toolActivityFor(session) === 'always' ? 'conversation.tools_all' : 'conversation.tools_grouped')}
         onclick={() => toggleToolsFor(session)}
       >⚙</button>
       {#if live.explanationSetting}
@@ -46,13 +46,13 @@
           class="history-btn"
           class:active={live.explanations.enabled}
           aria-pressed={live.explanations.enabled}
-          aria-label="Explain tool calls"
-          title={live.explanations.enabled ? 'Tool explanations on (Host setting)' : 'Tool explanations off: showing raw commands'}
+          aria-label={t('conversation.explain')}
+          title={t(live.explanations.enabled ? 'conversation.explain_on' : 'conversation.explain_off')}
           onclick={() => setExplanationsEnabled(!live.explanations.enabled)}
         >ⓘ</button>
       {/if}
       <ChatChoicesMenu {session} {active} />
-      <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label="Refresh"
+      <button id={active ? 'historyRefresh' : undefined} class="history-btn" aria-label={t('conversation.refresh')}
               onclick={() => reload(session)}>↻</button>
     </div>
   </header>

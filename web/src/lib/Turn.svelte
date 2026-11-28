@@ -1,4 +1,5 @@
 <script>
+  import { t } from '../stores/i18n.svelte.js';
   import { renderTool, renderTurnBodyCached } from './render.js';
   import LiveMessage from './live/LiveMessage.svelte';
   import { lazyHighlight } from './highlight.js';
@@ -63,10 +64,10 @@
   {#if turn.failed}
     <!-- The whole point of the delivery log: a message that did not arrive
          says so, instead of sitting here looking identical to one that did. -->
-    <span class="turn-delivery">Not delivered · ↑ to resend</span>
+    <span class="turn-delivery">{t('turn.not_delivered')}</span>
   {:else if turn.optimistic && turn.waiting}
     <!-- Accepted and waiting in the agent's queue: its row comes when its turn starts. -->
-    <span class="turn-delivery">Queued</span>
+    <span class="turn-delivery">{t('turn.queued')}</span>
   {/if}
 </div>
 {/if}

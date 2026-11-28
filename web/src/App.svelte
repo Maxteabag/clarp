@@ -1,4 +1,5 @@
 <script>
+  import { t } from './stores/i18n.svelte.js';
   import { untrack } from 'svelte';
   // Desktop and phone are separate shells rather than one tree full of
   // {#if isDesktop}. They differ in layout, in what the dock holds and in
@@ -255,14 +256,14 @@
   <!-- The server is reachable and refusing every request: the saved token is
        wrong. Waiting or reconnecting cannot fix that, only a fresh link can. -->
   <div class="reconnect auth-rejected" role="alert">
-    <span>Server rejected the saved token. Run <code>clarp-admin url</code> on the server and open the link it prints.</span>
+    <span>{@html t('app.token_rejected', { command: '<code>clarp-admin url</code>' })}</span>
   </div>
 {:else if app.showReconnect}
-  <button class="reconnect" aria-label="Reconnect" onclick={() => {
+  <button class="reconnect" aria-label={t('app.reconnect')} onclick={() => {
     app.showReconnect = false;
     scheduleReconnect();
   }}>
-    <span>Tap to reconnect</span>
+    <span>{t('app.tap_to_reconnect')}</span>
   </button>
 {/if}
 

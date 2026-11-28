@@ -1,4 +1,5 @@
 <script>
+  import { t } from '../../stores/i18n.svelte.js';
   import { untrack } from 'svelte';
   import { PaneGroup, Pane, PaneResizer } from 'paneforge';
   import PaneLeaf from './PaneLeaf.svelte';
@@ -50,7 +51,7 @@
     <Pane id="{node.id}-first" class="pane-split-child" order={1} defaultSize={initialFirst} minSize={15}>
       <PaneNode node={node.first} {onTapAgent} {onHoldAgent} />
     </Pane>
-    <PaneResizer class="split-resizer" ondblclick={() => equalizePaneSplits()} aria-label="Resize panes" />
+    <PaneResizer class="split-resizer" ondblclick={() => equalizePaneSplits()} aria-label={t('panes.resize')} />
     <Pane id="{node.id}-second" class="pane-split-child" order={2} defaultSize={100 - initialFirst} minSize={15}>
       <PaneNode node={node.second} {onTapAgent} {onHoldAgent} />
     </Pane>

@@ -3,6 +3,7 @@
   // matching could not, and which model does it.
   import { flash } from '../stores/app.svelte.js';
   import { t } from '../stores/i18n.svelte.js';
+  import { formatNumber } from './i18n/format.js';
 
   let { open = $bindable() } = $props();
 
@@ -95,7 +96,7 @@
         .map(row => ({
           text: row.utterance || '',
           reason: row.reason || '',
-          conf: Number(row.confidence || 0).toFixed(2),
+          conf: Number(row.confidence || 0),
         }));
     } catch (_) {
       last = { key: 'orchestrator.load_failed' };
@@ -180,7 +181,7 @@
           {#each ignored as row, i (i)}
             <div class="orchestrator-ignored-row">
               <div class="orchestrator-ignored-text">{row.text}</div>
-              <div class="orchestrator-ignored-meta">{row.reason || t('orchestrator.ignored_reason')} · {row.conf}</div>
+              <div class="orchestrator-ignored-meta">{row.reason || t('orchestrator.ignored_reason')} · {formatNumber(row.conf, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
             </div>
           {/each}
         {:else}

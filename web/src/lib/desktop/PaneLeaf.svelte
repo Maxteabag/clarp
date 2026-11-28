@@ -1,4 +1,5 @@
 <script>
+  import { t } from '../../stores/i18n.svelte.js';
   import Conversation from '../Conversation.svelte';
   import {
     panesState,
@@ -53,22 +54,22 @@
     </div>
 
     <div class="pane-controls">
-      <button class="pane-btn" title="Split Vertically (v)" onclick={(e) => { e.stopPropagation(); splitActivePane('vertical'); }}>
+      <button class="pane-btn" title={t('panes.split_vertical')} onclick={(e) => { e.stopPropagation(); splitActivePane('vertical'); }}>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
           <path d="M4 4h7v16H4V4zm9 0h7v16h-7V4z"/>
         </svg>
       </button>
-      <button class="pane-btn" title="Split Horizontally (s)" onclick={(e) => { e.stopPropagation(); splitActivePane('horizontal'); }}>
+      <button class="pane-btn" title={t('panes.split_horizontal')} onclick={(e) => { e.stopPropagation(); splitActivePane('horizontal'); }}>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
           <path d="M4 4h16v7H4V4zm0 9h16v7H4v-7z"/>
         </svg>
       </button>
-      <button class="pane-btn" title="Zoom / Maximize (z)" onclick={(e) => { e.stopPropagation(); toggleZoomActive(); }}>
+      <button class="pane-btn" title={t('panes.zoom')} onclick={(e) => { e.stopPropagation(); toggleZoomActive(); }}>
         <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor">
           <path d="M4 4h6v2H6v4H4V4zm16 0v6h-2V6h-4V4h6zm0 16h-6v-2h4v-4h2v6zm-16 0v-6h2v4h4v2H4z"/>
         </svg>
       </button>
-      <button class="pane-btn close" title="Close Pane (x)" onclick={(e) => { e.stopPropagation(); closeActivePane(pane.id); }}>
+      <button class="pane-btn close" title={t('panes.close')} onclick={(e) => { e.stopPropagation(); closeActivePane(pane.id); }}>
         ✕
       </button>
     </div>
