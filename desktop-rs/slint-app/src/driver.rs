@@ -1960,20 +1960,21 @@ fn desktop_check(out: String) {
                 return false;
             }
             let item = serde_json::json!({"id": "d1", "decision_id": "d1", "artifact_id": "q-d1", "revision": 3, "session": "rachel",
-                                          "agent_name": "Rachel", "title": "Ship it?", "response_type": "approval"});
+                                          "agent_name": "Rachel", "title": "Ship it?", "response_type": "single_choice"});
             if !app.engine.borrow().attention_items().iter().any(|i| i["decision_id"] == "d1") {
                 check(control("/__control/attention", &serde_json::json!({"items": [item]})).is_ok(), "the question is in Updates");
                 return false;
             }
-            // The question popped up as an approval: Yes from its popup.
-            crate::platform::desktop::act_on("rachel", "", "d1", "approval", "choice:yes");
+            // Now, the question's first answer, from its popup.
+            crate::platform::desktop::act_on("rachel", "", "d1", "single_choice", "choice:a");
             true
         })),
         ("answered", Box::new(|_, _window, _| {
             let resolved = posts("/decisions/d1/resolve");
             let Some(answered) = popups().into_iter().find(|n| n["body"].as_str().is_some_and(|b| b.starts_with("You answered"))) else { return false };
-            check(resolved.first().is_some_and(|r| r["body"]["undo_ms"] == 8000 && r["body"]["choice"] == "accepted"), &format!("an answer from a popup is held for Undo: {resolved:?}"));
-            check(answered["actions"][1] == "choice:undo" && answered["replaces"] == true, &format!("the chat's popup says what was answered and offers Undo: {answered}"));
+            check(resolved.first().is_some_and(|r| r["body"]["undo_ms"] == 8000 && r["body"]["answer"]["option_id"] == "a"), &format!("an answer from a popup is held for Undo: {resolved:?}"));
+            // The pressed popup closed; the next says what was answered.
+            check(answered["body"] == "You answered Now" && answered["actions"][1] == "choice:undo", &format!("the chat's popup says what was answered and offers Undo: {answered}"));
             crate::platform::desktop::act_on("rachel", "", "d1", "answered", "choice:undo");
             true
         })),
