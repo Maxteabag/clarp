@@ -3226,7 +3226,7 @@ mod tests {
         assert_eq!(
             row.as_object().unwrap().len(),
             // The Python Host's 55, plus Rust's `transit`, `archived_by` and
-            // `last_message_preview` (contract 217, chat_preview_parts).
+            // `last_message_preview` (contract 218, chat_preview_parts).
             58,
             "the fields of the snapshot row"
         );
