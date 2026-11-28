@@ -189,13 +189,13 @@
   {#if phase === 'loading'}
     <div class="rs-notice">Loading…</div>
   {:else if phase === 'newer'}
-    <div class="rs-notice">This form needs a newer version of this app.</div>
+    <div class="rs-notice">Update Clarp to view this form.</div>
   {:else if phase === 'unreadable'}
-    <div class="rs-notice">This form can't be shown. Ask the agent to publish it again.</div>
+    <div class="rs-notice">Form unavailable.</div>
   {:else if phase === 'failed'}
     <div class="rs-notice">
-      The form could not be loaded.
-      <button type="button" class="rs-retry start-btn" onclick={() => load()}>Try again</button>
+      Couldn't load form.
+      <button type="button" class="rs-retry start-btn" onclick={() => load()}>Retry</button>
     </div>
   {/if}
   <div class="rs-form" bind:this={host} hidden={phase !== 'form'}></div>

@@ -543,12 +543,11 @@ impl Conversation {
         self.remove_where(|m| m.activity);
     }
 
-    pub fn show_transient_thinking(&mut self, persona: &str) {
-        let persona = if persona.is_empty() { "Agent" } else { persona };
+    pub fn show_transient_thinking(&mut self, _persona: &str) {
         let event = json!({
             "activity_status": "running",
             "activity_action": "thinking",
-            "activity_summary": format!("{persona} is working"),
+            "activity_summary": "Working",
         });
         self.apply_activity_event(event.as_object().expect("literal object"));
     }

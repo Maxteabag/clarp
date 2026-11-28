@@ -28,11 +28,11 @@ pub const TIMEOUT_MS: u64 = 65_000;
 
 pub const DETAIL_LEVELS: [&str; 5] = ["Developer", "Technical", "Balanced", "Plain English", "Grandma"];
 const LEVEL_DESCRIPTIONS: [&str; 5] = [
-    "Original tool calls. No translation requests or model usage.",
-    "Explain the effect while retaining commands, paths, and precise technical terms.",
-    "Explain the action and useful context, with only essential technical details.",
-    "Everyday language about the task. Omit code, paths, and implementation jargon.",
-    "Short, concrete explanations for someone with no technical background.",
+    "Original tool calls.",
+    "Actions with commands and paths.",
+    "Actions with key technical details.",
+    "Everyday language, no code or paths.",
+    "Simple explanations, no technical terms.",
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -195,16 +195,16 @@ impl Narrator {
 
     pub fn status(&self) -> String {
         if !self.enabled {
-            return "Off — no background requests".into();
+            return "Off".into();
         }
         if !self.error.is_empty() {
             return self.error.clone();
         }
         if !self.remote_items.is_empty() {
-            return format!("Host translating · {} activities", self.remote_items.len());
+            return format!("Translating · {}", self.remote_items.len());
         }
         if !self.queue.is_empty() {
-            return format!("Translating activity · {} queued", self.queue.len());
+            return format!("Translating · {} queued", self.queue.len());
         }
         "Shared Host · Codex Spark · low".into()
     }

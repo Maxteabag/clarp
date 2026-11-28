@@ -530,12 +530,12 @@ fn show(app: &App, window: &AppWindow) {
         let models = choices(&engine.models_for_backend(&s.backend));
         let efforts = choices(&engine.efforts_for_model(&s.backend, &s.model));
         let label = |list: &[(String, String)], id: &str| list.iter().find(|(i, _)| i == id).map(|(_, l)| l.clone()).unwrap_or_else(|| id.to_owned());
-        let model_label = if s.model.is_empty() { "Server default".to_owned() } else { label(&models, &s.model) };
+        let model_label = if s.model.is_empty() { "Default".to_owned() } else { label(&models, &s.model) };
         let summary = if s.effort.is_empty() { model_label } else { format!("{model_label} · {}", label(&efforts, &s.effort)) };
         globals.set_model_summary(summary.into());
         globals.set_editing_model(s.editing_model);
         let with_default =
-            |list: &[(String, String)]| -> Vec<String> { std::iter::once("Server default".to_owned()).chain(list.iter().map(|(_, l)| l.clone())).collect() };
+            |list: &[(String, String)]| -> Vec<String> { std::iter::once("Default".to_owned()).chain(list.iter().map(|(_, l)| l.clone())).collect() };
         globals.set_model_labels(strings(with_default(&models)));
         globals.set_model_index(models.iter().position(|(id, _)| *id == s.model).map_or(0, |i| i as i32 + 1));
         globals.set_effort_labels(strings(with_default(&efforts)));

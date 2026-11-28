@@ -112,7 +112,7 @@ export component ActivitySweep inherits Rectangle {
 export component StatusPill inherits HorizontalLayout {
     in property <string> status;
     property <string> label: root.status != "" ? root.status : "offline";
-    property <bool> quiet: root.status == "live" || root.status == "done" || root.status == "idle";
+    property <bool> quiet: root.status == "live" || root.status == "done" || root.status == "idle" || root.status == "spawned";
     property <color> tone: root.status == "thinking" || root.status == "tool" || root.status == "compacting" ? Palette.success
         : root.status == "waiting" || root.status == "interrupted" ? Palette.danger
         : Palette.faint;

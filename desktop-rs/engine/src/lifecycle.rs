@@ -195,7 +195,7 @@ impl Engine {
         use clarp_core::catalog::{ANTIGRAVITY_ACP, LEGACY_ANTIGRAVITY};
 
         if backend == LEGACY_ANTIGRAVITY {
-            self.set_error("In New Session, choose which tool the new agent should use");
+            self.set_error("Choose a backend in New Session");
             return false;
         }
         if backend == ANTIGRAVITY_ACP && !self.backend_options().iter().any(|choice| choice["id"] == backend) {
@@ -742,7 +742,7 @@ impl Engine {
             .local_agent_directory(session)
             .or_else(clarp_core::dirs::home)
             .map_or_else(|| "/".to_owned(), |path| path.to_string_lossy().into_owned());
-        let title = format!("{} — {}", display_name(&agent), agent.backend);
+        let title = format!("{} · {}", display_name(&agent), agent.backend);
         let command = clarp_core::links::agent_terminal_command(&bridge, session, &self.base_url);
         let xdg = clarp_core::links::find_executable("xdg-terminal-exec").is_some();
         let (launcher, launch_arguments) = clarp_core::links::terminal_command(xdg, &title, &directory, &command);

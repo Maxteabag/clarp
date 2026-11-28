@@ -576,7 +576,7 @@ export component Sidebar inherits Rectangle {
           if !root.showing-pairs && !root.showing-archive && root.rows.length == 0 && (root.scope == "working" || root.scope == "needs-you" || root.scope == "done" || root.scope == "snoozed"): Text {
               y: 8px;
               width: parent.width;
-              text: root.scope == "needs-you" ? "Nothing needs you." : root.scope == "working" ? "No agent is working." : root.scope == "snoozed" ? "No snoozed chats." : "No finished chats.";
+              text: root.scope == "needs-you" ? "Nothing pending" : root.scope == "working" ? "None working" : root.scope == "snoozed" ? "None snoozed" : "None done";
               color: Palette.muted;
               font-size: 12 * Look.unit;
               horizontal-alignment: center;
@@ -585,7 +585,7 @@ export component Sidebar inherits Rectangle {
           if root.showing-pairs && root.rooms.length == 0: Text {
               y: 0;
               width: parent.width;
-              text: "No agent-to-agent conversations yet.";
+              text: "No agent conversations";
               color: Palette.muted;
               font-size: 12 * Look.unit;
               horizontal-alignment: center;

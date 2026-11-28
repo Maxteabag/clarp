@@ -32,7 +32,7 @@ pub const FALLBACK_FIELD: &str = "fallback";
 /// The setting's title (Settings › Chats).
 pub const TITLE: &str = "Send while working";
 /// Under its choices.
-pub const FOOTER: &str = "If an agent can't take a message mid-turn, Steer now stops and sends instead.";
+pub const FOOTER: &str = "Stops and sends if steering is unavailable.";
 /// The waiting line's dim words before Stop and send when the Host gives no
 /// reason of its own.
 pub const CANT_STEER: &str = "Can't steer this turn";
@@ -75,9 +75,9 @@ impl Mode {
     /// One line about the choice.
     pub fn about(self) -> &'static str {
         match self {
-            Mode::Steer => "Your message goes into the reply the agent is writing.",
-            Mode::AfterTurn => "Your message waits until the agent is done.",
-            Mode::StopAndSend => "The agent stops and answers your message.",
+            Mode::Steer => "Joins current turn.",
+            Mode::AfterTurn => "Waits for current turn.",
+            Mode::StopAndSend => "Stops turn and sends.",
         }
     }
 

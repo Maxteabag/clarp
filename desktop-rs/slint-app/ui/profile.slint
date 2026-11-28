@@ -510,7 +510,7 @@ export component AgentProfile inherits Modal {
                         HorizontalLayout {
                             spacing: 8px;
                             if ProfileBridge.prompts.length == 0 && !root.info.prompts-loading: Text {
-                                text: "No authenticated prompts recorded yet";
+                                text: "No prompts yet";
                                 color: Palette.muted;
                                 font-size: 11 * Look.unit;
                                 vertical-alignment: center;
@@ -625,12 +625,6 @@ export component AgentProfile inherits Modal {
                 artifacts-card := Card {
                     title: "PUBLICATIONS";
                     icon: @image-url("icons/artifacts.svg");
-                    Text {
-                        text: "Everything this agent published: reports, files, images, recordings and decisions, older ones too.";
-                        color: Palette.muted;
-                        font-size: 11 * Look.unit;
-                        wrap: word-wrap;
-                    }
                     HorizontalLayout {
                         alignment: start;
                         spacing: 6px;
@@ -775,16 +769,16 @@ export component ProfileLayers inherits Rectangle {
     if ProfileBridge.confirm == "compact": Confirm {
         width: root.width;
         height: root.height;
-        title: "Compact this conversation?";
-        message: "Older context is summarized while the session stays open.";
+        title: "Compact context?";
+        message: "Summarizes older messages.";
         yes-tip: "Compact";
         accepted => { ProfileBridge.compact(); }
     }
     if ProfileBridge.confirm == "release": Confirm {
         width: root.width;
         height: root.height;
-        title: "Release this chat?";
-        message: "The contact, history, files, and artifacts remain.";
+        title: "Release chat?";
+        message: "History and files are kept.";
         yes-tip: "Release";
         accepted => { ProfileBridge.release(); }
     }

@@ -12,15 +12,14 @@ use crate::json::{self, Object};
 
 pub const FEATURE: &str = "agent_backend_transit";
 pub const ROW_TITLE: &str = "Backend";
-pub const TURN_BLOCKED: &str = "Finish or stop the current turn first";
+pub const TURN_BLOCKED: &str = "Stop the current turn first";
 pub const DEFAULT_MARK: &str = "Default";
-pub const CONFIRM_BODY: &str =
-    "It keeps its persona and goals and takes the conversation's messages along (not tool output, thinking or attachments). This takes about a minute.";
-pub const SWITCH_BODY: &str = "Its conversation stays as it is.";
+pub const CONFIRM_BODY: &str = "Keeps persona, goals and messages. Takes about a minute.";
+pub const SWITCH_BODY: &str = "Keeps conversation.";
 /// A Host that carries the tools too (feature `agent_backend_transit_tools`,
 /// contract 161) says so in the move's confirmation.
 pub const TOOLS_FEATURE: &str = "agent_backend_transit_tools";
-pub const CONFIRM_BODY_TOOLS: &str = "The conversation comes along: what you and the agent said, the tools it used and what they returned (long results shortened), and attached files as paths to the files. A very long conversation keeps its newest part and a summary of the rest. Thinking is not carried.";
+pub const CONFIRM_BODY_TOOLS: &str = "Carries messages, tool results and attachments.";
 
 /// What a move's confirmation says comes along, by what the Host carries.
 pub fn confirm_body(carries_tools: bool) -> &'static str {
@@ -564,7 +563,7 @@ mod tools_tests {
         assert!(tools_offered_by(both.as_object().unwrap()));
         assert!(!tools_offered_by(older.as_object().unwrap()));
         assert!(offered_by(older.as_object().unwrap()));
-        assert!(confirm_body(true).starts_with("The conversation comes along: what you and the agent said, the tools it used"));
+        assert!(confirm_body(true).contains("tool results"));
         assert_eq!(confirm_body(false), CONFIRM_BODY);
     }
 }
