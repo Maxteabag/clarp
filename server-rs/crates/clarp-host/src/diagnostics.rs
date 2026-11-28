@@ -287,6 +287,34 @@ pub async fn update(State(app): State<App>, body: Bytes) -> Result<Json<Value>, 
     });
     Ok(Json(json!({"ok":true,"settings":s.public()})))
 }
+fn storage_health(path: &Path) -> Value {
+    let mut value = json!({});
+    if let Ok(stat) = nix::sys::statvfs::statvfs(path) {
+        let size = stat.fragment_size();
+        if let (Some(available), Some(total)) = (
+            stat.blocks_available().checked_mul(size),
+            stat.blocks().checked_mul(size),
+        ) {
+            value["data_filesystem"] = json!({"available_bytes":available, "total_bytes":total});
+        }
+    }
+    if let Ok(text) = std::fs::read_to_string("/proc/pressure/io") {
+        for line in text.lines() {
+            let mut fields = line.split_ascii_whitespace();
+            let Some(kind @ ("some" | "full")) = fields.next() else {
+                continue;
+            };
+            let avg = fields
+                .find_map(|word| word.strip_prefix("avg10="))
+                .and_then(|word| word.parse::<f64>().ok());
+            if let Some(avg) = avg.filter(|avg| (0.0..=100.0).contains(avg)) {
+                value["io_pressure"][format!("{kind}_avg10_pct")] = json!(avg);
+            }
+        }
+    }
+    value
+}
+
 pub async fn health(State(app): State<App>) -> Json<Value> {
     let subsystems = app.capture.subsystems();
     let (pending, active) = app.mouth.queue_counts();
@@ -302,6 +330,18 @@ pub async fn health(State(app): State<App>) -> Json<Value> {
     if dropped > 0 {
         reply["diagnostic_events_dropped"] = json!(dropped);
     }
+    let path = app.config.data_dir.clone();
+    let mut host = tokio::task::spawn_blocking(move || storage_health(&path))
+        .await
+        .unwrap_or_else(|_| json!({}));
+    host["instance_id"] = json!(app.hub.epoch());
+    host["observed_at_ms"] = json!(app.clock.now_ms());
+    if app.config.engine == "sqlite" {
+        let recent = clarp_store_sqlite::commit_health::recent();
+        host["slow_sqlite_commits"] = json!({"window_ms":recent.window_ms, "covered_ms":recent.covered_ms,
+            "threshold_ms":recent.threshold_ms, "count":recent.count, "max_ms":recent.max_ms});
+    }
+    reply["host_health"] = host;
     Json(reply)
 }
 pub type RequestCapture = (Arc<Capture>, Arc<dyn Clock + Send + Sync>);
