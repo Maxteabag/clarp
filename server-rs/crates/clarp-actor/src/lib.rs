@@ -2125,6 +2125,8 @@ impl Actor {
                             .map_or("", |(_, name)| name.as_str()),
                         resets_at_ms: None,
                         at_ms: settled.ended_at_ms,
+                        // The tool's own words, not a row that tells them.
+                        row: false,
                     },
                 );
                 ("failed", Some(error))
