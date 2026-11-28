@@ -1,0 +1,421 @@
+{
+  "about": "The chat list's line of a message. The Host sends it as `last_message_preview` (an agent row, a chat preview event, a /log answer) and `preview_parts` (a user-notification): a kind and its values, which each app words in the user's language. `en` is the English line the Host also sends as `last_message` / `preview` for apps that do not know a kind (before \"You: \" for the user's own message, `own: true`). `max`, where given, is the cut of the words. Held by server-rs/crates/clarp-speech/src/list_line.rs.",
+  "kinds": {
+    "text": [
+      "text"
+    ],
+    "image": [
+      "caption (\"\" when none)"
+    ],
+    "images": [
+      "count"
+    ],
+    "file": [
+      "name"
+    ],
+    "files": [
+      "count"
+    ],
+    "attachments": [
+      "count"
+    ],
+    "code": [],
+    "decision": [
+      "question",
+      "outcome: approved|declined|answered|discarded|expired|resolved",
+      "answer (for answered)"
+    ],
+    "tool": [
+      "category: exec|read|list|search|edit|write|fetch|mcp|agent|todo|other",
+      "name",
+      "label"
+    ]
+  },
+  "cases": [
+    {
+      "name": "plain words stay",
+      "text": "Done. The build is green.",
+      "en": "Done. The build is green.",
+      "part": {
+        "kind": "text",
+        "text": "Done. The build is green."
+      }
+    },
+    {
+      "name": "an image with a caption",
+      "text": "![Synthetic picker fixture](clarp-media://asset/asset_AbC_123)",
+      "en": "Image: Synthetic picker fixture",
+      "part": {
+        "kind": "image",
+        "caption": "Synthetic picker fixture"
+      }
+    },
+    {
+      "name": "an image without a caption",
+      "text": "![](clarp-media://asset/asset_AbC_123)",
+      "en": "Image",
+      "part": {
+        "kind": "image",
+        "caption": ""
+      }
+    },
+    {
+      "name": "an image captioned only 'image'",
+      "text": "![image](clarp-media://asset/asset_AbC_123)",
+      "en": "Image",
+      "part": {
+        "kind": "image",
+        "caption": ""
+      }
+    },
+    {
+      "name": "several images",
+      "text": "![one](clarp-media://asset/a1)\n![two](clarp-media://asset/a2)\n![three](clarp-media://asset/a3)",
+      "en": "3 images",
+      "part": {
+        "kind": "images",
+        "count": 3
+      }
+    },
+    {
+      "name": "a gallery block",
+      "text": "```clarp-gallery\n![front](clarp-media://asset/a1)\n![back](clarp-media://asset/a2)\n```",
+      "en": "2 images",
+      "part": {
+        "kind": "images",
+        "count": 2
+      }
+    },
+    {
+      "name": "words win over an image",
+      "text": "Here is the chart:\n\n![Weekly sales](clarp-media://asset/a1)",
+      "en": "Here is the chart:",
+      "part": {
+        "kind": "text",
+        "text": "Here is the chart:"
+      }
+    },
+    {
+      "name": "an image inside a sentence goes",
+      "text": "Look ![x](clarp-media://asset/a1) at this.",
+      "en": "Look at this.",
+      "part": {
+        "kind": "text",
+        "text": "Look at this."
+      }
+    },
+    {
+      "name": "a file",
+      "text": "[report.pdf](clarp-media://asset/asset_9)",
+      "en": "File: report.pdf",
+      "part": {
+        "kind": "file",
+        "name": "report.pdf"
+      }
+    },
+    {
+      "name": "a file by its /media address",
+      "text": "[budget.xlsx](/media/asset_7)",
+      "en": "File: budget.xlsx",
+      "part": {
+        "kind": "file",
+        "name": "budget.xlsx"
+      }
+    },
+    {
+      "name": "two files",
+      "text": "- [a.pdf](clarp-media://asset/a1)\n- [b.pdf](clarp-media://asset/a2)",
+      "en": "2 files",
+      "part": {
+        "kind": "files",
+        "count": 2
+      }
+    },
+    {
+      "name": "an image and a file",
+      "text": "![chart](clarp-media://asset/a1)\n[data.csv](clarp-media://asset/a2)",
+      "en": "2 attachments",
+      "part": {
+        "kind": "attachments",
+        "count": 2
+      }
+    },
+    {
+      "name": "a file inside a sentence is its name",
+      "text": "See [report.pdf](clarp-media://asset/a1) for details.",
+      "en": "See report.pdf for details.",
+      "part": {
+        "kind": "text",
+        "text": "See report.pdf for details."
+      }
+    },
+    {
+      "name": "only a code block",
+      "text": "```python\nprint('hi')\n```",
+      "en": "Code",
+      "part": {
+        "kind": "code"
+      }
+    },
+    {
+      "name": "a tilde code block",
+      "text": "~~~\nls -la\n~~~",
+      "en": "Code",
+      "part": {
+        "kind": "code"
+      }
+    },
+    {
+      "name": "words win over a code block",
+      "text": "Run this:\n```sh\ncargo build\n```",
+      "en": "Run this:",
+      "part": {
+        "kind": "text",
+        "text": "Run this:"
+      }
+    },
+    {
+      "name": "a link is its text",
+      "text": "Read [the guide](https://example.com/guide) first.",
+      "en": "Read the guide first.",
+      "part": {
+        "kind": "text",
+        "text": "Read the guide first."
+      }
+    },
+    {
+      "name": "an autolink is its address",
+      "text": "Open <https://example.com/a_b>",
+      "en": "Open https://example.com/a_b",
+      "part": {
+        "kind": "text",
+        "text": "Open https://example.com/a_b"
+      }
+    },
+    {
+      "name": "a bare address stays",
+      "text": "See https://example.com/a_b_c now",
+      "en": "See https://example.com/a_b_c now",
+      "part": {
+        "kind": "text",
+        "text": "See https://example.com/a_b_c now"
+      }
+    },
+    {
+      "name": "emphasis goes",
+      "text": "This is **bold**, *italic*, __strong__, _soft_ and ~~gone~~.",
+      "en": "This is bold, italic, strong, soft and gone.",
+      "part": {
+        "kind": "text",
+        "text": "This is bold, italic, strong, soft and gone."
+      }
+    },
+    {
+      "name": "snake_case stays",
+      "text": "Rename my_var_name to x",
+      "en": "Rename my_var_name to x",
+      "part": {
+        "kind": "text",
+        "text": "Rename my_var_name to x"
+      }
+    },
+    {
+      "name": "inline code is its words",
+      "text": "Call `fn **main**()` now",
+      "en": "Call fn **main**() now",
+      "part": {
+        "kind": "text",
+        "text": "Call fn **main**() now"
+      }
+    },
+    {
+      "name": "a heading",
+      "text": "## Summary\nAll green.",
+      "en": "Summary All green.",
+      "part": {
+        "kind": "text",
+        "text": "Summary All green."
+      }
+    },
+    {
+      "name": "a quote",
+      "text": "> quoted words\nreply",
+      "en": "quoted words reply",
+      "part": {
+        "kind": "text",
+        "text": "quoted words reply"
+      }
+    },
+    {
+      "name": "list marks",
+      "text": "- one\n- two\n1. three\n* [x] four",
+      "en": "one two three four",
+      "part": {
+        "kind": "text",
+        "text": "one two three four"
+      }
+    },
+    {
+      "name": "a table",
+      "text": "| Name | Score |\n|---|---:|\n| Ada | 3 |",
+      "en": "Name · Score Ada · 3",
+      "part": {
+        "kind": "text",
+        "text": "Name · Score Ada · 3"
+      }
+    },
+    {
+      "name": "a rule goes",
+      "text": "Above\n\n---\n\nBelow",
+      "en": "Above Below",
+      "part": {
+        "kind": "text",
+        "text": "Above Below"
+      }
+    },
+    {
+      "name": "html tags go",
+      "text": "Line<br>next <details><summary>More</summary>hidden</details>",
+      "en": "Line next More hidden",
+      "part": {
+        "kind": "text",
+        "text": "Line next More hidden"
+      }
+    },
+    {
+      "name": "escapes are undone",
+      "text": "2 \\* 3 is \\_six\\_",
+      "en": "2 * 3 is _six_",
+      "part": {
+        "kind": "text",
+        "text": "2 * 3 is _six_"
+      }
+    },
+    {
+      "name": "a reference definition goes",
+      "text": "See [docs][1].\n\n[1]: https://example.com",
+      "en": "See docs.",
+      "part": {
+        "kind": "text",
+        "text": "See docs."
+      }
+    },
+    {
+      "name": "arithmetic stars stay",
+      "text": "2 * 3 * 4 = 24",
+      "en": "2 * 3 * 4 = 24",
+      "part": {
+        "kind": "text",
+        "text": "2 * 3 * 4 = 24"
+      }
+    },
+    {
+      "name": "nothing for the user",
+      "text": "",
+      "en": "",
+      "part": null
+    },
+    {
+      "name": "a long line is cut at a word",
+      "text": "The quick brown fox jumps over the lazy dog and keeps running far beyond the visible edge of the list",
+      "en": "The quick brown fox jumps over the lazy dog and keeps running far beyond the…",
+      "part": {
+        "kind": "text",
+        "text": "The quick brown fox jumps over the lazy dog and keeps running far beyond the…"
+      },
+      "max": 80
+    },
+    {
+      "name": "a short line is not cut",
+      "text": "Short enough.",
+      "en": "Short enough.",
+      "part": {
+        "kind": "text",
+        "text": "Short enough."
+      },
+      "max": 80
+    },
+    {
+      "name": "a word too long to cut at is cut inside",
+      "text": "Averyveryveryveryveryveryveryverylongwordwithoutanyspacesatallthatgoesonandonandonforever",
+      "en": "Averyveryveryveryveryveryveryverylongwordwithoutanyspacesatallthatgoesonandonan…",
+      "part": {
+        "kind": "text",
+        "text": "Averyveryveryveryveryveryveryverylongwordwithoutanyspacesatallthatgoesonandonan…"
+      },
+      "max": 80
+    },
+    {
+      "name": "an escape inside inline code stays",
+      "text": "Use `\\*` literally.",
+      "en": "Use \\* literally.",
+      "part": {
+        "kind": "text",
+        "text": "Use \\* literally."
+      }
+    },
+    {
+      "name": "escaped backslashes inside inline code stay",
+      "text": "Run `C:\\\\tmp\\\\` now",
+      "en": "Run C:\\\\tmp\\\\ now",
+      "part": {
+        "kind": "text",
+        "text": "Run C:\\\\tmp\\\\ now"
+      }
+    },
+    {
+      "name": "an escaped backtick opens no code",
+      "text": "Not \\`code\\` here",
+      "en": "Not `code` here",
+      "part": {
+        "kind": "text",
+        "text": "Not `code` here"
+      }
+    },
+    {
+      "name": "an escaped opening backtick, then code",
+      "text": "A \\``b` c",
+      "en": "A `b c",
+      "part": {
+        "kind": "text",
+        "text": "A `b c"
+      }
+    },
+    {
+      "name": "an image caption keeps its literal inline code",
+      "text": "![Plot of `x\\*y`](clarp-media://asset/chart)",
+      "en": "Image: Plot of x\\*y",
+      "part": {
+        "kind": "image",
+        "caption": "Plot of x\\*y"
+      }
+    },
+    {
+      "name": "a file name rendered as inline code is still a file",
+      "text": "[`report.pdf`](clarp-media://asset/report)",
+      "en": "File: report.pdf",
+      "part": {
+        "kind": "file",
+        "name": "report.pdf"
+      }
+    },
+    {
+      "name": "an escaped sign in the name of a file stays literal",
+      "text": "[\\*report.pdf](clarp-media://asset/report)",
+      "en": "File: *report.pdf",
+      "part": {
+        "kind": "file",
+        "name": "*report.pdf"
+      }
+    },
+    {
+      "name": "literal private-use characters survive beside inline code",
+      "text": "A \ue0010\ue002, \uf02a and `one`.",
+      "en": "A \ue0010\ue002, \uf02a and one.",
+      "part": {
+        "kind": "text",
+        "text": "A \ue0010\ue002, \uf02a and one."
+      }
+    }
+  ]
+}
