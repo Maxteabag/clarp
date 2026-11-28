@@ -64,8 +64,8 @@ export global HostDownBridge {
         if (panel.back) { return @tr("host_down.status.back_online" => "Back online"); }
         // i18n: Host-down panel title when this computer has no network at all (statement)
         if (panel.reason == "device_offline") { return @tr("host_down.device_offline.title" => "This device is offline"); }
-        // i18n: Host-down panel title; {0} is the Host's name; the device must be paired with it again (statement)
-        if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.title" => "{0} needs pairing again", panel.host); }
+        // i18n: Host-down panel title; {0} is the Host's name; this device (not the Host) was signed out and must be paired again (statement)
+        if (panel.reason == "auth_expired") { return @tr("host_down.auth_expired.title" => "Signed out of {0}", panel.host); }
         // i18n: Host-down panel title; {0} is the Host's name; the saved address now leads elsewhere (statement)
         if (panel.reason == "wrong_address") { return @tr("host_down.wrong_address.title" => "{0} isn't at this address", panel.host); }
         // i18n: Host-down panel title; {0} is the Host's name; the computer answers but Clarp is not running (statement)
