@@ -6712,7 +6712,7 @@ impl Actor {
 
     /// The turn waits for an account because the provider said the active one's plan does not
     /// offer its model: it waits for that model, not for usage.
-    fn parked_for_its_plan(&self) -> bool {
+    pub fn parked_for_its_plan(&self) -> bool {
         matches!(
             self.recorder.agent().live(),
             Some(Turn::Parked(parked))
