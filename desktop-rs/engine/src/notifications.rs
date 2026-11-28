@@ -2,17 +2,31 @@
 //! Host's settings (which events alert, globally and per contact), read on
 //! connect and kept live from `notification-settings-changed`; which
 //! `user-notification` becomes a desktop popup; marking a chat read from a
-//! popup (`POST /chat-read`); and answering a question from its buttons.
+//! popup (`POST /chat-read`); and answering a question from its buttons. On
+//! a Host with `decision_undo` that answer is held a few seconds and the
+//! popup offers Undo (`POST /decisions/{id}/undo`), which brings the
+//! question back.
 //! A Host without the feature keeps the old rule: a reply in a chat that
 //! is not the selected one pops up.
 
 use clarp_core::json::{self, Object};
-use clarp_core::notify_events::{self, Incoming, Preset, Recent, Settings};
+use clarp_core::notify_events::{self, Choice, Incoming, Preset, Recent, Settings};
 use serde_json::{Value, json};
 
 use crate::{Change, Engine};
 
 const SETTINGS_TAG: &str = "notification-settings";
+const UNDO_TAG: &str = "notify-undo:";
+/// The Host feature that holds an answer so it can be taken back.
+const UNDO_FEATURE: &str = "decision_undo";
+/// How long an answer from a popup waits for Undo (as long as a popup shows).
+const UNDO_MS: u64 = 8_000;
+/// `response_type` of the popup that says what was answered: its one
+/// answer button is Undo.
+pub const ANSWERED: &str = "answered";
+const UNDO: &str = "undo";
+/// The questions kept to show again after an Undo.
+const QUESTIONS_KEPT: usize = 32;
 const SETTINGS_PATH: &str = "/notification-settings";
 
 #[derive(Default)]
@@ -23,6 +37,13 @@ pub(crate) struct Notifications {
     settings: Option<Settings>,
     /// The last notification ids that popped up (or were dropped).
     recent: Recent,
+    /// The Host lists `decision_undo`.
+    undo: bool,
+    /// Questions that popped up, newest last, to show again after Undo.
+    questions: Vec<Popup>,
+    /// Answers sent from a popup, by decision id: the answer's words, and
+    /// the revision Undo names once the Host has held it.
+    answers: std::collections::HashMap<String, (String, Option<i64>)>,
 }
 
 /// One desktop popup: who, what, and what its buttons do.
@@ -130,6 +151,20 @@ impl Engine {
     /// revision is not known here (not in Updates): the caller opens the
     /// chat at it instead.
     pub fn answer_from_notification(&mut self, decision_id: &str, response_type: &str, option: &str) -> bool {
+        on_peer!(self.owner_mut(decision_id), |engine, _local| engine.answer_from_notification(decision_id, response_type, option));
+        if response_type == ANSWERED {
+            return option == UNDO && self.undo_from_notification(decision_id);
+        }
+        let undo_ms = self.notifications.undo.then_some(UNDO_MS);
+        let words = self
+            .notifications
+            .questions
+            .iter()
+            .rev()
+            .find(|q| q.notification.decision_id == decision_id)
+            .and_then(|q| q.notification.options.iter().find(|c| c.id == option))
+            .map(|c| c.label.clone())
+            .unwrap_or_else(|| option.to_owned());
         let revision = self.attention_items().iter().filter_map(Value::as_object).find(|item| json::string(item, "decision_id") == decision_id).map(|item| json::integer(item, "revision"));
         let Some(revision) = revision.filter(|r| *r > 0) else { return false };
         match response_type {
@@ -139,14 +174,19 @@ impl Engine {
                     "no" | "rejected" => "no",
                     _ => return false,
                 };
-                self.resolve_decision(decision_id, choice, revision);
+                self.resolve_decision_held(decision_id, choice, revision, undo_ms);
+                self.notifications.answers.insert(decision_id.to_owned(), (words, None));
                 true
             }
             "single_choice" => {
-                let (artifact, body) = (self.decision_artifact(decision_id), json!({"answer": {"option_id": option}}));
-                match artifact {
+                let mut body = json!({"answer": {"option_id": option}});
+                if let Some(undo_ms) = undo_ms {
+                    body["undo_ms"] = json!(undo_ms);
+                }
+                match self.decision_artifact(decision_id) {
                     Some(artifact) => {
                         self.send_decision(&artifact, decision_id, "resolve", body, revision);
+                        self.notifications.answers.insert(decision_id.to_owned(), (words, None));
                         true
                     }
                     None => false,
@@ -154,6 +194,74 @@ impl Engine {
             }
             _ => false,
         }
+    }
+
+    /// Takes back an answer sent from a popup while the Host still holds
+    /// it. False when there is nothing to take back (the caller opens the
+    /// chat).
+    fn undo_from_notification(&mut self, decision_id: &str) -> bool {
+        let Some(revision) = self.notifications.answers.get(decision_id).and_then(|(_, r)| *r) else { return false };
+        let path = format!("/decisions/{}/undo", clarp_core::endpoint::percent_encode_segment(decision_id));
+        self.api.post_json(&format!("{UNDO_TAG}{decision_id}"), &path, json!({"expected_revision": revision}), None);
+        true
+    }
+
+    /// The decision id an answer's reply is for (`update-action:decision:<id>`
+    /// or `decision-answer:<artifact>|<id>`).
+    fn answered_decision(tag: &str) -> Option<&str> {
+        tag.strip_prefix("update-action:decision:").or_else(|| tag.strip_prefix("decision-answer:").and_then(|rest| rest.split_once('|').map(|(_, id)| id)))
+    }
+
+    /// An answer sent from a popup was taken: while the Host holds it, the
+    /// chat's popup says what was answered and offers Undo. Looks only:
+    /// Updates handles the reply too.
+    pub(crate) fn notification_answer_json(&mut self, tag: &str, object: &Object) {
+        let Some(decision_id) = Self::answered_decision(tag) else { return };
+        let Some((words, _)) = self.notifications.answers.get(decision_id).cloned() else { return };
+        let decision = object.get("artifact").and_then(|a| a.get("decision")).and_then(Value::as_object);
+        let held = decision.filter(|d| d.get("undoable").and_then(Value::as_bool) == Some(true));
+        let (Some(held), Some(question)) = (held, self.question(decision_id)) else {
+            self.notifications.answers.remove(decision_id);
+            return;
+        };
+        let revision = json::integer(held, "revision");
+        self.notifications.answers.insert(decision_id.to_owned(), (words.clone(), Some(revision)));
+        let mut notification = question.notification.clone();
+        notification.event = ANSWERED.into();
+        notification.response_type = ANSWERED.into();
+        notification.notification_id.clear();
+        notification.options = vec![Choice { id: UNDO.into(), label: notify_events::text("notify.action.undo").into() }];
+        let body = notify_events::text("notify.body.answered").replace("{answer}", &words);
+        self.changes.push(Change::Notification(Popup { body, notification, selected: false, ..question }));
+    }
+
+    fn question(&self, decision_id: &str) -> Option<Popup> {
+        self.notifications.questions.iter().rev().find(|q| q.notification.decision_id == decision_id).cloned()
+    }
+
+    fn undo_answered(&mut self, decision_id: &str, object: &Object) {
+        self.notifications.answers.remove(decision_id);
+        if object.get("undone").and_then(Value::as_bool) != Some(true) {
+            return;
+        }
+        // Pending again: the question as it popped up, its answers back.
+        if let Some(mut question) = self.question(decision_id) {
+            question.notification.notification_id.clear();
+            question.selected = false;
+            self.changes.push(Change::Notification(question));
+        }
+        self.load_updates();
+    }
+
+    fn undo_too_late(&mut self, decision_id: &str) {
+        self.notifications.answers.remove(decision_id);
+        let Some(mut question) = self.question(decision_id) else { return };
+        question.notification.options.clear();
+        question.notification.decision_id.clear();
+        question.notification.event = ANSWERED.into();
+        question.body = notify_events::text("notify.body.too_late").to_owned();
+        question.selected = false;
+        self.changes.push(Change::Notification(question));
     }
 
     /// The artifact a decision in Updates belongs to.
@@ -177,6 +285,11 @@ impl Engine {
             .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(notify_events::FEATURE)));
         let was = (self.notifications.offered, self.notifications.settings.is_some());
         self.notifications.offered = offered;
+        self.notifications.undo = info
+            .get("capabilities")
+            .and_then(|c| c.get("features"))
+            .and_then(Value::as_array)
+            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(UNDO_FEATURE)));
         if offered {
             self.api.get(SETTINGS_TAG, SETTINGS_PATH, &[]);
         } else {
@@ -193,6 +306,10 @@ impl Engine {
             self.take_notification_settings(object);
             return true;
         }
+        if let Some(decision_id) = tag.strip_prefix(UNDO_TAG) {
+            self.undo_answered(decision_id, object);
+            return true;
+        }
         tag.starts_with("chat-read:")
     }
 
@@ -204,6 +321,11 @@ impl Engine {
                 self.api.get(SETTINGS_TAG, SETTINGS_PATH, &[]);
             }
             self.set_error(&format!("Could not change notifications: {detail}"));
+            return true;
+        }
+        if let Some(decision_id) = tag.strip_prefix(UNDO_TAG) {
+            eprintln!("Engine: undo of {decision_id} failed: {detail}");
+            self.undo_too_late(decision_id);
             return true;
         }
         if let Some(session) = tag.strip_prefix("chat-read:") {
@@ -271,6 +393,14 @@ impl Engine {
             let words = notify_events::text(&key);
             body = if words == key { notify_events::text("notify.body.reply").to_owned() } else { words.to_owned() };
         }
-        self.changes.push(Change::Notification(Popup { title, body, session, notification: incoming, selected }));
+        let popup = Popup { title, body, session, notification: incoming, selected };
+        if !popup.notification.decision_id.is_empty() {
+            let questions = &mut self.notifications.questions;
+            questions.retain(|q| q.notification.decision_id != popup.notification.decision_id);
+            questions.push(popup.clone());
+            let extra = questions.len().saturating_sub(QUESTIONS_KEPT);
+            questions.drain(..extra);
+        }
+        self.changes.push(Change::Notification(popup));
     }
 }

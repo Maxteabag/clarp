@@ -1870,8 +1870,9 @@ fn voice_check(out: String) {
 /// Host's notifications per event: one popup per id, the chat's newer one
 /// replacing the older, none when the Host says no or the chat is on
 /// screen, a question's answers as buttons, the popup closed when the chat
-/// is read elsewhere, Mark read told to the Host, the NOTIFICATIONS
-/// settings and a contact's choices per event.
+/// is read elsewhere, an answer from a popup held for Undo and taken back,
+/// Mark read told to the Host, the NOTIFICATIONS settings and a contact's
+/// choices per event.
 fn desktop_check(out: String) {
     fn notifications() -> Vec<serde_json::Value> {
         let Some(path) = std::env::var_os("CLARP_TEST_NOTIFY_LOG") else { return Vec::new() };
@@ -1951,6 +1952,37 @@ fn desktop_check(out: String) {
             check(true, "a chat read elsewhere closes its popup");
             send(serde_json::json!({"type": "user-notification", "event": "reply", "alert": true, "unread": true, "notification_id": "pn-4",
                                     "session": "rachel", "agent_id": "a1", "persona": "Rachel", "preview": "Fourth"}));
+            true
+        })),
+        ("answer", Box::new(|app, _window, _| {
+            if !popups().iter().any(|n| n["body"] == "Fourth") {
+                return false;
+            }
+            let item = serde_json::json!({"id": "d1", "decision_id": "d1", "artifact_id": "q-d1", "revision": 3, "session": "rachel",
+                                          "agent_name": "Rachel", "title": "Ship it?", "response_type": "approval"});
+            if !app.engine.borrow().attention_items().iter().any(|i| i["decision_id"] == "d1") {
+                check(control("/__control/attention", &serde_json::json!({"items": [item]})).is_ok(), "the question is in Updates");
+                return false;
+            }
+            // The question popped up as an approval: Yes from its popup.
+            crate::platform::desktop::act_on("rachel", "", "d1", "approval", "choice:yes");
+            true
+        })),
+        ("answered", Box::new(|_, _window, _| {
+            let resolved = posts("/decisions/d1/resolve");
+            let Some(answered) = popups().into_iter().find(|n| n["body"].as_str().is_some_and(|b| b.starts_with("You answered"))) else { return false };
+            check(resolved.first().is_some_and(|r| r["body"]["undo_ms"] == 8000 && r["body"]["choice"] == "accepted"), &format!("an answer from a popup is held for Undo: {resolved:?}"));
+            check(answered["actions"][1] == "choice:undo" && answered["replaces"] == true, &format!("the chat's popup says what was answered and offers Undo: {answered}"));
+            crate::platform::desktop::act_on("rachel", "", "d1", "answered", "choice:undo");
+            true
+        })),
+        ("undone", Box::new(|_, _window, _| {
+            let asked_again = popups().iter().filter(|n| n["body"] == "Ship it?").count() == 2;
+            if posts("/decisions/d1/undo").is_empty() || !asked_again {
+                return false;
+            }
+            check(posts("/decisions/d1/undo")[0]["body"] == serde_json::json!({"expected_revision": 4}), "Undo names the held answer's revision");
+            check(true, "Undo brings the question back as a popup");
             true
         })),
         ("mark read", Box::new(|app, _window, _| {

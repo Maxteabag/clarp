@@ -490,7 +490,13 @@ impl Engine {
     /// Answers a decision: `yes`/`accepted` or `no`/`rejected`, against the
     /// revision the user saw.
     pub fn resolve_decision(&mut self, decision_id: &str, choice: &str, revision: i64) {
-        on_peer!(self.owner_mut(decision_id), |engine, _local| engine.resolve_decision(decision_id, choice, revision));
+        self.resolve_decision_held(decision_id, choice, revision, None);
+    }
+
+    /// `resolve_decision`, with the answer held `undo_ms` before it reaches
+    /// the agent (Host feature `decision_undo`), so it can be taken back.
+    pub(crate) fn resolve_decision_held(&mut self, decision_id: &str, choice: &str, revision: i64, undo_ms: Option<u64>) {
+        on_peer!(self.owner_mut(decision_id), |engine, _local| engine.resolve_decision_held(decision_id, choice, revision, undo_ms));
         let choice = match choice {
             "yes" | "accepted" => "accepted",
             "no" | "rejected" => "rejected",
@@ -504,6 +510,9 @@ impl Engine {
         self.changes.push(Change::Updates);
         let path = format!("/decisions/{}/resolve", clarp_core::endpoint::percent_encode_segment(decision_id));
         let mut body = json!({"choice": choice, "expected_revision": revision});
+        if let Some(undo_ms) = undo_ms {
+            body["undo_ms"] = json!(undo_ms);
+        }
         self.ask_voice(&mut body);
         self.api.post_json(&format!("update-action:decision:{decision_id}"), &path, body, None);
     }

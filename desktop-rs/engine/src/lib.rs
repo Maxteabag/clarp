@@ -1674,6 +1674,8 @@ impl Engine {
     }
 
     fn handle_json(&mut self, tag: &str, object: &Object) {
+        // An answer from a popup the Host holds: the popup offers Undo.
+        self.notification_answer_json(tag, object);
         if self.form_events_json(tag, object) {
             return;
         }
