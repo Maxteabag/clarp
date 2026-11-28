@@ -60,25 +60,27 @@ component DownIcon inherits Image {
 
 // The quiet status line, with its small dot (never a larger spinner).
 component StatusLine inherits HorizontalLayout {
-    in property <string> text;
+    in property <string> line;
     in property <bool> back;
     in property <float> size: 11;
     spacing: 6px;
     alignment: start;
-    Rectangle {
-        width: 6px;
-        height: 6px;
-        y: (parent.height - self.height) / 2;
-        border-radius: 3px;
-        background: root.back ? Palette.success : Palette.faint;
+    VerticalLayout {
+        alignment: center;
+        Rectangle {
+            width: 6px;
+            height: 6px;
+            border-radius: 3px;
+            background: root.back ? Palette.success : Palette.faint;
+        }
     }
     Text {
-        text: root.text;
+        text: root.line;
         color: root.back ? Palette.success : Palette.faint;
         font-size: root.size * Look.unit;
         vertical-alignment: center;
         accessible-role: text;
-        accessible-label: root.text;
+        accessible-label: root.line;
     }
 }
 
@@ -124,7 +126,7 @@ export component HostDownCard inherits Rectangle {
         spacing: 4px;
         HorizontalLayout {
             spacing: 8px;
-            DownIcon { kind: root.panel.back ? "" : root.panel.icon; width: 16px; height: 16px; y: 1px; }
+            DownIcon { kind: root.panel.back ? "" : root.panel.icon; width: 16px; height: 16px; }
             Text {
                 text: root.panel.back ? "Back online" : root.panel.title;
                 color: Palette.chrome-text;
@@ -155,7 +157,7 @@ export component HostDownCard inherits Rectangle {
             accessible-id: "host-down-reason";
             accessible-label: self.text;
         }
-        if !root.panel.back: StatusLine { text: root.panel.status; back: root.panel.back; }
+        if !root.panel.back: StatusLine { line: root.panel.status; back: root.panel.back; }
         if !root.panel.back: Actions { panel: root.panel; }
     }
 }
@@ -207,7 +209,7 @@ export component HostDownPage inherits Rectangle {
                     accessible-id: "host-down-page-reason";
                     accessible-label: self.text;
                 }
-                if !root.panel.back: StatusLine { text: root.panel.status; back: root.panel.back; size: 12; }
+                if !root.panel.back: StatusLine { line: root.panel.status; back: root.panel.back; size: 12; }
                 Rectangle { height: 6px; }
                 if !root.panel.back: Actions { panel: root.panel; }
             }
@@ -217,34 +219,36 @@ export component HostDownPage inherits Rectangle {
 
 // The list's compact row for a Host out of reach; it opens the full page.
 export component HostDownListRow inherits Rectangle {
-    in property <HostDownRow> row;
+    in property <HostDownRow> item;
     height: 22px;
     background: touch.has-hover ? Palette.hover : transparent;
     border-radius: 3px;
     accessible-role: button;
-    accessible-id: "host-down-row:" + root.row.url;
-    accessible-label: root.row.text;
-    accessible-action-default => { HostDownBridge.open(root.row.url); }
+    accessible-id: "host-down-row:" + root.item.url;
+    accessible-label: root.item.text;
+    accessible-action-default => { HostDownBridge.open(root.item.url); }
     HorizontalLayout {
         padding-left: 10px;
         padding-right: 10px;
         spacing: 6px;
-        Rectangle {
-            width: 6px;
-            height: 6px;
-            y: (parent.height - self.height) / 2;
-            border-radius: 3px;
-            background: Palette.faint;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: Palette.faint;
+            }
         }
         Text {
-            text: root.row.text;
+            text: root.item.text;
             color: Palette.muted;
             font-size: 11 * Look.unit;
             overflow: elide;
             vertical-alignment: center;
         }
     }
-    touch := TouchArea { mouse-cursor: pointer; clicked => { HostDownBridge.open(root.row.url); } }
+    touch := TouchArea { mouse-cursor: pointer; clicked => { HostDownBridge.open(root.item.url); } }
 }
 
 // One quiet app-wide line when this device has no network.
@@ -259,15 +263,15 @@ export component DeviceOfflineBanner inherits Rectangle {
     HorizontalLayout {
         alignment: center;
         spacing: 6px;
-        DownIcon { kind: "cloud-off"; width: 14px; height: 14px; y: 5px; }
+        VerticalLayout { alignment: center; DownIcon { kind: "cloud-off"; width: 14px; height: 14px; } }
         Text { text: "This device is offline"; color: Palette.muted; font-size: 12 * Look.unit; vertical-alignment: center; }
     }
 }
 
 // "Diagnostics copied", for a moment.
 export component HostDownToast inherits Rectangle {
-    in property <string> text;
-    visible: root.text != "";
+    in property <string> message;
+    visible: root.message != "";
     height: 28px;
     width: toast-text.preferred-width + 24px;
     border-radius: 4px;
@@ -276,6 +280,6 @@ export component HostDownToast inherits Rectangle {
     border-color: Palette.border;
     accessible-role: text;
     accessible-id: "host-down-toast";
-    accessible-label: root.text;
-    toast-text := Text { text: root.text; color: Palette.chrome-text; font-size: 12 * Look.unit; }
+    accessible-label: root.message;
+    toast-text := Text { text: root.message; color: Palette.chrome-text; font-size: 12 * Look.unit; }
 }

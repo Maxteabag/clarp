@@ -281,16 +281,16 @@ impl Engine {
     /// What else the classifier knows about `url`'s failure.
     fn reason_context(&self, url: &str) -> Context {
         let others: Vec<&Watch> = self.host_down.watches.iter().filter(|w| w.url != url && w.seen_live || w.url != url && w.down.is_some()).collect();
-        let tailnet = |w: &&Watch| host_down::address_kind(&w.url) == AddressKind::Tailnet;
-        let answering = |w: &&Watch| w.down.is_none();
+        let tailnet = |w: &Watch| host_down::address_kind(&w.url) == AddressKind::Tailnet;
+        let answering = |w: &Watch| w.down.is_none();
         Context {
             device_online: self.host_down.network.online,
             tailscale_on_device: self.host_down.network.tailscale,
             address: host_down::address_kind(url),
             other_hosts: others.len(),
-            other_hosts_answering: others.iter().filter(answering).count(),
-            other_tailnet_hosts: others.iter().filter(tailnet).count(),
-            other_tailnet_hosts_answering: others.iter().filter(tailnet).filter(answering).count(),
+            other_hosts_answering: others.iter().filter(|w| answering(w)).count(),
+            other_tailnet_hosts: others.iter().filter(|w| tailnet(w)).count(),
+            other_tailnet_hosts_answering: others.iter().filter(|w| tailnet(w) && answering(w)).count(),
         }
     }
 

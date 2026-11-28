@@ -13,6 +13,7 @@ use crate::headless;
 // ---- launch dialogs
 #[path = "launch_checks.rs"]
 mod launch_checks;
+mod host_down_checks;
 // ---- profile and overview
 #[path = "profile_checks.rs"]
 mod profile_checks;
@@ -631,6 +632,7 @@ pub fn start_check(name: &str, out: String) {
         "narrow" => narrow_checks::narrow_check(out),
         "fonts" => font_checks::fonts_check(out),
         "avatars" => avatar_checks::avatars_check(out),
+        "host-down" => host_down_checks::host_down_check(out),
         "playback" => playback_checks::playback_check(out, false),
         "playback-audio" => playback_checks::playback_check(out, true),
         "link-hints" => link_hint_checks::link_hints_check(out),
