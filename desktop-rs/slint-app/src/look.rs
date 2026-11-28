@@ -756,6 +756,8 @@ pub const CATALOGUED: &[(&str, &str)] = &[
     ("uiscale", "ui-scale"),
     ("spokenreplies", "spoken-replies"),
     ("pausemobile", "pause-mobile-push"),
+    ("notifyreplies", "desktop-notifications"),
+    ("notifysound", "notification-sound"),
     ("doublepress", "double-press"),
     ("fontsize", "font-size"),
 ];

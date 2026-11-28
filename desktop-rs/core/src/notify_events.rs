@@ -221,32 +221,36 @@ impl Recent {
     }
 }
 
-/// Every word the desktop shows for notifications, by its stable key.
-/// One place, so the localization pipeline can take them over.
+/// The reader's own switches (`notifyreplies`, `notifysound` in `prefs`).
+pub const DESKTOP_LABEL: &str = "Desktop notifications";
+pub const DESKTOP_ABOUT: &str = "Show notifications on this computer";
+pub const SOUND_LABEL: &str = "Sound";
+pub const SOUND_ABOUT: &str = "Play the desktop's message sound when an agent asks you something or rings";
+
+/// The events the desktop knows words for, in the Host catalog's order:
+/// wire id, `notify.event.<id>`, `notify.settings.about.<id>`.
+pub const EVENTS: &[(&str, &str, &str)] = &[
+    ("reply", "Replies", "An agent finished and has something for you"),
+    ("needs_you", "Questions for you", "An agent asks you something or waits for your answer"),
+    ("failed", "Failed turns", "A turn failed and the Host stopped trying"),
+    ("update", "Updates", "A note an agent sent you"),
+    ("job_done", "Background jobs done", "A background job of an agent ended"),
+    ("helper_report", "Helper reports", "A helper reported to the agent that started it"),
+    ("call", "Calls", "An agent rings you"),
+    ("account", "Account notices", "Account and usage notices"),
+];
+
+/// Every other word the desktop shows for notifications, by its stable
+/// key. One place, so the localization pipeline can take them over.
 pub const STRINGS: &[(&str, &str)] = &[
-    ("notify.event.reply", "Replies"),
-    ("notify.event.needs_you", "Questions for you"),
-    ("notify.event.failed", "Failed turns"),
-    ("notify.event.update", "Updates"),
-    ("notify.event.job_done", "Background jobs done"),
-    ("notify.event.helper_report", "Helper reports"),
-    ("notify.event.call", "Calls"),
-    ("notify.event.account", "Account notices"),
-    ("notify.settings.about.reply", "An agent finished and has something for you"),
-    ("notify.settings.about.needs_you", "An agent asks you something or waits for your answer"),
-    ("notify.settings.about.failed", "A turn failed and the Host stopped trying"),
-    ("notify.settings.about.update", "A note an agent sent you"),
-    ("notify.settings.about.job_done", "A background job of an agent ended"),
-    ("notify.settings.about.helper_report", "A helper reported to the agent that started it"),
-    ("notify.settings.about.call", "An agent rings you"),
-    ("notify.settings.about.account", "Account and usage notices"),
-    ("notify.settings.desktop", "Desktop notifications"),
-    ("notify.settings.desktop.about", "Show notifications on this computer; the switches above say which"),
-    ("notify.settings.sound", "Sound"),
-    ("notify.settings.sound.about", "Play the desktop's message sound when an agent asks you something or rings"),
+    ("notify.settings.desktop", DESKTOP_LABEL),
+    ("notify.settings.desktop.about", DESKTOP_ABOUT),
+    ("notify.settings.sound", SOUND_LABEL),
+    ("notify.settings.sound.about", SOUND_ABOUT),
     ("notify.settings.default", "Default"),
     ("notify.settings.on", "On"),
     ("notify.settings.off", "Off"),
+    ("notify.settings.contact", "Notifications from this contact"),
     ("notify.action.open", "Open"),
     ("notify.action.mark_read", "Mark read"),
     ("notify.body.needs_you", "Waiting for your answer"),
@@ -256,6 +260,12 @@ pub const STRINGS: &[(&str, &str)] = &[
 
 /// The English words for a key; the key itself when none is known.
 pub fn text(key: &str) -> &str {
+    if let Some(id) = key.strip_prefix("notify.event.") {
+        return EVENTS.iter().find(|(e, ..)| *e == id).map_or(key, |(_, label, _)| label);
+    }
+    if let Some(id) = key.strip_prefix("notify.settings.about.") {
+        return EVENTS.iter().find(|(e, ..)| *e == id).map_or(key, |(.., about)| about);
+    }
     STRINGS.iter().find(|(k, _)| *k == key).map_or(key, |(_, v)| v)
 }
 

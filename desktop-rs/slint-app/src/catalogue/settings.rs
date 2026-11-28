@@ -8,7 +8,7 @@ use clarp_core::reading_theme::{self, FontOverride};
 use clarp_engine::Change;
 use serde_json::Value;
 
-use super::{Choice, Setting, e, keyed, shown};
+use super::{Choice, Entry, Setting, e, keyed, shown};
 use crate::{App, AppWindow};
 
 const ACTIVITY: [(&str, &str); 4] = [
@@ -32,6 +32,7 @@ pub(super) fn register() -> Vec<Setting> {
     all.extend(startup());
     all.extend(appearance());
     all.extend(voice());
+    all.extend(notifications());
     all.extend(host());
     all.extend(super::lanes::register());
     all.extend(keyboard());
@@ -536,13 +537,68 @@ fn voice() -> Vec<Setting> {
                 app.engine.borrow_mut().set_tts_providers(&provider, value, "");
             },
         ),
-        Setting::stored_toggle(
-            e("pause-mobile-push", "Pause phone alerts while active on desktop", "notifications", "Holds phone notifications while you are using this window.", &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"]),
-            "NOTIFICATIONS",
-            "notifications/pauseMobileWhileDesktopActive",
-            true,
-        ),
     ]
+}
+
+/// The NOTIFICATIONS section: the Host's switch per event (Host feature
+/// `notification_events`), the owner's choice for every contact kept on
+/// the Host so every device agrees, listed only while the Host keeps them
+/// and names the event; then this computer's popups, their sound and
+/// pausing the phone while here.
+fn notifications() -> Vec<Setting> {
+    use clarp_core::notify_events::{self, EVENTS};
+    EVENTS
+        .iter()
+        .map(|&(id, label, about)| {
+            let on = move |app: &App| app.engine.borrow().notification_settings().and_then(|s| s.event(id)).is_some_and(|e| e.on);
+            Setting::toggle(
+                Entry { id: event_setting_id(id), label, description: about, aliases: EVENT_ALIASES, group: "notifications", actions: &[] },
+                "NOTIFICATIONS",
+                on,
+                move |app, _, on| app.engine.borrow_mut().set_notification_event(id, on),
+            )
+            .when(move |app| app.engine.borrow().notification_settings().is_some_and(|s| s.event(id).is_some()))
+        })
+        .chain([
+            // This computer's own switches, after the Host's.
+            Setting::stored_toggle(
+                e("desktop-notifications", notify_events::DESKTOP_LABEL, "notifications", notify_events::DESKTOP_ABOUT, &["notifications", "alerts", "notify", "popups", "toasts", "reply notifications", "toggle"]),
+                "NOTIFICATIONS",
+                "notifications/replies",
+                true,
+            ),
+            Setting::stored_toggle(
+                e("notification-sound", notify_events::SOUND_LABEL, "notifications", notify_events::SOUND_ABOUT, &["sounds", "chime", "ding", "audio alert", "beep", "notification sound", "toggle"]),
+                "NOTIFICATIONS",
+                "notifications/sound",
+                false,
+            ),
+            Setting::stored_toggle(
+                e("pause-mobile-push", "Pause phone alerts while active on desktop", "notifications", "Holds phone notifications while you are using this window.", &["notifications", "notification", "push", "phone", "mobile", "alerts", "quiet", "do not disturb", "toggle"]),
+                "NOTIFICATIONS",
+                "notifications/pauseMobileWhileDesktopActive",
+                true,
+            ),
+        ])
+        .collect()
+}
+
+/// Words every event switch answers to.
+const EVENT_ALIASES: &[&str] = &["notifications", "notify", "alerts", "popups", "push", "per event"];
+
+/// The catalogue id of an event's switch (`notify-reply`).
+fn event_setting_id(id: &str) -> &'static str {
+    match id {
+        "reply" => "notify-reply",
+        "needs_you" => "notify-needs-you",
+        "failed" => "notify-failed",
+        "update" => "notify-update",
+        "job_done" => "notify-job-done",
+        "helper_report" => "notify-helper-report",
+        "call" => "notify-call",
+        "account" => "notify-account",
+        _ => "notify-event",
+    }
 }
 
 fn run_command(action: &'static str) -> impl Fn(&Rc<App>, &AppWindow) {

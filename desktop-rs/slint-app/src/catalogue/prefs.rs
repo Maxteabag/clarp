@@ -17,6 +17,7 @@ fn section_of(section: &str) -> (&'static str, &'static str) {
         prefs::LAYOUT => ("LAYOUT", "layout"),
         prefs::CHAT => ("CHATS", "chats"),
         prefs::COLOURS => ("COLOURS", "colours"),
+        prefs::NOTIFICATIONS => ("NOTIFICATIONS", "notifications"),
         _ => ("BEHAVIOUR", "behaviour"),
     }
 }

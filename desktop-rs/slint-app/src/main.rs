@@ -538,7 +538,7 @@ impl App {
         }
         whole.lap("switcher");
         self.voice(changes);
-        if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo)) {
+        if changes.iter().any(|c| matches!(c, Change::HostStatus | Change::Preferences | Change::Connection | Change::ServerInfo | Change::NotificationSettings)) {
             settings_view::show(self, &window);
         }
         // ---- updates and teams
