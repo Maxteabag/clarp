@@ -120,7 +120,7 @@ if [ "$name" = all-hosts ]; then
     /usr/bin/python3 tests/fake_host.py --port-file "$scratch/peer-port" --log "$scratch/peer.log" --peer &
     third_party=$!
     for _ in $(seq 50); do [ -s "$scratch/peer-port" ] && break; sleep 0.1; done
-    export CLARP_TEST_PEER_URL="http://127.0.0.1:$(cat "$scratch/peer-port")" CLARP_TEST_PEER_LOG="$scratch/peer.log" CLARP_PEER_TOKEN=probe-token
+    export CLARP_TEST_PEER_URL="http://127.0.0.1:$(cat "$scratch/peer-port")" CLARP_TEST_PEER_LOG="$scratch/peer.log" CLARP_PEER_TOKEN=cld_probe_paired_device
 fi
 # A check runs the app once; startup runs it twice, with an empty portrait
 # cache and then with the one the first run filled (a usual launch).

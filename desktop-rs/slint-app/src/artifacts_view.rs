@@ -7,7 +7,7 @@ use std::time::Duration;
 use serde_json::Value;
 use slint::ComponentHandle;
 
-use clarp_engine::{Change, Engine};
+use clarp_engine::{Change, Engine, TranscriptImageReply, TranscriptImageRequest};
 use slint::Model;
 
 use crate::{App, AppWindow, ArtifactBridge, ArtifactItem, ArtifactOption, CardHint};
@@ -285,6 +285,7 @@ thread_local! {
 /// Before a chat's cards are drawn: asks for posters not yet fetched, and
 /// takes what has arrived (posters decoded, files saved and opened).
 pub fn settle_downloads(app: &App, session: &str) {
+    settle_pictures(app);
     let artifacts = app.engine.borrow().artifacts_for_session(session);
     for artifact in &artifacts {
         let id = text(artifact, "artifact_id");
@@ -301,15 +302,6 @@ pub fn settle_downloads(app: &App, session: &str) {
         let Some(result) = app.engine.borrow_mut().take_artifact_bytes(&id, &purpose) else { continue };
         FETCHING.with(|f| f.borrow_mut().remove(&(id.clone(), purpose.clone())));
         match (purpose.as_str(), result) {
-            // A small picture decodes at once, in its row's first drawing;
-            // a large one off the UI thread.
-            ("image", Ok(bytes)) if picture_is_small(&bytes) => store_picture(id, picture_pixels(&bytes)),
-            ("image", Ok(bytes)) => decode_picture_later(id, bytes),
-            ("image", Err(error)) => {
-                eprintln!("clarp-slint: no image at {id}: {error}");
-                PICTURES.with(|p| p.borrow_mut().insert(id.clone(), Picture::Failed));
-                PICTURES_LANDED.with(|l| l.set(l.get() + 1));
-            }
             ("poster", Ok(bytes)) => match image::load_from_memory(&bytes) {
                 Ok(decoded) => {
                     let rgba = decoded.to_rgba8();
@@ -422,10 +414,33 @@ enum Picture {
     Failed,
 }
 
+/// Host endpoint and image path. Different Hosts may use the same asset id.
+type PictureKey = (String, String);
+
 thread_local! {
-    static PICTURES: std::cell::RefCell<std::collections::HashMap<String, Picture>> = std::cell::RefCell::default();
+    static PICTURES: std::cell::RefCell<std::collections::HashMap<PictureKey, Picture>> = std::cell::RefCell::default();
+    static PICTURE_REQUESTS: std::cell::RefCell<std::collections::HashMap<PictureKey, TranscriptImageRequest>> = std::cell::RefCell::default();
     /// Bumped whenever a picture lands, so rows with images are drawn again.
     static PICTURES_LANDED: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn settle_pictures(app: &App) {
+    let mut engine = app.engine.borrow_mut();
+    PICTURE_REQUESTS.with(|requests| requests.borrow_mut().retain(|key, request| {
+        match engine.take_transcript_image(request) {
+            TranscriptImageReply::Pending => return true,
+            TranscriptImageReply::Abandoned => {
+                PICTURES.with(|pictures| pictures.borrow_mut().remove(key));
+                PICTURES_LANDED.with(|landed| landed.set(landed.get() + 1));
+            }
+            TranscriptImageReply::Received(Ok(bytes)) if picture_is_small(&bytes) => {
+                store_picture(key.clone(), picture_pixels(&bytes));
+            }
+            TranscriptImageReply::Received(Ok(bytes)) => decode_picture_later(key.clone(), bytes),
+            TranscriptImageReply::Received(Err(error)) => store_picture(key.clone(), Err(error)),
+        }
+        false
+    }));
 }
 
 /// The longest side a chat picture is kept at, in pixels. A 4K screenshot
@@ -450,7 +465,7 @@ fn picture_is_small(bytes: &[u8]) -> bool {
 static DECODING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// Decodes a chat picture off the UI thread; it lands in `picture_landed`.
-fn decode_picture_later(id: String, bytes: Vec<u8>) {
+fn decode_picture_later(key: PictureKey, bytes: Vec<u8>) {
     crate::platform::runtime::handle().spawn_blocking(move || {
         let pixels = {
             let _one = DECODING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -459,7 +474,7 @@ fn decode_picture_later(id: String, bytes: Vec<u8>) {
             give_back_freed_memory();
             pixels
         };
-        if let Err(error) = slint::invoke_from_event_loop(move || picture_landed(id, pixels)) {
+        if let Err(error) = slint::invoke_from_event_loop(move || picture_landed(key, pixels)) {
             eprintln!("clarp-slint: dropped a decoded picture: {error}");
         }
     });
@@ -485,28 +500,27 @@ fn picture_pixels(bytes: &[u8]) -> Result<slint::SharedPixelBuffer<slint::Rgba8P
 }
 
 /// A picture decoded off the UI thread: stored, and the chats drawn again.
-fn picture_landed(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
-    store_picture(id, pixels);
+fn picture_landed(key: PictureKey, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
+    store_picture(key, pixels);
     if let Some(app) = crate::app() {
         app.refresh(&[Change::Updates]);
     }
 }
 
-fn store_picture(id: String, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
+fn store_picture(key: PictureKey, pixels: Result<slint::SharedPixelBuffer<slint::Rgba8Pixel>, String>) {
     let picture = match pixels {
         Ok(pixels) => Picture::Loaded(slint::Image::from_rgba8(pixels)),
         Err(error) => {
-            eprintln!("clarp-slint: {id} is not an image: {error}");
+            eprintln!("clarp-slint: could not show {} at {}: {error}", key.1, key.0);
             Picture::Failed
         }
     };
-    PICTURES.with(|p| p.borrow_mut().insert(id, picture));
+    PICTURES.with(|p| p.borrow_mut().insert(key, picture));
     PICTURES_LANDED.with(|l| l.set(l.get() + 1));
 }
 
-/// iOS `mediaRequest`: clarp-media://asset/<id> and /media/... (or
-/// media/...) are the Host's; anything else is not fetched.
-fn media_path(reference: &str) -> Option<String> {
+/// The chat Host's media path, from a native reference or same-origin URL.
+fn media_path(reference: &str, host: Option<&str>) -> Option<String> {
     if let Some(asset) = reference.strip_prefix("clarp-media://asset/") {
         let ok = !asset.is_empty() && asset.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'));
         return ok.then(|| format!("/media/{asset}"));
@@ -514,7 +528,21 @@ fn media_path(reference: &str) -> Option<String> {
     if reference.starts_with("/media/") {
         return Some(reference.to_owned());
     }
-    reference.starts_with("media/").then(|| format!("/{reference}"))
+    if reference.starts_with("media/") {
+        return Some(format!("/{reference}"));
+    }
+    let base = clarp_core::endpoint::normalize_base(url::Url::parse(host?).ok()?);
+    let url = url::Url::parse(reference).ok()?;
+    let root = clarp_core::endpoint::resolve(&base, "/media/")?;
+    let asset = url.path().strip_prefix(root.path())?;
+    if !clarp_core::endpoint::same_origin(&url, &base) || asset.is_empty() {
+        return None;
+    }
+    let path = format!("/media/{asset}");
+    Some(match url.query() {
+        Some(query) => format!("{path}?{query}"),
+        None => path,
+    })
 }
 
 /// The `![alt](url)` references a paragraph consists of, or None when it
@@ -534,14 +562,16 @@ fn image_lines(paragraph: &str) -> Option<Vec<(String, String)>> {
 }
 
 /// A message's image (fetched once from the Host, with the app's token).
-fn message_image(alt: &str, reference: &str) -> crate::MessageImage {
+fn message_image(alt: &str, reference: &str, session: &str, host: Option<&str>) -> crate::MessageImage {
     let mut image = crate::MessageImage { url: reference.into(), alt: alt.into(), ..crate::MessageImage::default() };
-    let Some(path) = media_path(reference) else {
+    let Some(path) = media_path(reference, host) else {
         image.failed = true;
         image.foreign = true;
         return image;
     };
-    let state = PICTURES.with(|p| p.borrow().get(&path).cloned());
+    let Some(host) = host else { return image };
+    let key = (host.to_owned(), path);
+    let state = PICTURES.with(|p| p.borrow().get(&key).cloned());
     match state {
         Some(Picture::Loaded(picture)) => {
             image.image = picture;
@@ -550,10 +580,11 @@ fn message_image(alt: &str, reference: &str) -> crate::MessageImage {
         Some(Picture::Failed) => image.failed = true,
         Some(Picture::Loading) => {}
         None => {
-            PICTURES.with(|p| p.borrow_mut().insert(path.clone(), Picture::Loading));
-            FETCHING.with(|f| f.borrow_mut().insert((path.clone(), "image".into()), String::new()));
-            if let Some(app) = crate::app() {
-                app.engine.borrow_mut().fetch_artifact_bytes(&path, "image", &path);
+            if let Some(app) = crate::app()
+                && let Some(request) = app.engine.borrow_mut().fetch_transcript_image(session, host, &key.1)
+            {
+                PICTURES.with(|p| p.borrow_mut().insert(key.clone(), Picture::Loading));
+                PICTURE_REQUESTS.with(|f| f.borrow_mut().insert(key, request));
             }
         }
     }
@@ -567,12 +598,12 @@ fn images_block(images: Vec<crate::MessageImage>, gallery: bool) -> crate::Messa
 /// A message block as the transcript draws it: a paragraph of image
 /// references becomes an image (a single one) or a gallery, and a
 /// clarp-gallery fence a gallery (iOS's MarkdownParser).
-pub fn with_images(block: &clarp_engine::blocks::Block, literal: bool) -> Vec<crate::MessageBlock> {
+pub fn with_images(block: &clarp_engine::blocks::Block, literal: bool, session: &str, host: Option<&str>) -> Vec<crate::MessageBlock> {
     use clarp_engine::blocks::Block;
     match block {
         Block::Code { language, text } if !literal && matches!(language.as_str(), "clarp-gallery" | "gallery") => {
             match image_lines(text) {
-                Some(found) => vec![images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), true)],
+                Some(found) => vec![images_block(found.iter().map(|(a, u)| message_image(a, u, session, host)).collect(), true)],
                 None => vec![crate::view::message_block(block, literal)],
             }
         }
@@ -587,7 +618,7 @@ pub fn with_images(block: &clarp_engine::blocks::Block, literal: bool) -> Vec<cr
                             prose.clear();
                         }
                         let gallery = found.len() > 1;
-                        out.push(images_block(found.iter().map(|(a, u)| message_image(a, u)).collect(), gallery));
+                        out.push(images_block(found.iter().map(|(a, u)| message_image(a, u, session, host)).collect(), gallery));
                     }
                     None => prose.push(paragraph),
                 }

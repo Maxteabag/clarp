@@ -267,7 +267,7 @@ fn splice_turn_reasons(lines: &[clarp_core::turn_reason::Line], fresh: &mut Vec<
             activity_label: String::new(),
             explanation_repeat: 0,
         };
-        let row = crate::view::message_row(&source, false, &std::collections::HashSet::new());
+        let row = crate::view::message_row(&source, false, &std::collections::HashSet::new(), "", None);
         rows.insert(at, row);
         fresh.insert(at, (source, false, format!("turn-reason|{}", line.text), line.key));
     }
@@ -905,7 +905,8 @@ impl App {
         let seen_pending = self.artifact_seen_pending.borrow().clone();
         let state = crate::artifacts_view::CardState { cursor: &cursor, choices: &choices, drafts: &drafts, editing: &editing, seen_pending: &seen_pending };
         pane.presented_with = Some(self.presentation_key(&pane.session));
-        let built = pane.rows.rows(&presented, always, &expanded);
+        let image_host = self.engine.borrow().transcript_image_host(&pane.session).map(str::to_owned);
+        let built = pane.rows.rows(&presented, always, &expanded, &pane.session, image_host.as_deref());
         let now = std::time::Instant::now();
         let mut unsent = std::collections::HashMap::new();
         let mut kept = std::collections::HashMap::new();
@@ -1026,7 +1027,11 @@ impl App {
                 .collect::<Vec<_>>()
                 .join(",");
             // A row with images is drawn again when one lands.
-            let pictures = if row.blocks.iter().any(|b| b.kind == "images") { crate::artifacts_view::pictures_landed() } else { 0 };
+            let pictures = if row.blocks.iter().any(|b| b.kind == "images") {
+                format!("{}@{}", image_host.as_deref().unwrap_or_default(), crate::artifacts_view::pictures_landed())
+            } else {
+                String::new()
+            };
             let receipt = format!("{}:{}:{}", row.receipt.agent, row.receipt.kind, row.receipt.linked);
             // Another agent's prompt is drawn again when it opens or folds.
             // An unsent message is drawn again when its status becomes due.

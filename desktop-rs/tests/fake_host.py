@@ -1997,6 +1997,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply_bytes(200, b"%PDF-1.4 fixture contract", "application/pdf")
         if url.path == "/media/csv1":
             return self.reply_bytes(200, b"region,q3\nNordics,150\n", "text/csv")
+        if url.path in ("/media/all-hosts-primary-first", "/media/all-hosts-peer-first"):
+            if server_id == "fake-host-2":
+                return self.reply_bytes(200, solid_png(420, 240, (40, 120, 200, 255)), "image/png")
+            return self.reply_bytes(200, solid_png(280, 240, (200, 80, 40, 255)), "image/png")
         if url.path in ("/media/img-chart", "/media/img-a", "/media/img-b", "/media/img-c"):
             colours = {"/media/img-chart": (200, 80, 40, 255), "/media/img-a": (40, 120, 200, 255),
                        "/media/img-b": (60, 180, 90, 255), "/media/img-c": (220, 190, 40, 255)}

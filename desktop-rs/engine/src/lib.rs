@@ -48,6 +48,7 @@ mod roster_rows;
 mod teams;
 pub mod transit;
 mod updates;
+pub use updates::{TranscriptImageReply, TranscriptImageRequest};
 mod viewport;
 mod artifact_summary;
 mod render_spec;
@@ -991,6 +992,7 @@ impl Engine {
     }
 
     fn reset_transient_state(&mut self) {
+        self.reset_transcript_images();
         self.snapshot_generation += 1;
         self.snapshot_in_flight = false;
         self.snapshot_dirty = false;

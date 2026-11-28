@@ -100,6 +100,8 @@ pub(crate) struct Updates {
     artifact_status: std::collections::HashMap<String, String>,
     /// "purpose:artifact" -> the bytes fetched for it, or why not.
     artifact_bytes: std::collections::HashMap<String, Result<Vec<u8>, String>>,
+    /// A transcript image request is owned by this Host connection.
+    transcript_images: std::collections::HashMap<String, Option<Result<Vec<u8>, String>>>,
     /// job id -> its latest `GET /background-jobs/<id>` (timeline, log
     /// tail), or why it could not be read.
     job_details: std::collections::HashMap<String, Result<Object, String>>,
@@ -132,6 +134,18 @@ impl Updates {
             Feed::Artifacts => self.intervals.artifacts,
         }
     }
+}
+
+/// The connection and request that fetched a transcript image.
+pub struct TranscriptImageRequest {
+    host: String,
+    tag: String,
+}
+
+pub enum TranscriptImageReply {
+    Pending,
+    Received(Result<Vec<u8>, String>),
+    Abandoned,
 }
 
 impl Engine {
@@ -276,6 +290,53 @@ impl Engine {
     pub fn take_artifact_bytes(&mut self, artifact_id: &str, purpose: &str) -> Option<Result<Vec<u8>, String>> {
         on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.take_artifact_bytes(artifact_id, purpose));
         self.updates.artifact_bytes.remove(&format!("{purpose}:{artifact_id}"))
+    }
+
+    /// The endpoint that owns a displayed chat, including a peer's chat.
+    pub fn transcript_image_host(&self, session: &str) -> Option<&str> {
+        match self.peer_ref(session) {
+            Some(peer) => peer.map(|(engine, _)| engine.base_url()),
+            None => Some(self.base_url()),
+        }
+    }
+
+    /// Request bytes using the displayed chat's own connection and token.
+    pub fn fetch_transcript_image(&mut self, session: &str, host: &str, path: &str) -> Option<TranscriptImageRequest> {
+        on_peer!(self.peer_mut(session), |engine, local| engine.fetch_transcript_image(local, host, path));
+        if self.base_url() != host {
+            return None;
+        }
+        let tag = format!("transcript-image:{}", uuid::Uuid::new_v4().simple());
+        self.updates.transcript_images.insert(tag.clone(), None);
+        self.api.get_bytes(&tag, path);
+        Some(TranscriptImageRequest { host: host.to_owned(), tag })
+    }
+
+    pub fn take_transcript_image(&mut self, request: &TranscriptImageRequest) -> TranscriptImageReply {
+        let updates = if self.base_url == request.host {
+            &mut self.updates
+        } else if let Some(peer) = self.peers.list.iter_mut().find(|peer| peer.url == request.host) {
+            &mut peer.engine.updates
+        } else {
+            return TranscriptImageReply::Abandoned;
+        };
+        match updates.transcript_images.get_mut(&request.tag) {
+            Some(reply) => match reply.take() {
+                Some(reply) => {
+                    updates.transcript_images.remove(&request.tag);
+                    TranscriptImageReply::Received(reply)
+                }
+                None => TranscriptImageReply::Pending,
+            },
+            None => TranscriptImageReply::Abandoned,
+        }
+    }
+
+    pub(crate) fn reset_transcript_images(&mut self) {
+        if !self.updates.transcript_images.is_empty() {
+            self.updates.transcript_images.clear();
+            self.changes.push(Change::Updates);
+        }
     }
 
     // ---- commands --------------------------------------------------------
@@ -634,6 +695,13 @@ impl Engine {
 
     /// An artifact's bytes arrived.
     pub(crate) fn updates_bytes(&mut self, tag: &str, bytes: &[u8]) -> bool {
+        if tag.starts_with("transcript-image:") {
+            if let Some(reply) = self.updates.transcript_images.get_mut(tag) {
+                *reply = Some(Ok(bytes.to_vec()));
+                self.changes.push(Change::Updates);
+            }
+            return true;
+        }
         let Some(key) = artifact_bytes_key(tag) else { return false };
         self.updates.artifact_bytes.insert(key, Ok(bytes.to_vec()));
         self.changes.push(Change::Updates);
@@ -641,6 +709,13 @@ impl Engine {
     }
 
     pub(crate) fn updates_failure(&mut self, tag: &str, detail: &str, status: u16) -> bool {
+        if tag.starts_with("transcript-image:") {
+            if let Some(reply) = self.updates.transcript_images.get_mut(tag) {
+                *reply = Some(Err(detail.to_owned()));
+                self.changes.push(Change::Updates);
+            }
+            return true;
+        }
         if let Some(key) = artifact_bytes_key(tag) {
             self.updates.artifact_bytes.insert(key, Err(detail.to_owned()));
             self.changes.push(Change::Updates);

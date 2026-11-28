@@ -22,6 +22,8 @@ use super::{Stage, app_now, check, posts, run_stages, shot, view};
 use crate::headless;
 
 const NOVA: &str = "@fake-host-2/nova";
+const PRIMARY_FIRST: &str = "/media/all-hosts-primary-first";
+const PEER_FIRST: &str = "/media/all-hosts-peer-first";
 
 fn peer_url() -> String {
     std::env::var("CLARP_TEST_PEER_URL").unwrap_or_default()
@@ -71,6 +73,12 @@ fn moved_of(window: &crate::AppWindow, session: &str) -> String {
 
 fn texts(app: &crate::App, session: &str) -> Vec<String> {
     app.engine.borrow().conversation(session).map(|c| c.rows().iter().map(|r| r.text.clone()).collect()).unwrap_or_default()
+}
+
+fn images(window: &crate::AppWindow, id: &str) -> Vec<crate::MessageImage> {
+    super::rows(window).into_iter().find(|row| row.id == id)
+        .map(|row| row.blocks.iter().flat_map(|block| block.images.iter().collect::<Vec<_>>()).collect())
+        .unwrap_or_default()
 }
 
 pub fn all_hosts_check(out: String) {
@@ -131,7 +139,7 @@ pub fn all_hosts_check(out: String) {
                 saved.iter().any(|h| h.url == peer_url() && h.server_id == "fake-host-2"),
                 &format!("the peer's server id is saved with it: {saved:?}"),
             );
-            check(peer_requests("GET", "/agents/snapshot").iter().all(|r| r["authorization"] == "Bearer probe-token"), "the peer is read with its own token");
+            check(peer_requests("GET", "/agents/snapshot").iter().all(|r| r["authorization"] == "Bearer cld_probe_paired_device"), "the peer is read with its own token");
             check(posts("/select").iter().all(|p| !p["body"]["session"].as_str().unwrap_or("").starts_with('@')), "the primary is never asked about a peer's chat");
             shot(&out, "all-hosts-01-merged");
             peer_snapshots.set(peer_requests("GET", "/agents/snapshot").len());
@@ -221,6 +229,59 @@ pub fn all_hosts_check(out: String) {
                 return false;
             }
             check(posts("/decisions/pd1/resolve").is_empty(), "the decision is answered on the peer, not the primary");
+            let note = json!({"session": "rachel", "turns": [{"id": "primary-warms-image", "role": "assistant",
+                "kind": "note", "origin": "note", "text": "![Primary photo](clarp-media://asset/all-hosts-primary-first)"}]});
+            check(super::control("/__control/upsert", &note).is_ok(), "the displayed primary chat publishes the first image");
+            true
+        })),
+        ("primary image", Box::new(|app, window, _| {
+            let loaded = images(window, "primary-warms-image");
+            if !loaded.first().is_some_and(|image| image.loaded) {
+                return false;
+            }
+            check(loaded[0].image.size().width == 280, "the primary chat receives the primary's pixels");
+            check(peer_requests("GET", PRIMARY_FIRST).is_empty(), "the peer is not asked for the primary's image");
+            let primary = app.engine.borrow().base_url().to_owned();
+            let body = format!("```clarp-gallery\n![Peer photo](clarp-media://asset/all-hosts-primary-first)\n![Peer absolute]({}{PEER_FIRST})\n```\n\n![Foreign]({primary}/media/all-hosts-cross-origin)", peer_url());
+            let note = json!({"session": "nova", "turns": [{"id": "peer-warms-image", "role": "assistant",
+                "kind": "note", "origin": "note", "text": body}]});
+            check(peer_control("/__control/upsert", &note).is_ok(), "the peer publishes its own image under the same path");
+            app.engine.borrow_mut().select(NOVA);
+            crate::pump_now(&app_now());
+            true
+        })),
+        ("peer images", Box::new(|app, window, _| {
+            let loaded = images(window, "peer-warms-image");
+            if loaded.len() < 3 || !loaded.iter().take(2).all(|image| image.loaded) {
+                return false;
+            }
+            check(loaded.len() == 3 && loaded[..2].iter().all(|image| image.image.size().width == 420),
+                "the peer's native and same-origin absolute references display its own pixels");
+            check(loaded[2].foreign && !loaded[2].loaded, "a different Host's absolute media URL stays foreign to this chat");
+            check(super::requests("GET", PEER_FIRST).is_empty(), "the primary is not asked for the peer's image");
+            let note = json!({"session": "rachel", "turns": [{"id": "primary-reads-peer-path", "role": "assistant",
+                "kind": "note", "origin": "note", "text": "![Another primary photo](clarp-media://asset/all-hosts-peer-first)"}]});
+            check(super::control("/__control/upsert", &note).is_ok(), "the primary publishes a path already seen on the peer");
+            app.engine.borrow_mut().select("rachel");
+            crate::pump_now(&app_now());
+            true
+        })),
+        ("primary after peer", Box::new(|_, window, _| {
+            let loaded = images(window, "primary-reads-peer-path");
+            if !loaded.first().is_some_and(|image| image.loaded) {
+                return false;
+            }
+            check(loaded[0].image.size().width == 280, "the peer's cached image cannot satisfy the primary's request");
+            for path in [PRIMARY_FIRST, PEER_FIRST] {
+                let primary = super::requests("GET", path);
+                let peer = peer_requests("GET", path);
+                check(primary.len() == 1 && primary[0]["authorization"] == "Bearer probe-token"
+                    && peer.len() == 1 && peer[0]["authorization"] == "Bearer cld_probe_paired_device",
+                    &format!("{path} was fetched once per Host with its own token"));
+            }
+            let foreign = "/media/all-hosts-cross-origin";
+            check(super::requests("GET", foreign).is_empty() && peer_requests("GET", foreign).is_empty(),
+                "neither Host is asked for the foreign reference");
             let down = peer_control("/__control/outage", &json!({"seconds": 600}));
             check(down.is_ok(), &format!("the peer goes away: {down:?}"));
             true

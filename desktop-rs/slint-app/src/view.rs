@@ -669,6 +669,8 @@ pub(crate) fn message_row(
     row: &clarp_core::presentation::PresentedRow,
     always_show_tools: bool,
     expanded: &std::collections::HashSet<String>,
+    session: &str,
+    image_host: Option<&str>,
 ) -> MessageRow {
     let m = &row.message;
     // A row the Host writes itself (role "system", e.g. "Now on Codex ·
@@ -730,7 +732,10 @@ pub(crate) fn message_row(
         author: author.into(),
         spoken: spoken.into(),
         blocks: ModelRc::new(VecModel::from({
-            let mut shown: Vec<crate::MessageBlock> = blocks.iter().flat_map(|b| crate::artifacts_view::with_images(b, author == "user" && prompt.is_none())).collect();
+            let literal = author == "user" && prompt.is_none();
+            let mut shown: Vec<crate::MessageBlock> = blocks.iter()
+                .flat_map(|b| crate::artifacts_view::with_images(b, literal, session, image_host))
+                .collect();
             // Image blocks the keyboard reaches (J/K) and enlarges: not the
             // web's, which are never fetched.
             for (index, block) in shown.iter_mut().enumerate() {
@@ -817,6 +822,7 @@ struct RowSource {
 #[derive(Default)]
 pub(crate) struct RowCache {
     rows: std::collections::HashMap<String, (RowSource, MessageRow)>,
+    image_host: Option<String>,
     /// Live item rows (docs/live-items.md): key → the entry's signature
     /// (revision, status, revealed text, …) and the row built from it.
     live: std::collections::HashMap<String, (String, MessageRow)>,
@@ -851,7 +857,11 @@ impl RowCache {
         self.live.retain(|key, _| keys.contains(key.as_str()));
     }
 
-    pub(crate) fn rows(&mut self, presented: &[PresentedRow], always: bool, expanded: &std::collections::HashSet<String>) -> Vec<MessageRow> {
+    pub(crate) fn rows(&mut self, presented: &[PresentedRow], always: bool, expanded: &std::collections::HashSet<String>, session: &str, image_host: Option<&str>) -> Vec<MessageRow> {
+        if self.image_host.as_deref() != image_host {
+            self.rows.clear();
+            self.image_host = image_host.map(str::to_owned);
+        }
         let pictures = crate::artifacts_view::pictures_landed();
         let mut kept = std::collections::HashMap::with_capacity(presented.len());
         let rows = presented
@@ -869,7 +879,7 @@ impl RowCache {
                 });
                 let (source, shown) = reused.unwrap_or_else(|| {
                     self.built += 1;
-                    let shown = message_row(row, always, expanded);
+                    let shown = message_row(row, always, expanded, session, image_host);
                     let images = slint::Model::iter(&shown.blocks).any(|b| b.kind == "images");
                     (RowSource { row: row.clone(), always, open, prompt_open, pictures: images.then_some(pictures) }, shown)
                 });
@@ -1024,16 +1034,16 @@ mod tests {
         };
         let expanded = std::collections::HashSet::new();
         let mut cache = super::RowCache::default();
-        let first = cache.rows(&present(&messages), false, &expanded);
+        let first = cache.rows(&present(&messages), false, &expanded, "", None);
         assert_eq!(cache.built, 31);
         messages[30] = message("live", "assistant", "Partial answer, growing", 32);
-        let second = cache.rows(&present(&messages), false, &expanded);
+        let second = cache.rows(&present(&messages), false, &expanded, "", None);
         assert_eq!(cache.built, 32, "one row changed, one row built");
         assert_eq!(second.len(), first.len());
         assert!(first.iter().zip(&second).take(30).all(|(a, b)| a.id == b.id && slint::Model::row_count(&a.blocks) == slint::Model::row_count(&b.blocks)));
         let text = |row: &crate::MessageRow| slint::Model::row_data(&row.blocks, 0).map(|b| b.styled).unwrap_or_default();
         assert_eq!(text(&second[30]), super::styled("Partial answer, growing", false), "the changed row shows its new text");
-        cache.rows(&present(&messages), true, &expanded);
+        cache.rows(&present(&messages), true, &expanded, "", None);
         assert_eq!(cache.built, 63, "a presentation setting builds every row again");
     }
 
@@ -1052,13 +1062,13 @@ mod tests {
     fn an_agents_prompt_is_one_line_until_opened() {
         let rows = prompt_rows(&[serde_json::json!({"id": "u7", "role": "user", "origin": "agent", "sender_name": "Rachel",
             "text": "## Build plan\n\nRun `cargo test` first.\n\n- then report"})]);
-        let closed = super::message_row(&rows[0], false, &std::collections::HashSet::new());
+        let closed = super::message_row(&rows[0], false, &std::collections::HashSet::new(), "", None);
         assert_eq!(closed.prompt.key, "a2a:u7");
         assert_eq!(closed.prompt.sender, "Rachel");
         assert_eq!(closed.prompt.initial, "R");
         assert_eq!(closed.prompt.line, "Build plan");
         assert!(!closed.prompt.expanded, "folded by default");
-        let open = super::message_row(&rows[0], false, &["a2a:u7".to_owned()].into_iter().collect());
+        let open = super::message_row(&rows[0], false, &["a2a:u7".to_owned()].into_iter().collect(), "", None);
         assert!(open.prompt.expanded);
         // A paragraph and a list are blocks of their own, so the chat's
         // paragraph spacing falls between them.
@@ -1079,7 +1089,7 @@ mod tests {
             serde_json::json!({"id": "a1", "role": "assistant", "text": "Hi"}),
         ]);
         for row in &rows {
-            let shown = super::message_row(row, false, &std::collections::HashSet::new());
+            let shown = super::message_row(row, false, &std::collections::HashSet::new(), "", None);
             assert_eq!(shown.prompt.key, "", "{}", shown.id);
         }
     }
@@ -1094,14 +1104,14 @@ mod tests {
         ]);
         let mut cache = super::RowCache::default();
         let mut expanded = std::collections::HashSet::new();
-        assert!(!cache.rows(&rows, false, &expanded)[1].prompt.expanded);
+        assert!(!cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded);
         expanded.insert("a2a:u7".to_owned());
-        let open = cache.rows(&rows, false, &expanded);
+        let open = cache.rows(&rows, false, &expanded, "", None);
         assert!(open[1].prompt.expanded, "opened by its key");
         assert_eq!(cache.built, 3, "only the prompt is built again");
-        assert!(cache.rows(&rows, false, &expanded)[1].prompt.expanded, "and stays open when presented again");
+        assert!(cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded, "and stays open when presented again");
         expanded.remove("a2a:u7");
-        assert!(!cache.rows(&rows, false, &expanded)[1].prompt.expanded, "folds again");
+        assert!(!cache.rows(&rows, false, &expanded, "", None)[1].prompt.expanded, "folds again");
     }
 
     /// A live item's row is reused until its entry changes; a streaming
@@ -1132,7 +1142,7 @@ mod tests {
         let text = "[Clarp decision resolved]\nDecision ID: dec-7\nArtifact ID: art-42\nResolved by: user\nQuestion: Deploy to production?\nContext: CI is green.\nReference: \nPayload: {}\nThe user rejected this exact action: Deploy to production? Do not perform it or a broader version of it.";
         let messages = [Message::from_json(serde_json::json!({"id": "m1", "role": "user", "origin": "automation", "text": text}).as_object().unwrap())];
         let rows = clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows;
-        let row = super::message_row(&rows[0], false, &Default::default());
+        let row = super::message_row(&rows[0], false, &Default::default(), "", None);
         assert_eq!(row.author, "user");
         assert_eq!(slint::Model::row_count(&row.blocks), 0, "no prompt text");
         assert_eq!(row.receipt.key, "receipt:m1");
@@ -1142,7 +1152,7 @@ mod tests {
         assert_eq!(row.receipt.kind, "DECISION");
         let plain = [Message::from_json(serde_json::json!({"id": "m2", "role": "user", "text": "The user chose: accepted."}).as_object().unwrap())];
         let rows = clarp_core::presentation::present(&plain, &mut clarp_core::presentation::Settings::default(), None).rows;
-        assert_eq!(super::message_row(&rows[0], false, &Default::default()).receipt.key, "", "the user's own words stay a message");
+        assert_eq!(super::message_row(&rows[0], false, &Default::default(), "", None).receipt.key, "", "the user's own words stay a message");
     }
 
     /// A reply that was only spoken markup shows nothing, not its tags.
@@ -1150,7 +1160,7 @@ mod tests {
     fn a_reply_of_voice_markup_only_shows_no_tags() {
         let messages = [Message::from_json(serde_json::json!({"id": "a1", "role": "assistant", "text": "<speak><vox>um</vox> <break time=\"350ms\"/></speak>", "tools": [{"name": "Read"}]}).as_object().unwrap())];
         let rows = clarp_core::presentation::present(&messages, &mut clarp_core::presentation::Settings::default(), None).rows;
-        let row = super::message_row(&rows[0], true, &Default::default());
+        let row = super::message_row(&rows[0], true, &Default::default(), "", None);
         assert_eq!(slint::Model::row_count(&row.blocks), 0, "the raw text is never the fallback");
     }
 
