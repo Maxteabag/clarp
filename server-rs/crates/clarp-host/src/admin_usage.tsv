@@ -120,7 +120,7 @@ agent		usage: clarp-admin agent [-h] {archive,create,fork,helper-state,provider,
 agent archive	--session	usage: clarp-admin agent archive [-h] --session SESSION [--restore]
 agent create	--parent --role --cwd --backend --model --effort --session --voice-id --codex-home --codex-provider --cloud-speech	usage: clarp-admin agent create [-h] [--parent PARENT] [--role {agent,helper}] [--cwd CWD] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [--session SESSION] [--voice-id VOICE_ID] [--codex-home CODEX_HOME] [--codex-provider CODEX_PROVIDER] [--cloud-speech {on,off}] [--test] name
 agent fork	--task --task-file --count --spec --worktree --cwd --from --backend --model --effort	usage: clarp-admin agent fork [-h] [--task TASK] [--task-file TASK_FILE] [--count COUNT] [--spec SPEC] [--worktree WORKTREE] [--cwd CWD] [--from FROM_SESSION] [--backend BACKEND] [--model MODEL] [--effort EFFORT] [name]
-agent helper-state	--from --child-cwd	usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] [--child-cwd PATH] session [{done,failed,running}]
+agent helper-state	--from	usage: clarp-admin agent helper-state [-h] [--from FROM_SESSION] session [{done,failed,running}]
 agent provider	--session --codex-home --codex-provider --cloud-speech --reader --no-reader	usage: clarp-admin agent provider [-h] --session SESSION [--codex-home CODEX_HOME] [--codex-provider CODEX_PROVIDER] [--clear] [--cloud-speech {on,off,default}] [--reader READER] [--no-reader READER]
 agent transit	--session --backend --model --effort	usage: clarp-admin agent transit [-h] --session SESSION --backend BACKEND [--model MODEL] [--effort EFFORT]
 stop	--session --reason --from	usage: clarp-admin stop [-h] --session SESSION --reason REASON [--from FROM_SESSION]
