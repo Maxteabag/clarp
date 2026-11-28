@@ -147,7 +147,7 @@ fn voice_told(app: &App, directory: &Directory) -> Value {
         voice: voice.as_deref().unwrap_or(""),
         of_oracle: said.gemini_voice_for("Oracle"),
         usual: &said.gemini_voice,
-        elevenlabs: Some(ElevenVoice {
+        elevenlabs: eleven_realtime_enabled(&file).then(|| ElevenVoice {
             has_key: OwnerFile::key_from(Some(&file), "elevenlabs").is_some(),
             model: directory
                 .setting(ELEVEN_MODEL_KEY)
@@ -158,6 +158,14 @@ fn voice_told(app: &App, directory: &Directory) -> Value {
         }),
     };
     voices.status()
+}
+
+/// The release owner enables this only on a Host qualified for the new voice.
+fn eleven_realtime_enabled(file: &toml::Table) -> bool {
+    file.get("oracle")
+        .and_then(|oracle| oracle.get("eleven_realtime_enabled"))
+        .and_then(toml::Value::as_bool)
+        == Some(true)
 }
 
 #[derive(serde::Deserialize)]
@@ -214,6 +222,17 @@ async fn choose_voice(
         settings.push((ELEVEN_MODEL_KEY.to_string(), model.to_string()));
     }
     let _turn = app.oracle.turn.lock().await;
+    if chosen == "elevenlabs"
+        && !OwnerFile::new(app.config.speech_keys.clone())
+            .read()
+            .as_ref()
+            .is_some_and(eleven_realtime_enabled)
+    {
+        return Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "Eleven Realtime is disabled on this Host",
+        ));
+    }
     app.fleet.set(settings).await?;
     let told = voice_told(&app, &app.fleet.directory());
     let (selected, effective) = (&told["selected"], &told["provider"]);

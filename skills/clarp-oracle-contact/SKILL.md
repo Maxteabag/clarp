@@ -41,6 +41,6 @@ The wire contract is `docs/oracle-handoff.md` in the Clarp repository.
 
 Oracle Live calls on a Host advertising `oracle_eleven_realtime` can use Eleven
 Realtime v1 Mini or v1 Max. The user selects the model in Oracle settings on a
-supporting app. The Host offers it when the existing ElevenLabs key is present
-and uses the existing Oracle contact and routing. The choice applies to the
-next call. Older Hosts keep their existing provider choices.
+supporting app. The Host offers it when its owner enables `eleven_realtime_enabled`
+under `[oracle]` and the existing ElevenLabs key is present. The choice applies
+to the next call and uses the existing Oracle contact and routing.

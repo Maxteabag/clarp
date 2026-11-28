@@ -305,6 +305,7 @@ impl Voices<'_> {
         let voice = first_said(&[self.voice, self.of_oracle.unwrap_or(""), self.usual]);
         let voice = voice.unwrap_or("Kore");
         let fallback = (choice != current).then_some(match choice {
+            "elevenlabs" if self.elevenlabs.is_none() => "Eleven Realtime is disabled on this Host",
             "elevenlabs" => "Eleven Realtime needs an ElevenLabs API key on this Host",
             _ => "Gemini Live needs a Gemini API key on this Host",
         });

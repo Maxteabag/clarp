@@ -56,6 +56,12 @@ fn elevenlabs_stand_in() -> (String, std::sync::mpsc::Receiver<(Value, End)>) {
     (address, calls)
 }
 
+fn opted_in(place: &Place) -> PathBuf {
+    let path = place.root.join("oracle.toml");
+    std::fs::write(&path, "[oracle]\neleven_realtime_enabled = true\n").unwrap();
+    path
+}
+
 #[test]
 fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     let place = Place::new("oracle-eleven");
@@ -63,7 +69,7 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     let router = stand_in_oracle_router();
     let host = place.start_in(
         "admin",
-        &[],
+        &["--speech-keys", opted_in(&place).to_str().unwrap()],
         &[
             ("CLARP_ELEVEN_REALTIME_ENDPOINT", &address),
             ("ELEVEN_API_KEY", "fixture-vault-eleven"),
@@ -213,7 +219,12 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
 #[test]
 fn an_unconfigured_elevenlabs_key_reports_the_effective_oracle_fallback() {
     let place = Place::new("oracle-eleven-no-key");
-    let host = place.start_without("admin", &[], &[], &["ELEVEN_API_KEY"]);
+    let host = place.start_without(
+        "admin",
+        &["--speech-keys", opted_in(&place).to_str().unwrap()],
+        &[],
+        &["ELEVEN_API_KEY"],
+    );
     let (status, reply) = host.ask(
         "POST",
         PICKER,
@@ -228,4 +239,28 @@ fn an_unconfigured_elevenlabs_key_reports_the_effective_oracle_fallback() {
         "Eleven Realtime needs an ElevenLabs API key on this Host"
     );
     assert_eq!(host.get(PICKER), reply);
+}
+
+#[test]
+fn a_shared_host_needs_explicit_opt_in_before_elevenlabs_can_be_selected() {
+    let place = Place::new("oracle-eleven-disabled");
+    let host = place.start_in("admin", &[], &[("ELEVEN_API_KEY", "fixture-vault-eleven")]);
+    let before = host.get(PICKER);
+    assert_eq!(before["provider"], "openai");
+    assert!(before.get("elevenlabs").is_none());
+    assert!(
+        !before["available"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("elevenlabs"))
+    );
+    let (status, reply) = host.ask(
+        "POST",
+        PICKER,
+        Some(&json!({"provider":"elevenlabs","model":MAX})),
+    );
+    assert_eq!(status, 409);
+    assert_eq!(reply["error"], "Eleven Realtime is disabled on this Host");
+    assert_eq!(host.get(PICKER), before);
+    assert_eq!(host.get("/oracle/status")["v2"]["voice_provider"], "openai");
 }
