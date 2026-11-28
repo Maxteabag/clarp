@@ -197,7 +197,7 @@ msgstr "Conversación entre agentes"
 #. chat list, row that opens the list of conversations between agents (agent-to-agent rooms) (noun)
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It shows the rooms where agents talk to each other.
 msgid "Agent conversations"
-msgstr "Conversaciones entre agentes"
+msgstr "Chats entre agentes"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Shows the rooms where agents talk to each other.
 msgid "Agent conversations (agent to agent)"
@@ -2567,7 +2567,7 @@ msgstr "Teclas en el explorador"
 
 #. Keys help (?), title elsewhere; {} is the key context's name (e.g. Settings, Updates)
 msgid "Keys in {}"
-msgstr "Teclas en {}"
+msgstr "Atajos: {}"
 
 #. Keys help (?), title while the keyboard is on an artifact card in the chat
 msgid "Keys on a card"
@@ -3115,7 +3115,7 @@ msgstr "Siguiente agente que requiere atención"
 #. Keys (key context “Chat and explorer”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It opens the next agent that is waiting for you.
 #. Vim mode, the which-key panel: what the keys "<Space> a" do in the chat and the explorer
 msgid "Next attention"
-msgstr "Siguiente que requiere atención"
+msgstr "Siguiente pendiente"
 
 #. chat list, accessibility label of the small numbered badge on a chat row: its place in the queue of chats that need the user's attention; {} is the number (1 is next)
 msgid "Next attention, number {}"
@@ -4296,7 +4296,7 @@ msgstr "Restablecer valor predeterminado"
 
 #. font picker, button: back to the theme's font and size; {0} the font's name, {1} its size in pixels
 msgid "Reset to theme default ({0} {1} px)"
-msgstr "Restablecer la del tema ({0} {1} px)"
+msgstr "Usar fuente del tema ({0} {1} px)"
 
 #. Ctrl+K command palette, a command's name (an action; a verb phrase is a command, a noun phrase names what it opens). What it does: Draws the chats at 100% again.
 #. Keys (key context “Everywhere”): the name of a key's action, in the shortcut bar, Keys help (?) and the key-binding editor. It draws the chats at 100% again.
@@ -7306,8 +7306,7 @@ msgstr "↑↓ mover · Enter ejecutar o cambiar · Esc cerrar"
 #. Ctrl+K command palette, the key hint line at the bottom; key names stay, the words say what each key does
 msgid ""
 "↑↓ move · Enter runs a command, switches a setting or lists its choices · Esc close"
-msgstr ""
-"↑↓ mover · Enter ejecuta un comando, cambia un ajuste o muestra sus opciones · Esc cerrar"
+msgstr "↑↓ mover · Enter ejecutar, cambiar o ver opciones · Esc cerrar"
 
 #. chat, wide table, clickable hint above it: scrolls the table sideways to its end; {n} is how many columns it has; the arrow points right
 msgid "→ {n} column"
