@@ -18519,9 +18519,12 @@ fn an_agent_publishes_a_file_with_its_own_tool_and_the_apps_fetch_it() {
     // it from the agent's log, its bytes from the disk.
     host.kill();
     let host = place.start_with_token(token);
-    let shown = gallery(&host, &maker);
-    assert_eq!(shown.len(), 1);
-    assert_eq!(shown[0]["asset_id"], id.as_str());
+    let restored = gallery(&host, &maker);
+    let [restored_latest, restored_chart] = restored.as_slice() else {
+        panic!("both published images survive the restart: {restored:?}");
+    };
+    assert_eq!(restored_latest["asset_id"], latest["asset_id"]);
+    assert_eq!(restored_chart["asset_id"], chart["asset_id"]);
     let whole = fetch(&host, token, "GET", &format!("/media/{id}"), &[], b"");
     assert_eq!(whole.status, 200);
     assert!(
