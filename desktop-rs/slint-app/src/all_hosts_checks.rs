@@ -9,7 +9,7 @@
 //! peer and never to the primary. A peer that offers `roster_fields` mutes
 //! its Nova by event alone: the merged row changes, the peer's agent list
 //! is not read (issue 841). A peer that cannot be reached keeps its
-//! rows with a quiet "Peer Host unreachable" line, and turning the setting
+//! rows with a quiet "Peer Host isn't answering · since …" row, and turning the setting
 //! off leaves only the primary's chats.
 
 use std::time::Duration;
@@ -82,7 +82,8 @@ fn images(window: &crate::AppWindow, id: &str) -> Vec<crate::MessageImage> {
 }
 
 pub fn all_hosts_check(out: String) {
-    let (out_open, out_gone, out_gallery) = (out.clone(), out.clone(), out.clone());
+    let (out_open, out_gone, out_gallery, out_back) = (out.clone(), out.clone(), out.clone(), out.clone());
+    let peer_back = std::rc::Rc::new(std::cell::Cell::new(false));
     let primary_posts_before = std::rc::Rc::new(std::cell::Cell::new(0usize));
     let posts_before = primary_posts_before.clone();
     let peer_snapshots = std::rc::Rc::new(std::cell::Cell::new(0usize));
@@ -292,11 +293,23 @@ pub fn all_hosts_check(out: String) {
             true
         })),
         ("unreachable", Box::new(move |app, window, elapsed| {
-            let note = window.get_roster_note().to_string();
-            if !note.contains("Peer Host unreachable") || elapsed < Duration::from_millis(300) {
+            use slint::{ComponentHandle, Model};
+            let rows = window.global::<crate::HostDownBridge>().get_rows();
+            let row = rows.iter().find(|row| row.text.starts_with("Peer Host isn't answering · since "));
+            if row.is_none() || elapsed < Duration::from_millis(300) {
                 return false;
             }
+            check(rows.row_count() == 1, &format!("one row, for the peer alone: {:?}", rows.iter().map(|r| r.text.to_string()).collect::<Vec<_>>()));
+            check(!window.get_roster_note().contains("unreachable"), "the row replaces the bare note");
             let engine = app.engine.borrow();
+            let panel = engine.host_down_for_session(NOVA);
+            check(panel.as_ref().is_some_and(|p| p.title() == "Peer Host isn't answering"), &format!("the peer's chat has its panel: {panel:?}"));
+            check(engine.host_down_for_session("rachel").is_none(), "the primary's chats have none");
+            check(!engine.host_answers_for_session(NOVA), "the peer's chat is read-only");
+            check(engine.host_answers_for_session("rachel"), "the primary's chats still send");
+            let diagnostics = engine.host_diagnostics(&peer_url(), "desktop-linux", "0", "check");
+            check(diagnostics.starts_with("Clarp diagnostics\n") && !diagnostics.contains("127.0.0.1") && !diagnostics.contains("Peer Host"),
+                &format!("the diagnostics name nothing private: {diagnostics}"));
             let nova = engine.roster().find(NOVA).cloned();
             check(nova.as_ref().is_some_and(|a| a.latest_state == "offline"), &format!("the peer's rows stay, offline: {:?}", nova.map(|a| a.latest_state)));
             check(engine.connection_state() == "live", &format!("the primary is not slowed: {}", engine.connection_state()));
@@ -306,6 +319,22 @@ pub fn all_hosts_check(out: String) {
             // "Show the Host on each chat" off: no row and no header names
             // a Host, also with several Hosts listed; the moved line stays.
             check(crate::look::step_setting(&app_now(), window, "host-badges", 1), "the badge setting is on the settings page");
+            true
+        })),
+        ("back online", Box::new(move |app, _window, _| {
+            // The peer answers again; Try again asks it at once, and its
+            // panel says Back online before it goes.
+            if !peer_back.replace(true) {
+                check(peer_control("/__control/outage", &json!({"seconds": 0})).is_ok(), "the peer comes back");
+                app.engine.borrow_mut().host_try_again(&peer_url());
+                return false;
+            }
+            let back = app.engine.borrow().host_down_for_session(NOVA);
+            if !back.as_ref().is_some_and(|view| view.back_online && view.status == "Back online") {
+                return false;
+            }
+            check(app.engine.borrow().host_answers_for_session(NOVA), "the peer's chat sends again");
+            shot(&out_back, "all-hosts-04-back-online");
             true
         })),
         ("badges off", Box::new(|app, window, _| {

@@ -789,6 +789,17 @@ impl App {
         }
     }
 
+    /// The chat's Host does not answer: the panel under the header, its
+    /// saved messages readable, sending off with the read-only note.
+    fn host_down(engine: &Engine, view: &mut PaneView, session: &str) {
+        let down = if session.is_empty() || view.pair { None } else { engine.host_down_for_session(session) };
+        let read_only = down.as_ref().is_some_and(|d| !d.back_online);
+        view.down_shown = down.is_some();
+        view.read_only_note = down.as_ref().filter(|_| read_only).map(|d| clarp_core::host_down::read_only_note(&d.label)).unwrap_or_default().into();
+        view.can_send = !read_only && engine.can_send(session);
+        view.down = down.as_ref().map(crate::host_down_view::panel).unwrap_or_default();
+    }
+
     fn composer(engine: &Engine, view: &mut PaneView, session: &str) {
         let attachments: Vec<Attachment> = engine.attachments(session).iter().map(attachment).collect();
         view.attachments = ModelRc::new(VecModel::from(attachments));
@@ -1513,6 +1524,10 @@ impl App {
                 drop(engine);
                 view.portrait = self.header_portrait(&session);
                 pane.view = view;
+            }
+            // Its Host stopped or started answering (or the line counts down).
+            if composer || everything || changes.contains(&Change::HostDown) {
+                Self::host_down(&self.engine.borrow(), &mut pane.view, &session);
             }
             pane.view = self.pane_view(pane);
         }

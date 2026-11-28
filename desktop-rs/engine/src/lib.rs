@@ -34,6 +34,7 @@ mod voice;
 mod narrator;
 mod outage;
 mod host_status;
+pub mod host_down;
 pub mod lifecycle;
 mod live;
 mod queue;
@@ -86,6 +87,9 @@ pub const SNAPSHOT_MIN_INTERVAL: Duration = Duration::from_millis(700);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Change {
     Connection,
+    /// A Host stopped or started answering, or its panel's line changed
+    /// (`host_down`).
+    HostDown,
     ServerInfo,
     /// The saved Hosts changed (`clarp_core::hosts`).
     Hosts,
@@ -207,6 +211,11 @@ enum Message {
     LogRetryDue { session: String, token: u64 },
     /// A catch-up round's `/live` is read again (the round's generation).
     LiveRetryDue { session: String, generation: u64 },
+    /// A Host out of reach is probed again (`host_down`).
+    HostProbeDue { url: String, generation: u64 },
+    HostProbed { url: String, generation: u64, probe: clarp_net::probe::Probe },
+    /// `Back online` has shown long enough.
+    HostBackOnlineDue { url: String, generation: u64 },
 }
 
 pub struct Config {
@@ -366,6 +375,8 @@ pub struct Engine {
     profile: profile::Profile,
     publications: publications::Publications,
     avatars: avatars::Avatars,
+    /// Hosts that do not answer, per Host (`host_down`).
+    host_down: host_down::HostDown,
     live: live::Live,
     form_events: FormEventStore,
     form_events_supported: bool,
@@ -520,6 +531,7 @@ impl Engine {
             profile: Default::default(),
             publications: Default::default(),
             avatars: Default::default(),
+            host_down: Default::default(),
             live: Default::default(),
             form_events: form_events::store(config.form_events.clone()),
             form_events_supported: false,
@@ -575,6 +587,9 @@ impl Engine {
                 Message::ServerInfoRetryDue(attempt) => self.server_info_retry_due(attempt),
                 Message::LogRetryDue { session, token } => self.log_retry_due(&session, token),
                 Message::LiveRetryDue { session, generation } => self.live_retry_due(&session, generation),
+                Message::HostProbeDue { url, generation } => self.host_probe_due(&url, generation),
+                Message::HostProbed { url, generation, probe } => self.host_probed(&url, generation, probe),
+                Message::HostBackOnlineDue { url, generation } => self.host_back_online_due(&url, generation),
             }
         }
         // What the Host said of a chat's view (#702): the primary keeps it.
@@ -585,6 +600,7 @@ impl Engine {
         // What the panes show, told to the Host once per pump (#905).
         self.sync_viewport();
         self.pump_peers();
+        self.watch_hosts();
         let mut changes = std::mem::take(&mut self.changes);
         let mut seen = HashSet::new();
         changes.retain(|change| matches!(change, Change::Notification(_)) || seen.insert(format!("{change:?}")));
@@ -607,6 +623,10 @@ impl Engine {
     }
     pub fn error(&self) -> &str {
         &self.error
+    }
+    /// The error is the Host's being out of reach (no HTTP answer).
+    pub fn transport_error(&self) -> bool {
+        self.error_is_transport
     }
     pub fn server_version(&self) -> &str {
         &self.server_version

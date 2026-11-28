@@ -4,7 +4,9 @@
 
 mod api;
 pub mod credentials;
+pub mod device;
 pub mod pairing;
+pub mod probe;
 mod sse;
 pub mod terminal;
 

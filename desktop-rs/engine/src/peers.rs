@@ -41,7 +41,7 @@ pub(crate) struct Peer {
     handed_over: bool,
     /// Its first connect ended (live, or failed): until then the
     /// "<Host> unreachable" note stays quiet for it.
-    settled: bool,
+    pub(crate) settled: bool,
 }
 
 #[derive(Default)]

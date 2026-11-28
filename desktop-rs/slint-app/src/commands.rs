@@ -1071,15 +1071,10 @@ fn close_picker(app: &App, window: &AppWindow) {
 /// and why (both empty while it is current).
 pub fn roster_note(engine: &clarp_engine::Engine) -> (String, String) {
     let state = engine.roster_freshness();
-    let (note, detail) = (state.note(clarp_engine::roster_freshness::local_clock), state.detail());
-    // Paired Hosts that cannot be reached: their rows stay from cache.
-    let unreachable = engine.unreachable_hosts_note();
-    match (note.is_empty(), unreachable.is_empty()) {
-        (_, true) => (note, detail),
-        // i18n: explorer and Ctrl+K, the detail under the note that a paired Host cannot be reached: its chats are shown from the last read, and the app keeps trying
-        (true, false) => (unreachable, tr!("Its chats show as last read; the desktop keeps trying.")),
-        (false, false) => (format!("{note} · {unreachable}"), detail),
-    }
+    // A Host that cannot be reached has its own row under this note
+    // ("{Host} isn't answering · since 09:14", host_down_view), which
+    // opens its page; its chats stay, shown offline.
+    (state.note(clarp_engine::roster_freshness::local_clock), state.detail())
 }
 
 /// Rebuilds the results (a query typed, or the roster changed while open).

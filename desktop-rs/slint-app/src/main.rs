@@ -12,6 +12,7 @@
 mod agent_terminal;
 mod catalogue;
 mod chat_menu;
+mod host_down_view;
 mod commands;
 mod driver;
 mod headless;
@@ -488,6 +489,7 @@ impl App {
         }
         whole.lap("list");
         self.refresh_panes(&window, changes);
+        host_down_view::apply(self, &window, changes);
         queue_strip::follow(self);
         whole.lap("panes");
         // A chat opens ready to type into, unless the reader is scrolling.
@@ -509,7 +511,10 @@ impl App {
         let state = engine.connection_state().to_owned();
         let empty = engine.roster().agents().is_empty();
         let overlay = self.overlay.borrow().clone();
-        if overlay.is_empty() && empty && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
+        // A Host that answered before has its own page (host_down_view)
+        // instead: the connection page is for a desktop without one.
+        let host_down_page = engine.host_down(engine.base_url()).is_some();
+        if overlay.is_empty() && empty && !host_down_page && matches!(state.as_str(), "offline" | "unauthorized") && changes.contains(&Change::Connection) {
             commands::open_overlay(self, &window, "connection");
             window.invoke_open_connection_page();
         } else if overlay == "connection" && state == "live" && !empty && changes.contains(&Change::Roster) {
@@ -521,7 +526,12 @@ impl App {
         let conversation_error = engine.conversation(&selected).map(|c| {
             if c.error().is_empty() { c.voice_error().to_owned() } else { c.error().to_owned() }
         });
-        let error = if engine.error().is_empty() { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
+        // A Host that does not answer has its panel: its raw connection
+        // error is not shown over the chats (only in its diagnostics).
+        let primary_down = engine.host_down(engine.base_url()).is_some() && engine.transport_error();
+        let chat_down = engine.host_down_for_session(&selected).is_some();
+        let conversation_error = conversation_error.filter(|_| !chat_down);
+        let error = if engine.error().is_empty() || primary_down { conversation_error.unwrap_or_default() } else { engine.error().to_owned() };
         window.set_error(SharedString::from(error));
         drop(engine);
         // Live items say when the agent works: the bar names Stop.
@@ -1253,6 +1263,7 @@ fn main() {
     voice_view::wire(&window);
     font_view::wire(&window);
     orchestrator_view::wire(&window);
+    host_down_view::wire(&window);
     commands::refresh_keys(&state, &window);
     window.on_dismiss_error(|| with_window(|app, window| {
         commands::run(app, window, "dismiss-error");

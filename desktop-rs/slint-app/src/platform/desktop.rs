@@ -248,6 +248,12 @@ fn watch_window() {
                 // After Slint has handed the focus back to what had it.
                 if focused {
                     later(regain_keyboard);
+                    // A Host out of reach is asked again at once.
+                    later(|| {
+                        if let Some(app) = crate::app() {
+                            crate::host_down_view::window_focused(&app);
+                        }
+                    });
                 }
             }
             // Covered or minimised (X11; on Wayland the compositor stops

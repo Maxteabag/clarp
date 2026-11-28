@@ -36,6 +36,8 @@ import { FontPicker, FontBridge, FontItem, FontKey } from "fonts.slint";
 export { FontBridge, FontItem, FontKey }
 import { AvatarArt } from "avatar.slint";
 export { AvatarArt }
+import { HostDownBridge, HostDownPanel, HostDownRow, HostDownPage, DeviceOfflineBanner, HostDownToast } from "host_down.slint";
+export { HostDownBridge, HostDownPanel, HostDownRow }
 import { DisplayCell, CellLine } from "cells.slint";
 import { ArtifactItem, ArtifactBridge, CardHint, FormLeaf, FormRow, FormConfirmDialog, FormChart, FormChartMark, FormChartTick, FormChartDot, FormChartKey, FormTable, FormTableColumn, FormTableCell, FormTableRow } from "artifacts.slint";
 import { LinkHints, LinkBadge, LinkHintLayer } from "link_hints.slint";
@@ -548,6 +550,8 @@ export component AppWindow inherits Window {
                 row-index(session, kind) => { return root.sidebar-row-index(session, kind); }
             }
             VerticalLayout {
+                // No network on this device at all: said once, here.
+                if HostDownBridge.device-offline: DeviceOfflineBanner { }
                 if root.preview-enabled && (root.preview-update-label != "" || root.preview-pinned || root.preview-error != ""): PreviewBanner {
                     update-label: root.preview-update-label;
                     pinned: root.preview-pinned;
@@ -628,6 +632,13 @@ export component AppWindow inherits Window {
                     job-output(id) => { root.job-output(id); }
                     open-report(id) => { root.open-report(id); }
                     open-chat(session) => { root.open-chat(session); }
+                }
+                // The only Host does not answer and nothing is cached: its
+                // page takes the chat area.
+                if HostDownBridge.full-page && !HostDownBridge.device-offline && root.surface != "settings" && root.surface != "updates" && root.surface != "teams": HostDownPage {
+                    width: parent.width;
+                    height: parent.height;
+                    panel: HostDownBridge.page;
                 }
                 teams := Teams {
                     visible: root.surface == "teams";
@@ -755,6 +766,17 @@ export component AppWindow inherits Window {
             to: root.select-to;
             copy-all => { root.select-copy-all(); }
             close => { root.overlay-closed(); }
+        }
+        if root.overlay == "host-down": HostDownPage {
+            width: parent.width;
+            height: parent.height;
+            panel: HostDownBridge.page;
+            closable: true;
+        }
+        HostDownToast {
+            x: (parent.width - self.width) / 2;
+            y: parent.height - (root.shortcuts-visible ? footer.height : 0px) - self.height - 24px;
+            text: HostDownBridge.toast;
         }
         connection-page := ConnectionPage {
             visible: root.overlay == "connection";
