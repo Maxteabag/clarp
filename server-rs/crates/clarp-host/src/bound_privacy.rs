@@ -563,6 +563,7 @@ pub const CLASSES: &[(&str, Class)] = &[
     // A withheld agent is never searched for this reader (`search::find`); one named by its
     // session is refused as its `/log` is.
     ("/search", Words(Query)),
+    ("/notification-settings", NoWords),
     ("/send-settings", NoWords),
     ("/managed-skills", NoWords),
     ("/manifest.json", NoWords),

@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 220;
+pub const HOST_CONTRACT: u64 = 227;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -579,6 +579,13 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("opencode_provider_usage", 215),
     // The local tools token reaches HTTP routes with the agent's own identity and privacy.
     ("agent_token_api", 216),
+    // The owner's notifications per event (`clarp_kernel::notify_events`): `GET` and
+    // `POST /notification-settings` (one choice per event and per agent, kept on the Host,
+    // told as `notification-settings-changed`; `call` is the ring switch), `event`, `alert` and
+    // `message_id` on `user-notification`, the events `failed`, `job_done` and
+    // `helper_report`, and `POST /chat-read` (`chat-read`, and a silent `read` push that takes
+    // a chat's notifications down, also when a chat is opened or a request ends).
+    ("notification_events", 227),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -635,6 +642,9 @@ pub struct App {
     pub controller_actions: Arc<crate::controller_actions::Desk>,
     pub calendar_receipts: Arc<crate::calendar::Receipts>,
     pub form_event_writer: Arc<tokio::sync::Mutex<()>>,
+    /// Held while the owner's notification choices change, through any route that changes them
+    /// (`crate::notify_settings`): one change at a time, each with a version of its own.
+    pub notification_writer: Arc<tokio::sync::Mutex<()>>,
     /// Held by a change to the skills this Host keeps installed, from its reading of the
     /// tools' folders to its keeping of the chosen list.
     pub skill_links: Arc<tokio::sync::Mutex<()>>,
@@ -974,6 +984,11 @@ pub fn router(app: App) -> Router {
             "/send-settings",
             get(crate::send_settings::get).post(crate::send_settings::set),
         )
+        .route(
+            "/notification-settings",
+            get(crate::notify_settings::get).post(crate::notify_settings::set),
+        )
+        .route("/chat-read", post(crate::notify_settings::chat_read))
         .route("/agent-notes", post(crate::coordination::agent_note))
         .route("/orchestrator/route-delegation", post(route_delegation))
         .route("/stop", post(stop))

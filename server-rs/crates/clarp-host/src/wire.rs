@@ -15,6 +15,7 @@ use clarp_kernel::failures;
 use clarp_kernel::jobs::{Job, JobRecord};
 use clarp_kernel::launch_refused;
 use clarp_kernel::notify;
+use clarp_kernel::notify_events;
 use clarp_kernel::recovery;
 use clarp_kernel::spoken::Line;
 use clarp_kernel::tools;
@@ -1334,6 +1335,161 @@ pub fn note_notification(
         })),
         notify::Decision::Suppress { reason } => Err(reason),
     }
+}
+
+/// The keys of the texts the Host made for a notification, as the apps are told them beside
+/// its English (`title_loc_key`, `title_loc_args`, `body_loc_key`, `body_loc_args`).
+fn put_locs(told: &mut Value, title: Option<&notify_events::Loc>, body: &notify_events::Loc) {
+    if let Some(title) = title {
+        told["title_loc_key"] = json!(title.key);
+        told["title_loc_args"] = json!(title.args);
+    }
+    told["body_loc_key"] = json!(body.key);
+    told["body_loc_args"] = json!(body.args);
+}
+
+/// What the Host knows of a failed turn beyond how it ended: what [`failed_notification`]
+/// explains it from, as the agent's state explains it (`turn_error::explained`).
+#[derive(Debug, Clone, Copy, Default)]
+pub struct FailedTurn<'a> {
+    pub model: &'a str,
+    /// The user's own message the turn was for: what a retry sends again. Empty: none.
+    pub message_id: &'a str,
+    pub trace_id: &'a str,
+}
+
+/// The user told that a turn failed (event `failed`): once the Host has stopped trying, of a
+/// kind the user is told of ([`failures::NOTIFY`]). Not a Stop, which is someone's own act;
+/// not of a helper, which reports to its maker; not of a quiet agent; not of a turn that was
+/// talk between agents or routine. The chat is marked unread: what was asked was not done.
+/// Its words are the failure as every app draws it (`docs/turn-errors.md`): the key of the
+/// sentence and its arguments (a time as epoch milliseconds), the English as the fallback,
+/// and the first of its actions. `None` where nobody is told.
+pub fn failed_notification(
+    record: &AgentRecord,
+    ended: &Settled,
+    turn: &FailedTurn<'_>,
+) -> Option<Value> {
+    let (kind, said) = match &ended.outcome {
+        Outcome::Failed { kind, reason } => (kind.as_str(), reason.as_str()),
+        Outcome::Interrupted { reason } => (failures::INTERRUPTED, reason.as_str()),
+        _ => return None,
+    };
+    let origin = ended.origin.name();
+    if !failures::NOTIFY.contains(&kind)
+        || record.is_helper()
+        || record.is_quiet()
+        || !notify::tells_failure(origin)
+    {
+        return None;
+    }
+    let error = clarp_kernel::turn_error::explained(&clarp_kernel::turn_error::Failure {
+        kind,
+        said,
+        backend: &record.backend,
+        model: turn.model,
+        message_id: turn.message_id,
+        trace_id: turn.trace_id,
+        at_ms: ended.ended_at_ms,
+        ..clarp_kernel::turn_error::Failure::default()
+    });
+    let key = error["key"].as_str().unwrap_or("error.unknown");
+    let params = &error["params"];
+    let args: Vec<Value> = clarp_kernel::turn_error::placeholders(key)
+        .iter()
+        .map(|name| match *name {
+            "time" => params["time_ms"].clone(),
+            name => params[name].clone(),
+        })
+        .collect();
+    let name = crate::pusher::display_name(record);
+    let title = notify_events::Loc::new("notify.body.failed_title", &[name]);
+    let body = notify_events::Loc {
+        key: key.to_string(),
+        args,
+    };
+    let mut told = json!({
+        "type": "user-notification",
+        "event": notify_events::Event::Failed.id(),
+        "notification_id": notify_events::failed_id(&record.agent_id, ended.id.0),
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "persona": record.persona,
+        "origin": origin,
+        "reason": format!("failed:{kind}"),
+        "error_kind": kind,
+        "error_code": error["code"],
+        "turn_id": ended.id.0,
+        "cause_message_id": turn.message_id,
+        "source_message_id": "",
+        "title": title.english(),
+        "preview": error["text"]["en"],
+        "done_ts": ended.ended_at_ms,
+        "badge": true,
+        "unread": true,
+        "push": !record.muted,
+        "muted": record.muted,
+    });
+    if !params["time_ms"].is_null() {
+        told["time_ms"] = params["time_ms"].clone();
+    }
+    // The first action is the one a notification offers; never the text to copy.
+    if let Some(first) = error["actions"].get(0) {
+        let mut primary = json!({ "id": first["id"] });
+        if !first["at_ms"].is_null() {
+            primary["at_ms"] = first["at_ms"].clone();
+        }
+        told["primary_action"] = primary;
+    }
+    put_locs(&mut told, Some(&title), &body);
+    Some(told)
+}
+
+/// The user told that a job of an agent's own ended (event `job_done`), succeeded or failed.
+/// A job that mirrors a helper (`sub-agent`) is the helper's, which reports by itself; a
+/// cancelled job was ended on purpose. Not of a helper, a quiet agent, or an agent whose words
+/// go to no push service (the job's title is its words). A job's end is no message: no badge,
+/// nothing unread.
+pub fn job_notification(record: &AgentRecord, job: &Job, at_ms: i64) -> Option<Value> {
+    use clarp_kernel::jobs::JobStatus;
+    let key = match job.status {
+        JobStatus::Succeeded => "notify.body.job_succeeded",
+        JobStatus::Failed => "notify.body.job_failed",
+        _ => return None,
+    };
+    if job.kind == "sub-agent" || record.is_helper() || record.is_quiet() || record.bound() {
+        return None;
+    }
+    let named = if job.title.trim().is_empty() {
+        job.kind.trim()
+    } else {
+        job.title.trim()
+    };
+    let body = notify_events::Loc::new(key, &[named]);
+    let status = job.status.as_str();
+    let mut told = json!({
+        "type": "user-notification",
+        "event": notify_events::Event::JobDone.id(),
+        "notification_id": notify_events::job_id(&job.id, job.generation, status),
+        "agent_id": record.agent_id,
+        "session": record.session,
+        "persona": record.persona,
+        "origin": "job",
+        "reason": format!("job:{status}"),
+        "job_id": job.id,
+        "job_status": status,
+        "cause_message_id": "",
+        "source_message_id": "",
+        "preview": body.english(),
+        "done_ts": at_ms,
+        "badge": false,
+        "unread": false,
+        "push": true,
+        "alert": true,
+        "muted": record.muted,
+    });
+    put_locs(&mut told, None, &body);
+    Some(told)
 }
 
 /// The message a finished turn answered, as far as telling the user of the turn looks at it.
@@ -4251,6 +4407,180 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    fn settled(outcome: Outcome, origin: Origin) -> Settled {
+        Settled {
+            id: clarp_kernel::turn::TurnId(41),
+            message_seq: 3,
+            origin,
+            outcome,
+            accepted_at_ms: 1_000,
+            started_at_ms: Some(1_100),
+            ended_at_ms: 9_000,
+            tool_count: 0,
+            attempts: 3,
+            account_waits: 0,
+            never_ran: false,
+        }
+    }
+
+    fn failed(kind: &str) -> Outcome {
+        Outcome::Failed {
+            reason: "it broke".to_string(),
+            kind: kind.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_failed_turn_is_told_once_under_its_turns_id_and_marks_the_chat_unread() {
+        let ended = settled(failed(failures::USAGE_LIMIT), Origin::User);
+        let turn = FailedTurn {
+            model: "opus",
+            message_id: "m-1",
+            trace_id: "t-1",
+        };
+        let told = failed_notification(&record(), &ended, &turn).unwrap();
+        assert_eq!(told["type"], "user-notification");
+        assert_eq!(told["event"], "failed");
+        assert_eq!(told["error_kind"], "usage_limit");
+        assert_eq!(told["error_code"], "usage_limit");
+        assert_eq!(told["cause_message_id"], "m-1");
+        assert_eq!(told["title"], "Maximus couldn't finish");
+        assert_eq!(told["title_loc_key"], "notify.body.failed_title");
+        assert_eq!(told["title_loc_args"], json!(["Maximus"]));
+        // The sentence as every app draws it: its key, the arguments its catalog string
+        // takes, the English as the fallback.
+        let key = told["body_loc_key"].as_str().unwrap();
+        assert_eq!(key, "error.usage_limit");
+        let wanted = clarp_kernel::turn_error::placeholders(key).len();
+        assert_eq!(told["body_loc_args"].as_array().unwrap().len(), wanted);
+        assert!(!told["preview"].as_str().unwrap().is_empty());
+        // Never the text to copy: only the first action's id, and its moment.
+        if let Some(primary) = told["primary_action"].as_object() {
+            assert!(primary.keys().all(|key| key == "id" || key == "at_ms"));
+        }
+        assert_eq!(told["unread"], true);
+        assert_eq!(told["badge"], true);
+        assert_eq!(told["push"], true);
+        // Told again (a client that asks, a second look), the same turn goes by the same id:
+        // the phone replaces it, never shows two.
+        let again = failed_notification(&record(), &ended, &turn).unwrap();
+        assert_eq!(again["notification_id"], told["notification_id"]);
+        let next = Settled {
+            id: clarp_kernel::turn::TurnId(42),
+            ..ended.clone()
+        };
+        let other = failed_notification(&record(), &next, &turn).unwrap();
+        assert_ne!(other["notification_id"], told["notification_id"]);
+        // The process went away under it: the same, of its own kind.
+        let gone = Outcome::Interrupted {
+            reason: "shim gone".to_string(),
+        };
+        let told = failed_notification(&record(), &settled(gone, Origin::User), &turn).unwrap();
+        assert_eq!(told["error_kind"], "interrupted");
+        // The push says the same.
+        let pushed = crate::pusher::failed(&record(), &told);
+        assert_eq!(pushed.body_loc.unwrap().key, told["body_loc_key"]);
+        assert_eq!(pushed.preview, told["preview"]);
+        assert_eq!(pushed.message_id, "m-1");
+    }
+
+    #[test]
+    fn a_stop_a_helper_a_quiet_agent_and_talk_between_agents_tell_no_failure() {
+        let user = Origin::User;
+        let stopped = Outcome::Stopped {
+            by: "user".to_string(),
+            verified: true,
+            reason: String::new(),
+        };
+        assert!(
+            failed_notification(
+                &record(),
+                &settled(stopped, user.clone()),
+                &FailedTurn::default()
+            )
+            .is_none()
+        );
+        assert!(
+            failed_notification(
+                &record(),
+                &settled(Outcome::Completed, user.clone()),
+                &FailedTurn::default()
+            )
+            .is_none()
+        );
+        // A kind the user is not told of.
+        let unknown = settled(failed(failures::UNKNOWN), user.clone());
+        assert!(failed_notification(&record(), &unknown, &FailedTurn::default()).is_none());
+        let ended = settled(failed(failures::AUTH), user);
+        let helper = AgentRecord {
+            role: "helper".to_string(),
+            ..record()
+        };
+        assert!(failed_notification(&helper, &ended, &FailedTurn::default()).is_none());
+        let janitor = AgentRecord {
+            is_janitor: true,
+            ..record()
+        };
+        assert!(failed_notification(&janitor, &ended, &FailedTurn::default()).is_none());
+        let from_an_agent = Origin::Agent {
+            agent_id: "a2".to_string(),
+        };
+        let between = settled(failed(failures::AUTH), from_an_agent);
+        assert!(failed_notification(&record(), &between, &FailedTurn::default()).is_none());
+        let scheduled = Origin::Trigger {
+            name: "heartbeat".to_string(),
+        };
+        assert!(
+            failed_notification(
+                &record(),
+                &settled(failed(failures::AUTH), scheduled),
+                &FailedTurn::default()
+            )
+            .is_none()
+        );
+        // A muted agent's failure marks the chat unread and pages nobody.
+        let muted = AgentRecord {
+            muted: true,
+            ..record()
+        };
+        assert_eq!(
+            failed_notification(&muted, &ended, &FailedTurn::default()).unwrap()["push"],
+            false
+        );
+    }
+
+    fn job(kind: &str, status: &str) -> Job {
+        serde_json::from_value(json!({
+            "id": "job-1", "kind": kind, "title": "Nightly build", "status": status,
+            "generation": 2, "revision": 9, "started_at_ms": 1, "updated_at_ms": 2,
+            "heartbeat_timeout_ms": 60_000,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_job_that_ended_is_told_once_per_run_and_end_and_never_a_helpers_mirror() {
+        let told = job_notification(&record(), &job("worker", "succeeded"), 5).unwrap();
+        assert_eq!(told["event"], "job_done");
+        assert_eq!(told["notification_id"], "job-job-1-2-succeeded");
+        assert_eq!(told["preview"], "Finished: Nightly build");
+        assert_eq!(told["body_loc_key"], "notify.body.job_succeeded");
+        assert_eq!(told["body_loc_args"], json!(["Nightly build"]));
+        assert_eq!(told["unread"], false);
+        let failed = job_notification(&record(), &job("worker", "failed"), 5).unwrap();
+        assert_eq!(failed["preview"], "Failed: Nightly build");
+        for (kind, status) in [
+            ("worker", "running"),
+            ("worker", "cancelled"),
+            ("sub-agent", "failed"),
+        ] {
+            assert!(
+                job_notification(&record(), &job(kind, status), 5).is_none(),
+                "{kind} {status}"
+            );
         }
     }
 }
