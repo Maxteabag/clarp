@@ -213,6 +213,11 @@ impl Withheld {
     }
 
     fn blank(&self, key: &str, value: &Value) -> Value {
+        // What a chat list's line holds (feature `chat_preview_parts`) is the agent's words
+        // whatever its kind: none at all, as its `last_message` is empty.
+        if matches!(key, "last_message_preview" | "preview_parts") {
+            return Value::Null;
+        }
         match value {
             Value::String(text) if self.keeps(key, text) => value.clone(),
             Value::String(_) => Value::String(String::new()),
@@ -1598,10 +1603,7 @@ mod tests {
         assert_eq!(event["words_withheld"], true);
         let fields = &event["fields"];
         assert_eq!(fields["last_message"], "");
-        assert_eq!(
-            fields["last_message_preview"],
-            json!({"kind": "file", "name": "", "own": false})
-        );
+        assert_eq!(fields["last_message_preview"], Value::Null);
         assert_eq!(fields["status_text"], "");
         assert_eq!(
             (&fields["conversation_id"], &fields["last_message_id"]),
