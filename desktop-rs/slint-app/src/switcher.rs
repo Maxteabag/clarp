@@ -326,8 +326,10 @@ pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
         .map(|name| Item {
             kind: Kind::Contact,
             target: name.to_owned(),
-            label: format!("Start {name}"),
-            detail: format!("New session · {backend} · ~"),
+            // i18n: command palette, row that starts a saved contact (imperative); {} is the contact's name
+            label: clarp_core::tr!("Start {}", name),
+            // i18n: command palette, detail under a contact row: a new session on a backend in the home folder (~ stays); {} is the backend
+            detail: clarp_core::tr!("New session · {} · ~", backend),
             key: String::new(),
             group: "contact",
             description: String::new(),
@@ -350,7 +352,8 @@ pub fn hosts(engine: &Engine, query: &str) -> Vec<Item> {
         .filter(|host| needle.is_empty() || [host.label(), host.url.clone()].iter().any(|f| f.to_lowercase().contains(&needle)))
         .map(|host| Item {
             kind: Kind::Host,
-            label: format!("Switch to {}", host.label()),
+            // i18n: command palette, row that switches to another saved Host (imperative); {} is the Host's name
+            label: clarp_core::tr!("Switch to {}", host.label()),
             detail: host.url.clone(),
             target: host.url,
             key: String::new(),

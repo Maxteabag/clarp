@@ -726,7 +726,8 @@ pub(crate) fn message_row(
     } else if !row.activity_label.is_empty() {
         row.activity_label.clone()
     } else {
-        format!("{count} tool call{}", if count == 1 { "" } else { "s" })
+        // i18n: chat, label of a group of tool calls in the transcript; {n} is how many
+        clarp_core::tr!("{n} tool call" | "{n} tool calls" % count)
     };
     // A group is keyed by its first member (presentation `toggle_group`).
     let group_id = if row.group_label.is_empty() { String::new() } else { m.id.clone() };

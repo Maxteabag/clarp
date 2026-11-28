@@ -188,7 +188,8 @@ impl Context<'_> {
                 leaf.value = self.text(key);
                 leaf.required = self.form.required.contains(key);
                 if let Some(min) = self.short.get(key) {
-                    leaf.note = format!("At least {min} characters.");
+                    // i18n: form card, note under a text field: its shortest answer; {} is the least number of characters
+                    leaf.note = clarp_core::tr!("At least {} characters.", min);
                 }
             }
             Kind::Toggle { label, key } => {
