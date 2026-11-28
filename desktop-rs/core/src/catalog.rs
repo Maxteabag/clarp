@@ -48,7 +48,7 @@ pub fn backend_options(catalog: &Object) -> Vec<Value> {
     if sorted.is_empty() {
         return vec![option("claude", "Claude"), option("codex", "Codex")];
     }
-    sorted.sort_by_key(|(index, _)| *index);
+    sorted.sort_by(|(a, id_a, _), (b, id_b, _)| a.cmp(b).then_with(|| id_a.cmp(id_b)));
     sorted
         .into_iter()
         .filter_map(|(_, id, provider)| {
