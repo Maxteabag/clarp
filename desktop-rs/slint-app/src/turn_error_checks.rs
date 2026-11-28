@@ -147,7 +147,7 @@ pub fn turn_errors_check(out: String) {
             check(done, "the button shows it done");
             check(drawn("error-note:marker-u6"), "with a note saying what happens");
             shot(&o4, "turn-errors-04-compacting");
-            check(press("error-action:copy_details:marker-u5"), "Copy for AI on the auth card");
+            check(press("error-action:copy_details:marker-u5"), "Copy diagnostics on the auth card");
             true
         })),
         ("copied", Box::new(move |_, _, elapsed| {
