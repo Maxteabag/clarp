@@ -728,6 +728,31 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
     let summary = failed
         .as_ref()
         .map_or(summary, |told| told.summary.as_str());
+    // The same failure as the chat draws it, for a list that shows its sentence (feature
+    // `turn_error_explained`). No message is named: a list sends nothing again.
+    let explained = match status
+        .last
+        .as_ref()
+        .map(|last| (&last.outcome, last.ended_at_ms))
+    {
+        Some((
+            Outcome::Failed {
+                reason,
+                kind: failure_kind,
+            },
+            ended_at_ms,
+        )) if kind == AgentStateKind::Interrupted => Some(clarp_kernel::turn_error::explained(
+            &clarp_kernel::turn_error::Failure {
+                kind: failure_kind,
+                said: reason,
+                backend: &record.backend,
+                model: &record.model,
+                at_ms: ended_at_ms,
+                ..clarp_kernel::turn_error::Failure::default()
+            },
+        )),
+        _ => None,
+    };
     // A turn that waits for an account keeps its place and is not thinking: it makes no
     // progress until an account is there. The line says what it waits for.
     let waiting = running.and_then(|live| waiting_for(live, &record.backend));
@@ -758,6 +783,9 @@ pub fn activity(record: &AgentRecord, status: &Status) -> Value {
         "turn_started_ms": running.map(|live| live.started_at_ms),
         "ts": state_stamp(record, status),
     });
+    if let Some(error) = explained {
+        activity["error"] = error;
+    }
     // What a limited turn waits for, as a word an app keys on (`waits_for`).
     if let Some(kind) = waiting
         .as_ref()
@@ -1826,6 +1854,88 @@ pub fn row(version: &Versioned) -> Value {
     row
 }
 
+/// The turn error of a row that says why a turn failed or was cut off (feature
+/// `turn_error_explained`, `docs/turn-errors.md`): its code, its sentence in both languages,
+/// what the user can do and the tool's raw words. `None` for any other row. A row written
+/// before the feature is read the same way, so the history is told as plainly.
+pub fn turn_error_of(
+    version: &Versioned,
+    row: &Value,
+    backend: &str,
+    model: &str,
+    sent_by_user: &dyn Fn(&str) -> bool,
+) -> Option<Value> {
+    use clarp_kernel::turn_error::{Failure, explained};
+    let interrupted = |text: &str, kind: Option<&String>| match kind {
+        Some(kind) if !kind.is_empty() => kind.clone(),
+        _ => match failures::classify_error(text) {
+            failures::UNKNOWN | failures::RUNNER_EXIT => failures::INTERRUPTED.to_string(),
+            kind => kind.to_string(),
+        },
+    };
+    let (kind, said, message_id, trace_id) = match &version.entry {
+        Entry::Notice(notice)
+            if notice.code == Notice::TURN_FAILED || notice.code == "usage-limit" =>
+        {
+            (
+                if notice.code == "usage-limit" {
+                    failures::USAGE_LIMIT.to_string()
+                } else {
+                    notice.kind.clone().unwrap_or_default()
+                },
+                notice.text.as_str(),
+                notice.id.strip_prefix("marker-").unwrap_or(""),
+                notice.trace_id.as_deref().unwrap_or(""),
+            )
+        }
+        Entry::Notice(notice) if notice.code == "turn-interrupted" => (
+            interrupted(&notice.text, notice.kind.as_ref()),
+            notice.text.as_str(),
+            "",
+            notice.trace_id.as_deref().unwrap_or(""),
+        ),
+        Entry::Imported(_)
+            if row["role"] == "assistant"
+                && row["origin"] == "system"
+                && row.get("error").is_none() =>
+        {
+            let text = row["text"].as_str().unwrap_or("");
+            let kind = row["failure_kind"].as_str().unwrap_or("").to_string();
+            // Only what reads as a failure: a system row of the Host it came from may say
+            // anything else (a move, a call).
+            if kind.is_empty()
+                && !text.starts_with("Turn failed")
+                && failures::classify_error(text) == failures::UNKNOWN
+            {
+                return None;
+            }
+            (kind, text, "", row["trace_id"].as_str().unwrap_or(""))
+        }
+        _ => return None,
+    };
+    if said.trim().is_empty() {
+        return None;
+    }
+    // Only the user's own message can be sent again (`POST /turn-retry`): a goal's wake, an
+    // agent's word or a schedule's prompt has no button for it.
+    let message_id = if sent_by_user(message_id) {
+        message_id
+    } else {
+        ""
+    };
+    Some(explained(&Failure {
+        kind: &kind,
+        said,
+        backend,
+        model,
+        message_id,
+        trace_id,
+        resets_at_ms: None,
+        at_ms: version.ts_ms,
+        row: true,
+    }))
+}
+
 /// The name of an agent's conversation. It is the Host's own: chosen when the agent was made,
 /// or brought along when the agent moved here, and the same from the first message on. A tool
 /// that can be told its session's name is told this one (Claude); one that names its session
@@ -1854,10 +1964,30 @@ pub fn log_response(
     let conversation = conversation_id(record, status);
     let file = (record.backend == "claude" && !conversation.is_empty())
         .then(|| format!("{conversation}.jsonl"));
+    // The user's own messages on the page: a failure under one of them can be sent again. One
+    // under a message the page does not hold is offered, and the Host's answer decides.
+    let others: std::collections::HashSet<&str> = page
+        .entries
+        .iter()
+        .filter_map(|version| match &version.entry {
+            Entry::Message(message)
+                if message.origin != Origin::User || message.sender.is_some() =>
+            {
+                Some(message.id.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+    let sent_by_user = |id: &str| !id.is_empty() && !others.contains(id);
     json!({
         "conversation_id": conversation,
         "turns": page.entries.iter().map(|version| {
             let mut row = row(version);
+            // A row that tells why a turn failed says it for every app to draw the same way
+            // (feature `turn_error_explained`), in the agent's backend and model.
+            if let Some(error) = turn_error_of(version, &row, &record.backend, &record.model, &sent_by_user) {
+                row["error"] = error;
+            }
             // A row brought from another Host is the user's here, as every row of an agent
             // that cannot leave a note.
             if row.is_object() && (!hides || row.get("audience").is_none()) {

@@ -175,6 +175,27 @@ Host (delivered as `clarp-admin prompt --server host` does). The
 front desk also gets one daily summary. Findings are stored even without
 a configured recipient. See [the watcher configuration](../../server-rs/docs/experience-watch.md).
 
+## Why a turn failed, as the user sees it (Rust Host contract 218)
+
+A Rust Host with feature `turn_error_explained` explains every failed turn the
+same way to every app: the `/log` row that tells it, the live turn's
+`turn.error` and `agent-activity` carry `error` with a stable `code`
+(`usage_limit`, `billing`, `auth`, `invalid_request`, `prompt_too_long`,
+`connection`, `provider_busy`, `session_locked`, `refused`, ...), one sentence
+in `text.en` and `text.nb`, the `actions` that fit and the tool's raw `detail`.
+Read `code` and `detail`, never the sentence, when you diagnose; the full list
+is in [turn errors](../../docs/turn-errors.md). The iOS, Android and Rust
+desktop apps draw it as one card with buttons once their builds that read it
+are installed; older apps show the old text.
+
+With feature `turn_retry`, `POST /turn-retry {"session","message_id"}` sends a
+failed message of the user's again as a new message (`"at_ms"` for a time,
+`"compact": true` to compact a Claude conversation first). An agent uses it
+only when the user asked for the message to go again. After `invalid_request`
+(the provider rejected the session's history) the agent's next turn opens a
+fresh session with the Host's record of the conversation by itself, and a
+`session_locked` turn is tried twice more within 15 seconds before it fails.
+
 ## Read why an app crashed
 
 The Host keeps the apps' client log and crash reports whatever the diagnostics
