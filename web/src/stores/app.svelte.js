@@ -16,7 +16,7 @@ import { ensureLoaded, reconcileWithSnapshot } from './conversations.svelte.js';
 import { hostBadgeText } from '@core/host-badge.js';
 import { prefs } from './prefs.svelte.js';
 import { knownHosts, readHosts } from './hosts.svelte.js';
-import { PRIMARY as SERVING, isDown } from './reach.svelte.js';
+import { PRIMARY as SERVING, unheard } from './reach.svelte.js';
 
 export const AVATAR_PALETTE = {
   Mike: '#7aa2f7', Rachel: '#f7768e', Domi: '#bb9af7', Bella: '#ff9e64',
@@ -109,13 +109,13 @@ const LIVE_ONLY = {
 };
 
 /**
- * An agent's status row. While the serving Host does not answer, what it last said is not
+ * An agent's status row. While the serving Host is not heard (down, or no network), what it last said is not
  * happening now: the row keeps its name, move and last activity, but nothing working, so no
  * spinner or timer runs on it. The live row comes back with the Host.
  */
 export function statusFor(sid) {
   const s = app.status[sid] || {};
-  return isDown(SERVING) ? { ...s, ...LIVE_ONLY } : s;
+  return unheard(SERVING) ? { ...s, ...LIVE_ONLY } : s;
 }
 
 export function shortActivityText(s) {

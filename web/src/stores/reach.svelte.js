@@ -31,6 +31,8 @@ export const reach = $state({
   hosts: {},
   /** What the OS says (navigator.onLine): false shows one app-wide banner instead of panels. */
   deviceOnline: typeof navigator === 'undefined' || navigator.onLine !== false,
+  /** When this device lost its network (ms), or 0 while it has one. */
+  offlineSince: typeof navigator !== 'undefined' && navigator.onLine === false ? Date.now() : 0,
   /** Ticks once a second while a status line counts down. */
   now: Date.now(),
   /** The Host whose full panel is open over the app (from a list row), or ''. */
@@ -111,6 +113,28 @@ export function reachOf(id) {
 }
 
 /** Shown as not answering: down, and this device is online (offline is the banner's). */
+/**
+ * Nothing is heard from the Host now: it does not answer, or this device has no network. Its
+ * last live state is then not happening now (no working state, no timer). Unlike isDown, this
+ * includes the device being offline, where the banner stands in for the panels.
+ */
+export function unheard(id) {
+  const r = reach.hosts[id];
+  return !reach.deviceOnline || !!(r && r.down);
+}
+
+/** Since when nothing has been heard: the first failure, or the device going offline. */
+export function silentSince(id) {
+  const r = reach.hosts[id];
+  return (r && r.downSince) || reach.offlineSince || (r && r.lastOk) || 0;
+}
+
+/** The Host was heard at `ts` (an event on its stream): "Last answered" counts from there. */
+export function noteHeard(id, ts) {
+  const r = reach.hosts[id];
+  if (r && !r.down && ts > r.lastOk) r.lastOk = ts;
+}
+
 export function isDown(id) {
   const r = reach.hosts[id];
   return !!(r && r.down && reach.deviceOnline);
@@ -346,6 +370,7 @@ export function startReach() {
   started = true;
   window.addEventListener('online', () => {
     reach.deviceOnline = true;
+    reach.offlineSince = 0;
     clog('hostReach', 'device=online');
     // Every Host is asked: the ones that were down, and the serving one in case it went down
     // while there was no network to notice.
@@ -354,6 +379,7 @@ export function startReach() {
   });
   window.addEventListener('offline', () => {
     reach.deviceOnline = false;
+    reach.offlineSince = Date.now();
     clog('hostReach', 'device=offline');
   });
   window.addEventListener('focus', retryAll);

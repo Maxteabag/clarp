@@ -9,7 +9,7 @@
   import StatusLine from './live/StatusLine.svelte';
   import HostDownPanel from './HostDownPanel.svelte';
   import { conversation, reload } from '../stores/conversations.svelte.js';
-  import { PRIMARY, isDown, panelShown } from '../stores/reach.svelte.js';
+  import { PRIMARY, isDown, panelShown, unheard } from '../stores/reach.svelte.js';
   import { live, setExplanationsEnabled } from '../stores/live.svelte.js';
   import { toggleToolsFor, toolActivityFor } from '../stores/chat-choices.svelte.js';
 
@@ -23,7 +23,7 @@
   let nothingSaved = $derived(isDown(PRIMARY) && !conversation(session).turns.length);
 </script>
 
-<section id={active ? 'history' : undefined} class="history" class:hidden={!active} class:host-silent={isDown(PRIMARY)}
+<section id={active ? 'history' : undefined} class="history" class:hidden={!active} class:host-silent={unheard(PRIMARY)}
          aria-label="Conversation" aria-hidden={active ? undefined : 'true'}>
   <header class="history-head">
     <AgentIdentity {session} onTap={onTapAgent} onHold={onHoldAgent} />

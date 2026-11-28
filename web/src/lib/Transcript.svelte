@@ -22,7 +22,7 @@
   } from '../stores/conversations.svelte.js';
   import { live, liveFor, liveRequested, openLive, watchSession } from '../stores/live.svelte.js';
   import { prefs } from '../stores/prefs.svelte.js';
-  import { PRIMARY, isDown, reach } from '../stores/reach.svelte.js';
+  import { PRIMARY, silentSince as silentSinceOf, unheard } from '../stores/reach.svelte.js';
 
   let { session, active = true } = $props();
 
@@ -45,11 +45,10 @@
   // started is not drawn. The policy the rows were read under says it, else the snapshot.
   let visibility = $derived(conv.coordination?.visibility || statusFor(session).coordination_visibility || '');
   let liveHidden = $derived(hidesLiveTurn(visibility, liveState && liveState.turn));
-  // While the serving Host does not answer, nothing it last said runs on: a running item's time
-  // stops where the Host was last heard (no timer counts on), and live data takes over again
+  // While the serving Host is not heard, nothing it last said runs on: a running item's time
+  // stops where it went silent (no timer counts on), and live data takes over again
   // when it is back (docs/design/host-not-answering.md).
-  let silentSince = $derived(isDown(PRIMARY)
-    ? (reach.hosts[PRIMARY]?.lastOk || reach.hosts[PRIMARY]?.downSince || 0) : 0);
+  let silentSince = $derived(unheard(PRIMARY) ? silentSinceOf(PRIMARY) : 0);
   let liveItems = $derived.by(() => {
     const items = liveState && !liveHidden ? currentTurnItems(liveState) : [];
     if (!silentSince) return items;

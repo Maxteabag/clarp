@@ -37,6 +37,32 @@ describe('stale live state while the serving Host is down', () => {
     expect(bannerFor('iris')).toMatchObject({ spinner: true });
   });
 
+  it('goes quiet while this device has no network, though the Host is not marked down', () => {
+    app.status.iris = { name: 'Iris', busy: true, latest_state: 'thinking', turn_started_at: 1000 };
+    expect(reach.isDown(reach.PRIMARY)).toBe(false);
+    reach.reach.deviceOnline = false;
+    reach.reach.offlineSince = 5000;
+    expect(reach.unheard(reach.PRIMARY)).toBe(true);
+    expect(statusFor('iris')).toMatchObject({ busy: false, turn_started_at: null });
+    expect(reach.silentSince(reach.PRIMARY)).toBe(5000);
+    reach.reach.deviceOnline = true;
+    reach.reach.offlineSince = 0;
+    expect(statusFor('iris').busy).toBe(true);
+  });
+
+  it('counts silence from when the Host was last heard, not when its stream opened', () => {
+    reach.noteOk(reach.PRIMARY);
+    const opened = reach.reachOf(reach.PRIMARY).lastOk;
+    reach.noteHeard(reach.PRIMARY, opened + 3_600_000);
+    expect(reach.reachOf(reach.PRIMARY).lastOk).toBe(opened + 3_600_000);
+    reach.noteHeard(reach.PRIMARY, opened);   // never backwards
+    expect(reach.reachOf(reach.PRIMARY).lastOk).toBe(opened + 3_600_000);
+    reach.noteFail(reach.PRIMARY, { kind: 'refused' });
+    const down = reach.reachOf(reach.PRIMARY).downSince;
+    expect(reach.silentSince(reach.PRIMARY)).toBe(down);
+    reach.noteOk(reach.PRIMARY);
+  });
+
   it('is not quieted by another Host being down', () => {
     app.status.iris = { name: 'Iris', busy: true, latest_state: 'thinking' };
     reach.trackHost('peer:x', { label: 'Laptop', url: 'http://10.0.0.2', via: 'host', probe: async () => {} });

@@ -12,7 +12,7 @@
   import { hostsState, openOnHost, readHosts } from '../stores/hosts.svelte.js';
   import { formatRelative } from './i18n/format.js';
   import { t } from '../stores/i18n.svelte.js';
-  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach } from '../stores/reach.svelte.js';
+  import { PRIMARY as SERVING, downHosts, isDown, openPanel, reach, unheard } from '../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -39,7 +39,9 @@
       const isCurrent = !remote && row.sid === app.session;
       // A Host that does not answer: what it last said is not happening now, so nothing working.
       const hostDown = isDown(remote ? remote.id : SERVING);
-      const isBusy = !!s.busy && !hostDown;
+      // Not heard (down, or no network): nothing it last said is happening now.
+      const silent = unheard(remote ? remote.id : SERVING);
+      const isBusy = !!s.busy && !silent;
       const isUnread = !remote && isUserNotificationUnread(row.sid);
       return {
         key: row.key, sid: row.sid, name: row.name, remote,
@@ -50,7 +52,7 @@
         text: s.moved ? movedLine(s.moved)
           : isCurrent ? 'current'
           : isBusy ? (shortActivityPhase(s) || 'working')
-          : isUnread ? 'new' : hostDown ? '' : 'idle',
+          : isUnread ? 'new' : silent ? '' : 'idle',
       };
     });
   });
