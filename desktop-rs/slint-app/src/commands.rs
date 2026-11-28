@@ -932,8 +932,8 @@ pub fn open_switcher(app: &App, window: &AppWindow) {
 
 /// Enter on a setting with choices: the switcher lists its options, the
 /// current one marked; Escape goes back to everything.
-fn open_picker(app: &App, window: &AppWindow, id: &str) {
-    let label = crate::catalogue::find(id).map_or(id, |e| e.label);
+pub fn open_picker(app: &App, window: &AppWindow, id: &str) {
+    let label = crate::catalogue::setting(id).map_or_else(|| crate::catalogue::find(id).map_or(id, |e| e.label).to_owned(), |s| s.label(app));
     {
         let mut state = app.switcher.borrow_mut();
         state.open = true;

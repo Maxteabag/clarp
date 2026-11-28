@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""tools/i18n-import FILE.jsonl [--lang LANG] [--prune]: writes translations into
+desktop-rs/i18n/<lang>/LC_MESSAGES/clarp-slint.po. LANG defaults to the file's
+name (nb.jsonl -> nb). Each line is {"key", "text"} or {"key", "plural": {"one",
+"other"}} (zh-Hans needs only "other").
+
+Translations already in the file stay unless a line replaces them. A key the
+source no longer has is reported and kept, unless --prune drops it. A line whose
+placeholders differ from the English is refused and reported. The file is
+written sorted, so the same input gives the same bytes."""
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import i18n_catalog as cat  # noqa: E402
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(usage=__doc__)
+    ap.add_argument("file")
+    ap.add_argument("--lang")
+    ap.add_argument("--prune", action="store_true")
+    args = ap.parse_args()
+    path = Path(args.file)
+    lang = args.lang or path.name.removesuffix(".jsonl")
+    if lang not in cat.LANGUAGES:
+        print(f"i18n-import: {lang} is not one of {', '.join(cat.LANGUAGES)}", file=sys.stderr)
+        return 2
+    _, categories = cat.PLURAL_FORMS[lang]
+    source, _ = cat.scan()
+    by_key = {m.key: m for m in source}
+    existing = {e.key: e for e in cat.read_po(cat.po_path(lang))}
+    problems, written = [], 0
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip():
+            continue
+        try:
+            line = json.loads(raw)
+            key = line["key"]
+        except (ValueError, KeyError, TypeError):
+            problems.append(f"{path}:{number}: not a {{\"key\", ...}} JSON line")
+            continue
+        msg = by_key.get(key)
+        if msg is None:
+            problems.append(f"{path}:{number}: {key!r} is not in the source")
+            continue
+        wanted = set(cat.placeholders(msg.text + msg.plural))
+        entry = existing.get(key) or cat.Translation(msg.context, msg.text, msg.plural)
+        if msg.plural:
+            forms = line.get("plural")
+            if not isinstance(forms, dict) or any(not forms.get(c) for c in categories):
+                problems.append(f"{path}:{number}: {key!r} is a plural and needs {categories}")
+                continue
+            strs = [forms[c] for c in categories]
+            # Every form may drop {n} (e.g. "one file"); no form may bring a placeholder of its own.
+            if any(set(cat.placeholders(s)) - wanted for s in strs):
+                problems.append(f"{path}:{number}: {key!r} has placeholders the English lacks")
+                continue
+            entry.msgstr_plural, entry.msgstr = strs, ""
+        else:
+            text = line.get("text")
+            if not isinstance(text, str) or not text:
+                problems.append(f"{path}:{number}: {key!r} needs a non-empty \"text\"")
+                continue
+            if set(cat.placeholders(text)) != wanted:
+                problems.append(f"{path}:{number}: {key!r} must keep the placeholders {sorted(wanted)}")
+                continue
+            entry.msgstr = text
+        entry.plural, entry.fuzzy = msg.plural, False
+        entry.comments = msg.comments + ([f"context: {msg.context}"] if msg.context else [])
+        existing[key] = entry
+        written += 1
+    gone = [k for k in existing if k not in by_key]
+    for k in gone:
+        if args.prune:
+            del existing[k]
+        else:
+            print(f"i18n-import: {lang}: {k!r} is no longer in the source (kept; --prune drops it)", file=sys.stderr)
+    for p in problems:
+        print(f"i18n-import: {p}", file=sys.stderr)
+    cat.write_po(lang, list(existing.values()))
+    print(f"i18n-import: {lang}: {written} written, {len(existing)} in {cat.po_path(lang).relative_to(cat.ROOT)}")
+    return 1 if problems else 0
+
+
+sys.exit(main())

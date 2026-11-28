@@ -95,7 +95,8 @@ export component Settings inherits Rectangle {
             spacing: 6px;
             HorizontalLayout {
                 spacing: 16px;
-                Text { text: "SETTINGS"; color: Palette.chrome-text; font-size: 16 * Look.unit; font-weight: 700; }
+                // i18n: Settings page, title at the top (noun), written in capitals where the script has them
+                Text { text: @tr("SETTINGS"); color: Palette.chrome-text; font-size: 16 * Look.unit; font-weight: 700; }
                 Text {
                     text: search.has-focus ? "↓ / Enter results · Esc clear" : "↑↓ move · Enter change · ←→ / −+ adjust · ⌫ reset · ⇧⌫ section · / search · Esc back";
                     color: Palette.muted;

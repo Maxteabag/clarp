@@ -110,6 +110,9 @@ mod lanes_checks;
 // ---- native forms (render_spec) in the chat
 #[path = "render_spec_checks.rs"]
 mod render_spec_checks;
+// ---- Settings → Language switches the window's language at once
+#[path = "language_checks.rs"]
+mod language_checks;
 // ---- what animating costs the UI thread
 #[path = "budget_checks.rs"]
 mod budget_checks;
@@ -340,10 +343,13 @@ fn step(out: &str) {
 
 /// `--shot PATH --select SESSION [--theme ID]`: once live, open SESSION,
 /// let it load and settle, save the window as PNG and quit.
+/// `CLARP_SHOT_COMMAND` runs one command first ("settings", "help-keys",
+/// "switcher"; `commands::run`'s names), to shoot the surface it opens.
 pub fn start_shot(path: String, session: String) {
     let timer = slint::Timer::default();
     let started = Instant::now();
     let chosen = Cell::new(false);
+    let command = Cell::new(std::env::var("CLARP_SHOT_COMMAND").ok().filter(|c| !c.is_empty()));
     let settled: Cell<Option<Instant>> = Cell::new(None);
     timer.start(slint::TimerMode::Repeated, Duration::from_millis(100), move || {
         let Some(app) = crate::app() else { return };
@@ -364,6 +370,11 @@ pub fn start_shot(path: String, session: String) {
         }
         let loaded = app.engine.borrow().conversation(&session).is_some_and(|c| !c.loading() && !c.rows().is_empty());
         if !loaded {
+            return;
+        }
+        if let (Some(name), Some(window)) = (command.take(), crate::window()) {
+            check(crate::commands::run(&app, &window, &name), &format!("ran {name} before the shot"));
+            settled.set(Some(Instant::now()));
             return;
         }
         let since = *settled.get().get_or_insert_with(Instant::now);
@@ -567,6 +578,7 @@ pub fn start_check(name: &str, out: String) {
         "panes" => panes_check(out),
         "switcher" => switcher_check(out),
         "settings" => settings_check(out),
+        "language" => language_checks::language_check(out),
         "keymap" => keymap_check(out),
         "voice" => voice_check(out),
         "desktop" => desktop_check(out),

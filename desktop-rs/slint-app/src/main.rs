@@ -33,6 +33,7 @@ mod unasked;
 mod preview_view;
 mod platform;
 mod settings_view;
+mod language;
 // ---- every preference, applied (Settings, Ctrl+K, :set, the settings file)
 mod look;
 mod switcher;
@@ -740,6 +741,8 @@ fn main() {
         font_warm::start(window.window());
     }
     let settings = settings();
+    // The window's language, before anything draws text (Settings → Language).
+    language::start(&settings);
     let theme = std::env::args()
         .skip_while(|a| a != "--theme")
         .nth(1)
