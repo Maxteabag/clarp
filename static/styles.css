@@ -1192,7 +1192,10 @@ body.chat-open .status { display: none !important; }
    sideways and is never covered. A tap or click opens it full screen. */
 .turn .body .code-block {
   margin: 4px 0;
-  background: rgba(0, 0, 0, .25);
+  /* The highlight theme is a dark one, so code keeps a dark ground in the
+     light theme too (in the dark theme this is what the old tint gave). */
+  background: #14141d;
+  color: #a9b1d6;
   border-radius: 3px;
   overflow: hidden;
 }
@@ -1212,11 +1215,13 @@ body.chat-open .status { display: none !important; }
   justify-content: space-between;
   min-height: 26px;
   padding: 0 2px 0 10px;
-  border-bottom: 1px solid color-mix(in srgb, var(--ink-edge) 60%, transparent);
+  border-bottom: 1px solid rgba(255, 255, 255, .06);
 }
+.turn .body .table-block > .blk-head .blk-btn { color: var(--washi-low); }
+.turn .body .table-block > .blk-head .blk-btn:hover { color: var(--washi); }
 .turn .body .blk-lang {
   font: 400 11px/1 var(--font-mono);
-  color: var(--washi-low);
+  color: #737aa2;
   letter-spacing: .02em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1233,12 +1238,12 @@ body.chat-open .status { display: none !important; }
   border: 0;
   border-radius: 4px;
   background: transparent;
-  color: var(--washi-low);
+  color: #737aa2;
   cursor: pointer;
 }
 .turn .body .blk-btn svg { width: 15px; height: 15px; }
-.turn .body .blk-btn:hover { color: var(--washi); }
-.turn .body .blk-btn.copied { color: var(--moss); }
+.turn .body .blk-btn:hover { color: #c0caf5; }
+.turn .body .blk-btn.copied { color: #9ece6a; }
 /* A table's line holds only the expand icon, and only when the table is
    wider than the message. */
 .turn .body .table-block { margin: 6px 0; }
