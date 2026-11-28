@@ -312,6 +312,7 @@ pub struct Outputs {
     pub changed: Changed,
     /// Follow-ups whose replay echo removed them from the queue.
     pub joined_reads: Vec<JoinedRead>,
+    pub admission_changes: Vec<String>,
     /// The agent's tool named a new conversation in place of one it had let go of, and the
     /// Host carried the conversation over: from which name to which. What is bound to the
     /// agent's conversation with its tool (its goals) follows.
@@ -335,12 +336,14 @@ impl Outputs {
             actions,
             changed,
             joined_reads,
+            admission_changes,
             carried,
             passed,
             damaged_lines,
         } = later;
         self.actions.extend(actions);
         self.changed.absorb(changed);
+        self.admission_changes.extend(admission_changes);
         self.joined_reads.extend(joined_reads);
         self.carried.extend(carried);
         self.passed.extend(passed);
@@ -417,6 +420,7 @@ impl From<LogError> for ActorError {
 /// What became of a message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Sent {
+    pub owner_admission: Option<(&'static str, u64)>,
     pub message_seq: Seq,
     /// The turn it became. `None` for a message that had been sent before.
     pub turn: Option<TurnId>,
@@ -1078,6 +1082,8 @@ pub struct Marks {
     pub user_word: bool,
     /// The user asked for the running turn to finish before this message is read.
     pub wait_for_turn: bool,
+    /// Track this pilot send by its original client identity.
+    pub owner_admission: bool,
 }
 
 /// A send refused: the trace it names belongs to another message of the agent.
@@ -1636,6 +1642,7 @@ impl Actor {
         )?;
         // A recovered spool can finish a turn while opening. Fence its next
         // launch before reading that spool, not after the agent is open.
+        actor.restore_fork_lane()?;
         actor.recorder.hold_for_transit(transit_held);
         actor.open_team_effects()?;
         actor.open_goal_ledger(now_ms)?;
@@ -1715,6 +1722,7 @@ impl Actor {
     ) -> Result<Self, ActorError> {
         let (mut actor, _) = Self::read_books(profile, backend, log, now_ms, None, None, phases)?;
         phases.begin("held");
+        actor.restore_fork_lane()?;
         actor.read_held()?;
         phases.begin("notes");
         actor.read_turn_notes()?;
@@ -4098,6 +4106,7 @@ impl Actor {
             trace_named: marks.trace_named,
             user_word: marks.user_word,
             wait_for_turn: marks.wait_for_turn,
+            owner_admission: marks.owner_admission,
         };
         let (sent, mut out) = self.take(message, admission, with, reservation, &marks, now_ms)?;
         if !sent.duplicate
@@ -4225,6 +4234,9 @@ impl Actor {
             })?;
             with.push(NewItem::new(kind::TRACE, now_ms, owner).keyed(trace_key(trace)));
         }
+        if marks.owner_admission {
+            with.push(fork::route_item(message.told_id(), "waiting", now_ms)?);
+        }
         let encoded = if reservation.is_some() || marks.wait_for_turn {
             serde_json::to_value(message).and_then(|mut row| {
                 if let Some(reservation) = reservation {
@@ -4256,6 +4268,7 @@ impl Actor {
         let mut out = Outputs::default();
         if accepted.duplicate {
             let sent = Sent {
+                owner_admission: None,
                 message_seq: accepted.message_seq,
                 turn: None,
                 queued: false,
@@ -4289,6 +4302,7 @@ impl Actor {
             out.changed.status |= again.changed.status;
         }
         let sent = Sent {
+            owner_admission: None,
             message_seq: accepted.message_seq,
             turn: accepted.turn,
             queued: !started,
