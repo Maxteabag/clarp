@@ -57,69 +57,10 @@ echo(uid)
 answer(uid, follow, first, uid)
 "#;
 
-/// Antigravity, which is told how to speak in the words before the prompt. Every prompt it is
-/// given is kept, one JSON string a line, in `prompts`. A prompt that ends with `hold` waits
-/// for the file `release`.
-const AGY: &str = r#"#!/usr/bin/env python3
-import json, os, pathlib, sys, time
-root = pathlib.Path(__file__).resolve().parent
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-with (root / "prompts").open("a") as kept:
-    kept.write(json.dumps(prompt) + "\n")
-number = sum(1 for _ in (root / "prompts").open())
-conversation = "11111111-2222-3333-4444-555555555555"
-def say(event, **body):
-    print(json.dumps({"event": event, **body}), flush=True)
-def step(index, state, kind, **more):
-    update = {"conversation_id": conversation, "step_index": index, "state": state,
-              "step_type": kind, **more}
-    say("step_update", step_update=update)
-say("init", conversation_id=conversation,
-    init={"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []})
-step(0, "DONE", "user_input", text_delta=prompt)
-if prompt.endswith("hold"):
-    (root / "holding").touch()
-    end = time.monotonic() + 60
-    while not (root / "release").exists():
-        if time.monotonic() >= end:
-            raise SystemExit("stand-in release expired")
-        time.sleep(0.05)
-answer = "agy answer %d" % number
-step(1, "DONE", "agent_response", text_delta=answer)
-say("result", result={"conversation_id": conversation, "status": "SUCCESS", "response": answer})
-"#;
-
 #[test]
 fn agy_voice_keeps_long_then_short_in_order_without_result_replay() {
     let place = Place::new("agy-cumulative-speech");
-    let agy = place.root.join("agy");
-    let conversation = "11111111-2222-3333-4444-555555555555";
-    let long = format!(
-        "<speak>First line. {}</speak>",
-        "The longer opening stays ahead of the short answer. ".repeat(8)
-    );
-    let short = "<speak>First summary.</speak>";
-    let next = "<speak>Next turn only.</speak>";
-    let init = json!({"event":"init","conversation_id":conversation});
-    let step = |index, said: &str| {
-        json!({"event":"step_update","step_update":{"conversation_id":conversation,
-            "step_type":"agent_response","step_index":index,"state":"DONE","text_delta":said}})
-    };
-    let result = |said: &str| {
-        json!({"event":"result","result":{"conversation_id":conversation,
-            "status":"SUCCESS","response":said}})
-    };
-    program(
-        &agy,
-        &format!(
-            "#!/bin/sh\ncase \"$*\" in\n*voice-fixture-next*)\ncat <<'NEXT'\n{init}\n{}\nNEXT\n;;\n*)\ncat <<'FIRST'\n{init}\n{}\n{}\n{}\nFIRST\n;;\nesac\n",
-            result(next),
-            step(1, &long),
-            step(2, short),
-            result(&format!("{long}{short}")),
-        ),
-    );
+    let agy = host_acp_peer(&place, "speech");
     let voice = cartesia_stand_in(vec![23; 2000]);
     let owners = place.root.join("synthetic-voice.toml");
     std::fs::write(
@@ -169,8 +110,11 @@ fn agy_voice_keeps_long_then_short_in_order_without_result_replay() {
             .is_some_and(|said| said.contains("First line."))
             && clips().len() == 1
     });
+    wait_for("the first ACP turn to finish", || {
+        host.state(session) == "done"
+    });
     let second = host.send_aloud(session, "voice-fixture-next", "second-voice");
-    wait_for("the next turn's terminal-only answer", || {
+    wait_for("the next turn's answer", || {
         host.turns(session).iter().any(|row| {
             row["role"] == "assistant"
                 && row["text"]
@@ -189,13 +133,9 @@ fn agy_voice_keeps_long_then_short_in_order_without_result_replay() {
     let replies: Vec<_> = host
         .turns(session)
         .into_iter()
-        .filter(|row| row["role"] == "assistant")
+        .filter(|row| row["role"] == "assistant" && row["kind"].is_null())
         .collect();
-    assert_eq!(
-        replies.len(),
-        3,
-        "the cumulative result must not write a second copy of the first turn"
-    );
+    assert_eq!(replies.len(), 3, "each spoken passage appears once");
     wait_for("three clips, in the original speech order", || {
         requested().len() >= 3 && clips().len() >= 3
     });
@@ -228,9 +168,9 @@ fn agy_voice_keeps_long_then_short_in_order_without_result_replay() {
 #[test]
 fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
     let place = Place::new("spoken-when-asked");
-    let (claude, agy) = (place.root.join("claude"), place.root.join("agy"));
+    let (claude, grok) = (place.root.join("claude"), place.root.join("grok"));
     program(&claude, CLAUDE);
-    program(&agy, AGY);
+    program(&grok, include_str!("../fixtures/grok-queued.py"));
     let voice = cartesia_stand_in(vec![23; 2000]);
     let owners = place.root.join("synthetic-voice.toml");
     std::fs::write(
@@ -249,7 +189,7 @@ fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
         ("XDG_CACHE_HOME", xdg[2].to_str().unwrap()),
         ("XDG_STATE_HOME", xdg[3].to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
-        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+        ("CLARP_GROK_PROGRAM", grok.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_GROK_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_MUSE_PROGRAM", nowhere.to_str().unwrap()),
@@ -420,8 +360,8 @@ fn a_send_is_spoken_and_its_tool_told_how_to_speak_only_when_it_asks() {
         Some(&json!({ "call_id": call_id })),
     );
 
-    // Antigravity is told how to speak in the words before the prompt: only when it is asked.
-    let gatherer = make("Fixture Gatherer", "agy");
+    // Grok is told how to speak in the words before the prompt: only when it is asked.
+    let gatherer = make("Fixture Gatherer", "grok");
     let prompts = || -> Vec<String> {
         lines("prompts")
             .into_iter()
@@ -719,48 +659,15 @@ fn a_reword_a_send_now_and_an_answer_carry_the_apps_audio_setting() {
     });
 }
 
-/// Antigravity, as `AGY` above, but each answer marks itself for the ear, and a prompt that
-/// ends with `hold-<tag>` waits for the file `release-<tag>`: the same file however often the
-/// prompt is given, so a turn tried again after a restart waits the same way.
-const AGY_SPOKEN: &str = r#"#!/usr/bin/env python3
-import json, os, pathlib, re, sys, time
-root = pathlib.Path(__file__).resolve().parent
-args = sys.argv[1:]
-prompt = next((a[len("--print="):] for a in args if a.startswith("--print=")), "")
-with (root / "prompts").open("a") as kept:
-    kept.write(json.dumps(prompt) + "\n")
-conversation = "11111111-2222-3333-4444-555555555555"
-def say(event, **body):
-    print(json.dumps({"event": event, **body}), flush=True)
-def step(index, state, kind, **more):
-    update = {"conversation_id": conversation, "step_index": index, "state": state,
-              "step_type": kind, **more}
-    say("step_update", step_update=update)
-say("init", conversation_id=conversation,
-    init={"model": "gemini-stand-in-low", "cwd": os.getcwd(), "tools": []})
-step(0, "DONE", "user_input", text_delta=prompt)
-held = re.search(r"hold-(\w+)$", prompt)
-tag = held.group(1) if held else "none"
-if held:
-    (root / ("holding-" + tag)).touch()
-    end = time.monotonic() + 90
-    while not (root / ("release-" + tag)).exists():
-        if time.monotonic() >= end:
-            raise SystemExit("stand-in release expired")
-        time.sleep(0.05)
-answer = "<speak>Answer %s.</speak>" % tag
-step(1, "DONE", "agent_response", text_delta=answer)
-say("result", result={"conversation_id": conversation, "status": "SUCCESS", "response": answer})
-"#;
-
 /// The user's messages read together into one turn are spoken as the newest of them asked,
 /// also when the Host starts again while that turn runs: it is taken up as it began, not as
 /// its first message said.
 #[test]
 fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
     let place = Place::new("spoken-after-restart");
-    let agy = place.root.join("agy");
-    program(&agy, AGY_SPOKEN);
+    let grok = place.root.join("grok");
+    program(&grok, include_str!("../fixtures/grok-queued.py"));
+    std::fs::write(place.root.join("spoken"), "").unwrap();
     let voice = cartesia_stand_in(vec![31; 2000]);
     let owners = place.root.join("synthetic-voice.toml");
     std::fs::write(
@@ -771,7 +678,7 @@ fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
     .unwrap();
     let nowhere = place.root.join("absent");
     let world = [
-        ("CLARP_AGY_PROGRAM", agy.to_str().unwrap()),
+        ("CLARP_GROK_PROGRAM", grok.to_str().unwrap()),
         ("CLARP_CLAUDE_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_CODEX_PROGRAM", nowhere.to_str().unwrap()),
         ("CLARP_CARTESIA_ENDPOINT", voice.address.as_str()),
@@ -785,7 +692,7 @@ fn a_turn_read_together_keeps_its_newest_flag_across_a_restart() {
     let own = json!({ "cartesia": "fixture-voice-restart" }).to_string();
     let made = host.post(
         "/agents",
-        json!({ "name": "Fixture Restarted", "backend": "agy", "voice_id": own }),
+        json!({ "name": "Fixture Restarted", "backend": "grok", "voice_id": own }),
     );
     let agent = made["session"].as_str().unwrap().to_string();
     let spoken = |words: &str| {
