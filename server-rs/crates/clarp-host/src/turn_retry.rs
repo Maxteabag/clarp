@@ -90,7 +90,7 @@ async fn retry(State(app): State<App>, body: Bytes) -> Response {
                 .into_response();
         };
         if let Err(why) = app.fleet.keep(KIND, key, Some(stored)).await {
-            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.message()).into_response();
+            return ApiError::new(StatusCode::SERVICE_UNAVAILABLE, why.0).into_response();
         }
         return Json(json!({"ok": true, "status": "scheduled", "at_ms": at_ms})).into_response();
     }

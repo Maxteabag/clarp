@@ -162,6 +162,9 @@ fn the_kinds_and_who_is_told_are_the_python_hosts() {
     assert_eq!(
         failures::OWN_KINDS,
         [
+            failures::INVALID_REQUEST,
+            failures::REFUSED,
+            failures::SESSION_LOCKED,
             failures::PROMPT_TOO_LONG,
             failures::PROVIDER_MISMATCH,
             failures::FOLDER_MISSING,
