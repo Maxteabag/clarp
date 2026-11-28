@@ -274,9 +274,12 @@ async fn tell(app: &App, janitor: &str, told: &[String], tool: &str, text: &str,
             unread: false,
             session: member.record.session.clone(),
             persona: member.record.persona.clone(),
+            agent_id: member.record.agent_id.clone(),
             notification_id: id.clone(),
             preview: text.to_string(),
             needs_response: false,
+            event: clarp_kernel::notify_events::Event::Account,
+            ..crate::pusher::TurnDone::default()
         });
     }
     for session in told

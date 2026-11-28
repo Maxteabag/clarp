@@ -485,6 +485,7 @@ async fn serve(config: Config) -> Result<(), String> {
         capture,
         turns,
         form_event_writer: Arc::default(),
+        notification_writer: Arc::default(),
         skill_links: Arc::default(),
         controller_actions: Arc::default(),
         calendar_receipts: Arc::default(),

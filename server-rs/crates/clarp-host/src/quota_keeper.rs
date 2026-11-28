@@ -668,6 +668,9 @@ async fn deliver(app: &App, keeper: &Keeper, receipts: &mut BTreeMap<String, Rec
                     notification_id: said("notification_id"),
                     preview: said("preview"),
                     needs_response: false,
+                    event: clarp_kernel::notify_events::Event::Account,
+                    agent_id: keeper.agent_id.clone(),
+                    ..TurnDone::default()
                 };
                 // A pusher that never answers (it is gone) leaves the receipt waiting, to be
                 // tried at the next look, as the Python Host leaves one whose push raised.

@@ -1387,11 +1387,26 @@ async fn ring_settings_change(
         Ok((_, said)) => said,
         Err(refused) => return refused.into_response(),
     };
+    // The ring switch is the `call` event of the owner's notification choices: a change of it
+    // is one change of those, with a version of its own, and every app is told the choices.
+    let switched = said.get("enabled").is_some();
+    let _writing = if switched {
+        Some(app.notification_writer.lock().await)
+    } else {
+        None
+    };
+    if switched && let Err(unkept) = crate::notify_settings::next_version(&app).await {
+        return answered(Err(unkept));
+    }
     let desk = app.calls.clone();
     let changed = desk.rings(&app, |rings, _, with, (out, _)| {
         rings.change(&said, with.at.now_ms, out)
     });
-    answered(changed.await)
+    let changed = changed.await;
+    if switched && matches!(changed, Ok(Ok(_))) {
+        crate::notify_settings::tell_changed(&app).await;
+    }
+    answered(changed)
 }
 
 /// `POST /calls/ring/voip-token` with `{token, environment}`: a phone leaves the token an

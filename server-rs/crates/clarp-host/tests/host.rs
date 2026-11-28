@@ -159,6 +159,10 @@ mod native_agent_goal;
 mod native_goal_folder;
 #[path = "host/network_wait.rs"]
 mod network_wait;
+#[path = "host/notification_buttons.rs"]
+mod notification_buttons;
+#[path = "host/notification_review.rs"]
+mod notification_review;
 #[path = "host/opencode_chat_lane.rs"]
 mod opencode_chat_lane;
 #[path = "host/opencode_usage.rs"]

@@ -4617,10 +4617,80 @@ impl Fleet {
         let (senders, targets) = (parent_of(sender), parent_of(target));
         if senders.as_deref() == Some(target) {
             self.helper_event(sender, "reported", true)?;
+            self.helper_reported(sender, target);
         } else if targets.as_deref() == Some(sender) {
             self.helper_event(target, "parent_prompted", true)?;
         }
         Ok(())
+    }
+
+    /// A helper reported to the agent that made it: the owner is told where they want it
+    /// (event `helper_report`, off unless they chose it). The report itself is a message in
+    /// the maker's chat, whose reply tells the owner as any reply does: this is only that it
+    /// came. Nothing is published when the owner does not want it, so an app that does not
+    /// know the event shows nothing of it.
+    fn helper_reported(&self, helper_id: &str, maker_id: &str) {
+        use clarp_kernel::notify_events::{Event, KEY, Loc, Settings};
+        let find = |id: &str| {
+            self.members
+                .iter()
+                .find(|member| member.record.agent_id == id)
+                .map(|member| &member.record)
+        };
+        let (Some(helper), Some(maker)) = (find(helper_id), find(maker_id)) else {
+            return;
+        };
+        let settings = Settings::stored(self.settings.get(KEY).map(String::as_str));
+        let muted = maker.muted || maker.is_helper() || maker.is_quiet();
+        if !settings.alerts(Event::HelperReport, &maker.agent_id, muted, true) {
+            return;
+        }
+        let now = self.now_ms();
+        let body = Loc::new(
+            "notify.body.helper_reported",
+            &[crate::pusher::display_name(helper)],
+        );
+        let notification_id = format!("helper-{}-{now}", helper.agent_id);
+        self.works.hub.publish(
+            serde_json::json!({
+                "type": "user-notification",
+                "event": Event::HelperReport.id(),
+                "notification_id": notification_id,
+                "agent_id": maker.agent_id,
+                "session": maker.session,
+                "persona": maker.persona,
+                "origin": "agent",
+                "reason": "helper_report",
+                "helper_agent_id": helper.agent_id,
+                "helper_session": helper.session,
+                "cause_message_id": "",
+                "source_message_id": "",
+                "preview": body.english(),
+                "body_loc_key": body.key,
+                "body_loc_args": body.args,
+                "done_ts": now,
+                "badge": false,
+                "unread": false,
+                "push": true,
+                "alert": true,
+                "muted": false,
+            }),
+            now,
+        );
+        let mut extra = serde_json::Map::new();
+        extra.insert("helper_agent_id".into(), serde_json::json!(helper.agent_id));
+        extra.insert("helper_session".into(), serde_json::json!(helper.session));
+        self.works.pusher.turn_done(crate::pusher::TurnDone {
+            session: maker.session.clone(),
+            persona: maker.persona.clone(),
+            notification_id,
+            preview: body.english(),
+            event: Event::HelperReport,
+            agent_id: maker.agent_id.clone(),
+            body_loc: Some(body),
+            extra,
+            ..crate::pusher::TurnDone::default()
+        });
     }
 
     fn mark(
@@ -4991,6 +5061,11 @@ impl Fleet {
         }
         if announce {
             self.works.hub.publish(wire::focus(&record), self.now_ms());
+            // The chat is open on a device: the phones take its notifications down.
+            self.works.pusher.read(crate::pusher::Read {
+                session: record.session.clone(),
+                decision_id: String::new(),
+            });
         }
         Ok(Some(record))
     }

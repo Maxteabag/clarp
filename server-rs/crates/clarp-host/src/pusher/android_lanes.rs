@@ -69,6 +69,7 @@ impl Lanes {
             Job::Turn(t, _) => &t.session,
             Job::Request(r) => &r.session,
             Job::Ring(r, _) => &r.ring.session,
+            Job::Read(r) => &r.session,
             Job::BadgeWake => return,
         };
         self.0.retain(|_, lane| lane.strong_count() > 0);

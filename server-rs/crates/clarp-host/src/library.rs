@@ -44,6 +44,7 @@ use crate::ids;
 use crate::pairing::Scope;
 use crate::pusher::Requested;
 use crate::render_spec;
+use clarp_kernel::notify_events::Loc;
 
 /// An agent's books as anyone may read them without asking the agent.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -1530,17 +1531,94 @@ fn push_request(app: &App, artifact: &Value) {
         .iter()
         .find(|member| member.record.agent_id == asker && member.record.bound());
     let or = |said: String, otherwise: String| if said.is_empty() { otherwise } else { said };
-    let (title, question) = match bound {
-        Some(member) => (
-            format!("{} asks", crate::pusher::display_name(&member.record)),
-            "Open Clarp to answer.".to_string(),
-        ),
+    let (title, question, title_loc, body_loc, options) = match bound {
+        Some(member) => {
+            let asks = Loc::new(
+                "notify.body.asks",
+                &[crate::pusher::display_name(&member.record)],
+            );
+            let open = Loc::new("notify.body.open_to_answer", &[]);
+            // What it asks is withheld, so nothing answers it from a banner: no choices and no
+            // answering category. A tap opens the card, behind the app's own sign-in.
+            (
+                asks.english(),
+                open.english(),
+                Some(asks),
+                Some(open),
+                Vec::new(),
+            )
+        }
         None => (
             text(&artifact["title"]),
             or(text(&decision["question"]), text(&artifact["summary"])),
+            None,
+            None,
+            if decision["response_type"] == "approval" {
+                approval_options(
+                    decision["yes_label"].as_str().unwrap_or(""),
+                    decision["no_label"].as_str().unwrap_or(""),
+                )
+            } else {
+                decision["options"].as_array().cloned().unwrap_or_default()
+            },
         ),
     };
+    // The owner's choice of questions (`needs_you`). Where it is on, the apps are told at
+    // once, so a desk shows it while the phones wait (`crate::pusher::ESCALATE_AFTER`).
+    let event = clarp_kernel::notify_events::Event::NeedsYou;
+    if !crate::notify_settings::settings(&directory).alerts(event, asker, false, true) {
+        return;
+    }
+    let session = text(&artifact["session"]);
+    let persona = or(text(&artifact["agent_name"]), "Clarp".to_string());
+    // How it is answered, where it may be answered from a notification; empty where what it
+    // asks is withheld.
+    let response_type = if bound.is_some() {
+        String::new()
+    } else {
+        text(&decision["response_type"])
+    };
+    let text_input = response_type == "text_input";
+    let mut told = serde_json::json!({
+        "type": "user-notification",
+        "event": event.id(),
+        "alert": true,
+        "notification_id": push::decision_notification_id(&decision_id),
+        "agent_id": asker,
+        "session": session,
+        "persona": persona,
+        "origin": "decision",
+        "reason": "decision",
+        "decision_id": decision_id,
+        "artifact_id": text(&artifact["artifact_id"]),
+        "response_type": response_type,
+        "revision": decision["revision"].as_i64().unwrap_or(1),
+        "title": title,
+        "preview": question,
+        "cause_message_id": "",
+        "source_message_id": "",
+        "done_ts": app.clock.now_ms(),
+        "badge": false,
+        "unread": false,
+        "push": true,
+        "muted": false,
+    });
+    // The answers a desk can offer as buttons, as the push offers them.
+    let category = push::decision_category(&response_type, options.len(), text_input);
+    if let Some(offered) = push::offered_options(&category, &options) {
+        told["options"] = serde_json::json!(offered);
+    }
+    if let Some(loc) = &body_loc {
+        told["body_loc_key"] = serde_json::json!(loc.key);
+        told["body_loc_args"] = serde_json::json!(loc.args);
+    }
+    app.hub.publish(told, app.clock.now_ms());
     app.pusher.requested(Requested {
+        agent_id: asker.to_string(),
+        response_type,
+        options,
+        title_loc,
+        body_loc,
         session: text(&artifact["session"]),
         persona: or(text(&artifact["agent_name"]), "Clarp".to_string()),
         title,
@@ -1551,9 +1629,32 @@ fn push_request(app: &App, artifact: &Value) {
             decision["blocks_progress"] == true,
             decision["urgency"].as_str().unwrap_or(""),
         ),
-        text_input: decision["response_type"] == "text_input",
+        text_input,
         revision: decision["revision"].as_i64().unwrap_or(1),
         expires_at: decision["expires_at"].as_i64(),
+        ..Requested::default()
+    });
+}
+
+/// The two answers of an approval, as a notification's buttons: the card's own words for yes
+/// and no, or Yes and No where it gave none. Their ids are the choices `resolve` takes.
+fn approval_options(yes: &str, no: &str) -> Vec<Value> {
+    let or = |said: &str, otherwise: &str| match said.trim() {
+        "" => otherwise.to_string(),
+        said => said.to_string(),
+    };
+    vec![
+        serde_json::json!({ "id": "accepted", "label": or(yes, "Yes") }),
+        serde_json::json!({ "id": "rejected", "label": or(no, "No") }),
+    ]
+}
+
+/// A request ended (answered, dismissed, withdrawn): its notification is taken down on every
+/// phone, wherever it was answered.
+fn push_ended(app: &App, member: &crate::fleet::Member, decision_id: &str) {
+    app.pusher.read(crate::pusher::Read {
+        session: member.record.session.clone(),
+        decision_id: decision_id.to_string(),
     });
 }
 
@@ -1746,6 +1847,9 @@ pub(crate) async fn decide(
         *synthesize_audio = app.mouth.can_speak(&member.record).await;
     }
     let done = ask_agent(member, want).await?;
+    if done.changed {
+        push_ended(app, member, &decision_id);
+    }
     if action != "resolve" {
         // A card withdrawn or dismissed asks nothing any more: what the Host kept of it goes.
         crate::bound_privacy::let_go(app, &decision_id, done.changed).await;
@@ -2056,5 +2160,17 @@ mod tests {
         assert!(object(b"[1]").is_err());
         assert!(whole(&data, "count").is_ok());
         assert!(whole(&data, "title").is_err());
+    }
+
+    #[test]
+    fn an_approval_offers_the_cards_yes_and_no_or_yes_and_no() {
+        assert_eq!(
+            approval_options("Ship it", " "),
+            vec![
+                serde_json::json!({"id": "accepted", "label": "Ship it"}),
+                serde_json::json!({"id": "rejected", "label": "No"}),
+            ]
+        );
+        assert_eq!(approval_options("", "")[0]["label"], "Yes");
     }
 }

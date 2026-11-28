@@ -382,9 +382,12 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
             unread: false,
             session: member.record.session.clone(),
             persona: member.record.persona.clone(),
+            agent_id: member.record.agent_id.clone(),
             notification_id: run,
             preview: text,
             needs_response: false,
+            event: clarp_kernel::notify_events::Event::Account,
+            ..crate::pusher::TurnDone::default()
         });
     }
     crate::janitors::changed(app);

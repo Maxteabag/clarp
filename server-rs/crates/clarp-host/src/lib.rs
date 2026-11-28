@@ -95,6 +95,7 @@ pub mod models;
 mod native_goal_routes;
 mod native_lines;
 pub mod network;
+mod notify_settings;
 pub mod once;
 pub mod oracle;
 pub mod owner;
