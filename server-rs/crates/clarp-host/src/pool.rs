@@ -140,8 +140,15 @@ impl Service {
         .flatten()
     }
 
-    pub fn available(self: &Arc<Self>, serves: impl Fn(&str) -> bool) {
-        self.told(|pool, now| ((), pool.login_available(serves, now)));
+    pub fn available(self: &Arc<Self>, switched: bool, serves: impl Fn(&str) -> bool) {
+        self.told(|pool, now| {
+            let effects = if self.tool == "codex" {
+                pool.recheck_available(switched, now)
+            } else {
+                pool.login_available(serves, now)
+            };
+            ((), effects)
+        });
     }
 
     /// Gives the pool the way to the agents.
@@ -222,11 +229,11 @@ impl Service {
         agent: &str,
         turn: TurnId,
         model: &str,
+        plan: bool,
         resets_at_ms: Option<i64>,
     ) {
         let trace = turn.0.to_string();
         self.told(|pool, now| {
-            let (_, mut effects) = pool.carried(true, since_ms, &[agent.to_string()], now);
             let starting = Starting {
                 agent,
                 trace: &trace,
@@ -234,11 +241,10 @@ impl Service {
                 holds: true,
                 ends: true,
             };
-            effects.extend(pool.register(starting, now).1);
-            if let Some(at) = resets_at_ms {
-                pool.out_until(agent, &trace, at, now);
-            }
-            ((), effects)
+            (
+                (),
+                pool.carry_turn(starting, since_ms, plan, resets_at_ms, now),
+            )
         });
     }
 

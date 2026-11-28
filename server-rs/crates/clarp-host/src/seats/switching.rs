@@ -172,8 +172,8 @@ pub(super) async fn perform(
         // Another account, and another seat beside it.
         crate::quota::look_again(app).await;
     }
-    if state == "switched" && expected.is_none() {
-        pool.available(|_| true);
+    if state == "switched" && (tool == "codex" || expected.is_none()) {
+        pool.available(true, |_| true);
     }
     answer
 }

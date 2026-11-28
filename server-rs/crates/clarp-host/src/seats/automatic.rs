@@ -372,8 +372,11 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
         .find(|a| serving.as_str() == Some(a.alias.as_str()))
         && let Some(pool) = app.pools.iter().find(|p| p.tool() == tool)
         && account.remaining.unwrap_or(0) > 0
+        && (claude || !switched)
     {
-        pool.available(|model| !claude || account.serves(model_or_default(model, &default_model)));
+        pool.available(false, |model| {
+            account.serves(model_or_default(model, &default_model))
+        });
     }
     if notify && let Some(member) = app.fleet.directory().janitor(id) {
         app.pusher.turn_done(crate::pusher::TurnDone {

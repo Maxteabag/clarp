@@ -3117,7 +3117,14 @@ impl Worker {
                 let agent = self.setup.record.agent_id.clone();
                 let model = actor.turn_model().unwrap_or_default();
                 let resets = actor.waits_until_reset();
-                pool.carried_turn(since, &agent, turn, &model, resets);
+                pool.carried_turn(
+                    since,
+                    &agent,
+                    turn,
+                    &model,
+                    actor.parked_for_its_plan(),
+                    resets,
+                );
                 self.pooled = Some(turn);
             }
         }

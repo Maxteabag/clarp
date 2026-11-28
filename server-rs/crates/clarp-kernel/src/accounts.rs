@@ -359,6 +359,8 @@ pub struct Pool {
     /// How many answers in a row found no account while every waiting turn waits for a
     /// reset it was told: the next asking is twice as far off after each.
     quiet_checks: u32,
+    /// A confirmed login change overlapped the outstanding selector request.
+    login_changed_while_asking: bool,
     /// When the account has usage again for each model, as the tool of a turn of that model
     /// said in this recovery (the latest said): a fact of the machine's one login, so every
     /// waiting turn of the model waits for it, also one that was stopped with that turn or
@@ -638,6 +640,7 @@ impl Pool {
         // tool names, from now.
         let released = self.released_at_reset.remove(&key);
         if self.recovering {
+            self.attempts[trigger].plan |= plan;
             if released {
                 self.attempts[trigger].parked = true;
                 self.note_park(trigger, now_ms);
@@ -726,6 +729,26 @@ impl Pool {
         (true, vec![timer])
     }
 
+    /// Restore the same account failure the actor persisted, including its model and reset.
+    pub fn carry_turn(
+        &mut self,
+        turn: Starting<'_>,
+        since_ms: i64,
+        plan: bool,
+        reset: Option<i64>,
+        now: i64,
+    ) -> Vec<Effect> {
+        let (_, mut effects) = self.carried(true, since_ms, &[turn.agent.to_owned()], now);
+        effects.extend(self.register(turn, now).1);
+        if let Some(at) = self.at(turn.agent) {
+            self.attempts[at].plan = plan;
+        }
+        if let Some(reset) = reset {
+            self.out_until(turn.agent, turn.trace, reset, now);
+        }
+        effects
+    }
+
     /// Someone else changed the machine's login (the owner, the desk of seats) to an
     /// account known to serve the models `serves` accepts. The turns that wait for them
     /// while the pool works start now: how many. Nothing is stopped and nobody is asked.
@@ -768,6 +791,19 @@ impl Pool {
         let mut effects = Vec::new();
         self.after(Verdict::Only(models), now, &mut effects);
         effects
+    }
+
+    /// A new Codex login or quota reading may serve waiting turns. Only the selector
+    /// qualifies models. Bring its next check forward without stopping working turns.
+    pub fn recheck_available(&mut self, switched: bool, now: i64) -> Vec<Effect> {
+        if switched && self.pass == Some(Pass::Asking) {
+            self.login_changed_while_asking = true;
+        }
+        if self.pass.is_some() || self.parked_now().is_empty() {
+            return Vec::new();
+        }
+        self.next_check_ms = now;
+        self.fired(Timer::Recovery, now)
     }
 
     /// The turns that are still their agents', the others forgotten; without those let go
@@ -1080,6 +1116,17 @@ impl Pool {
             return out;
         }
         self.pass = None;
+        if std::mem::take(&mut self.login_changed_while_asking) {
+            self.next_check_ms = now_ms;
+            self.stopped_all(now_ms, &mut out);
+            return out;
+        }
+        // "All" covers the request that was sent. A different model may have
+        // joined the pool while the selector ran.
+        let verdict = match verdict {
+            Verdict::All => Verdict::Only(self.checked_models.iter().cloned().collect()),
+            other => other,
+        };
         self.after(verdict, now_ms, &mut out);
         out
     }
@@ -1100,7 +1147,7 @@ impl Pool {
                 let unserved = served
                     .as_ref()
                     .is_none_or(|served| !served.contains(&attempt.model));
-                if attempt.plan && unserved {
+                if attempt.plan && unserved && self.checked_models.contains(&attempt.model) {
                     attempt.unserved_checks += 1;
                     if let Some(at) = self.at(&attempt.agent) {
                         self.attempts[at].unserved_checks = attempt.unserved_checks;
@@ -1368,6 +1415,47 @@ mod tests {
         );
         assert!(pool.checking());
         pool
+    }
+
+    #[test]
+    fn a_selector_answer_releases_covered_waiters_when_a_new_model_arrives() {
+        let mut pool = Pool::new();
+        let reset = Some(3_600_000);
+        pool.carry_turn(starting("a", "1"), 0, false, reset, 1);
+        pool.carry_turn(starting("b", "2"), 0, false, None, 1);
+        assert_eq!(
+            pool.fired(Timer::Recovery, 2),
+            vec![Effect::Ask {
+                models: vec!["m1".into()]
+            }]
+        );
+        assert!(pool.register(of_model("c", "3", "m2"), 3).0);
+        let effects = pool.answered(Verdict::All, 4);
+        assert!(effects.contains(&resume("a")) && effects.contains(&resume("b")));
+        assert!(!effects.contains(&resume("c")));
+        assert_eq!(pool.waiting(), ["c"]);
+        assert!(pool.answered(Verdict::All, 5).is_empty());
+    }
+
+    #[test]
+    fn a_confirmed_switch_requalifies_waiters_and_discards_the_previous_logins_answer() {
+        let mut pool = Pool::new().ending_plans_after(PLAN_CHECKS_HERE);
+        pool.carry_turn(starting("a", "1"), 0, false, Some(3_600_000), 1);
+        pool.carry_turn(starting("b", "2"), 0, false, None, 1);
+        pool.carry_turn(of_model("c", "3", "unsupported"), 0, true, None, 1);
+        pool.carry_turn(starting("d", "4"), 0, false, None, 1);
+        let first = pool.fired(Timer::Recovery, 2);
+        assert!(matches!(first.as_slice(), [Effect::Ask { .. }]));
+        pool.answered(Verdict::NoAnswer, 3);
+        assert_eq!(pool.recheck_available(true, 4), first);
+        assert!(pool.recheck_available(true, 5).is_empty());
+        pool.disown("d", 6);
+        assert_eq!(pool.answered(Verdict::All, 7), first);
+        let effects = pool.answered(Verdict::Only(["m1".into()].into()), 8);
+        assert!(effects.contains(&resume("a")) && effects.contains(&resume("b")));
+        assert!(effects.contains(&Effect::End { agent: "c".into() }));
+        assert!(!effects.contains(&resume("c")) && !effects.contains(&resume("d")));
+        assert!(pool.recheck_available(true, 9).is_empty());
     }
 
     #[test]
