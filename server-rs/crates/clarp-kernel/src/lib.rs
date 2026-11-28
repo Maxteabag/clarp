@@ -69,6 +69,7 @@ pub mod managed_skills;
 pub mod mcp;
 pub mod media;
 pub mod notify;
+pub mod notify_events;
 pub mod opencode;
 pub mod oracle;
 pub mod personas;

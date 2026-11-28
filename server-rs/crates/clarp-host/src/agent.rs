@@ -7,7 +7,7 @@
 //! When the actor reports that its log or files failed, the thread drops it and opens it again
 //! from the log: the same path as after a restart, and the only way back to a known state.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicI64, Ordering};
@@ -2098,6 +2098,8 @@ pub fn prepare(setup: Setup) -> (AgentHandle, Unopened) {
         helper_change_session: None,
         transcript_due: None,
         jobs_told: BTreeMap::new(),
+        jobs_alerted: BTreeSet::new(),
+        born_ms: now_ms,
         helper_rows: Default::default(),
         helper_source: Some(Default::default()),
         helper_clock: Default::default(),
@@ -2214,6 +2216,10 @@ struct Worker {
     transcript_due: Option<Instant>,
     /// The revision of each job the clients were last told.
     jobs_told: BTreeMap<String, (u64, String)>,
+    /// The ends of jobs the owner was notified of, by their notification's id.
+    jobs_alerted: BTreeSet<String>,
+    /// When this thread began: what ended before it was told by an earlier one.
+    born_ms: i64,
     /// When the running jobs were last looked at.
     jobs_checked: Instant,
     helper_rows: clarp_actor::helper_cells::HelperRows,
@@ -4375,25 +4381,46 @@ impl Worker {
                     ((noted, told), out)
                 });
                 if let Ok(((_, Some(Ok(told))), _)) = &left {
+                    let record = &self.setup.record;
+                    let mut told = told.clone();
+                    // The owner's choice of updates, for the push and for a desk's popup.
+                    let directory = self.setup.hub.queue_directory();
+                    let event = clarp_kernel::notify_events::Event::Update;
+                    let alert =
+                        crate::notify_settings::alerts_in(directory.as_deref(), event, record);
+                    told["event"] = json!(event.id());
+                    told["alert"] = json!(alert);
+                    told["message_id"] = told["source_message_id"].clone();
+                    let order = crate::pusher::Order::observe(self.setup.clock.as_ref());
+                    order.event(&mut told);
+                    let (body_loc, extra) = crate::pusher::preview_keys(record, &told);
                     // A phone that is not listening is pushed to, when the rule says so.
-                    if told["push"] == true {
+                    if told["push"] == true && alert {
                         self.setup.pusher.turn_done(TurnDone {
+                            order,
                             badge: true,
                             unread: true,
-                            session: self.setup.record.session.clone(),
-                            persona: self.setup.record.persona.clone(),
+                            session: record.session.clone(),
+                            persona: record.persona.clone(),
                             notification_id: told["notification_id"]
                                 .as_str()
                                 .unwrap_or("")
                                 .to_string(),
                             preview: crate::pusher::preview_of(
-                                &self.setup.record,
+                                record,
                                 told["preview"].as_str().unwrap_or(""),
                             ),
                             needs_response: actor.artifacts().has_pending_decision(now),
+                            event,
+                            agent_id: record.agent_id.clone(),
+                            message_id: told["message_id"].as_str().unwrap_or("").to_string(),
+                            category: crate::pusher::REPLY_CATEGORY.to_string(),
+                            body_loc,
+                            extra,
+                            ..TurnDone::default()
                         });
                     }
-                    self.setup.hub.publish(told.clone(), now);
+                    self.setup.hub.publish(told, now);
                 }
                 answered(left, answer)?
             }
@@ -6913,14 +6940,31 @@ impl Worker {
             let id = clarp_kernel::notify::id(&record.agent_id, ended.ended_at_ms);
             // A reply with nothing for the user in it is not something to be told of, and
             // neither is what agents say to each other.
-            if let Some(told) =
+            if let Some(mut told) =
                 wire::user_notification(&record, &id, &asked, reply, ended.ended_at_ms)
             {
+                // A reply while a request waits for the user is something to answer: the
+                // owner switches it as such (`needs_you`).
+                let needs_response = actor.artifacts().has_pending_decision(now);
+                let event = if needs_response {
+                    clarp_kernel::notify_events::Event::NeedsYou
+                } else {
+                    clarp_kernel::notify_events::Event::Reply
+                };
+                let directory = hub.queue_directory();
+                let alert = crate::notify_settings::alerts_in(directory.as_deref(), event, &record);
+                told["event"] = json!(event.id());
+                told["alert"] = json!(alert);
+                told["message_id"] = told["source_message_id"].clone();
+                let order = crate::pusher::Order::observe(self.setup.clock.as_ref());
+                order.event(&mut told);
+                let (body_loc, extra) = crate::pusher::preview_keys(&record, &told);
                 // A phone that is not listening is pushed to, when the rule says so. With a
                 // sound when the agent still waits for an answer from the user.
-                if told["push"] == true {
+                if told["push"] == true && alert {
                     alert_queued = true;
                     self.setup.pusher.turn_done(TurnDone {
+                        order,
                         badge: told["badge"] == true,
                         unread: told["unread"] == true,
                         session: record.session.clone(),
@@ -6930,11 +6974,57 @@ impl Worker {
                             &record,
                             told["preview"].as_str().unwrap_or(""),
                         ),
-                        needs_response: actor.artifacts().has_pending_decision(now),
+                        needs_response,
+                        event,
+                        agent_id: record.agent_id.clone(),
+                        message_id: told["message_id"].as_str().unwrap_or("").to_string(),
+                        category: crate::pusher::REPLY_CATEGORY.to_string(),
+                        body_loc,
+                        extra,
+                        ..TurnDone::default()
                     });
                 }
                 hub.publish(told, now);
             }
+        }
+        // A turn that failed, once the Host stopped trying: the user is told, once.
+        if let Some(ended) = status.last.as_ref().filter(|_| turn_ended)
+            && (before.is_some() || ended.ended_at_ms >= self.born_ms)
+            && let Some(told) = {
+                // The user's own message the turn was for, which a retry sends again.
+                let message = actor.message_of(ended).ok().filter(|message| {
+                    message.origin == clarp_kernel::turn::Origin::User && message.sender.is_none()
+                });
+                let model = actor.turn_model().unwrap_or_default();
+                let turn = wire::FailedTurn {
+                    model: &model,
+                    message_id: message.as_ref().map_or("", |message| message.id.as_str()),
+                    trace_id: message
+                        .as_ref()
+                        .and_then(|message| message.trace_id.as_deref())
+                        .unwrap_or(""),
+                };
+                wire::failed_notification(&record, ended, &turn)
+            }
+        {
+            let event = clarp_kernel::notify_events::Event::Failed;
+            let directory = hub.queue_directory();
+            let alert = crate::notify_settings::alerts_in(directory.as_deref(), event, &record);
+            let mut told = told;
+            told["alert"] = json!(alert);
+            if alert {
+                alert_queued = true;
+                let mut push = crate::pusher::failed(&record, &told);
+                push.order = crate::pusher::Order::observe(self.setup.clock.as_ref());
+                push.order.event(&mut told);
+                self.setup.pusher.turn_done(push);
+            } else {
+                // Switched off, or a muted agent's: the chat is marked unread, and no popup.
+                // Apps from before this event pop up any `user-notification` whatever its
+                // `alert` says, and know no `chat-unread`, which they leave alone.
+                told["type"] = json!(crate::notify_settings::CHAT_UNREAD);
+            }
+            hub.publish(told, now);
         }
         if !alert_queued
             && (turn_ended
@@ -6965,6 +7055,24 @@ impl Worker {
                 told["change_revision"] = json!(event.revision);
                 let status = told["status"].as_str().unwrap_or_default().to_owned();
                 hub.publish(told, now);
+                // A job of the agent's own that ended is told the owner, where they want it:
+                // once for each run and how it ended.
+                if event.at >= self.born_ms
+                    && let Some(mut done) = wire::job_notification(&record, job, event.at)
+                {
+                    let key = done["notification_id"].as_str().unwrap_or("").to_owned();
+                    let event = clarp_kernel::notify_events::Event::JobDone;
+                    let directory = hub.queue_directory();
+                    if self.jobs_alerted.insert(key)
+                        && crate::notify_settings::alerts_in(directory.as_deref(), event, &record)
+                    {
+                        let mut push = crate::pusher::job_done(&record, &done);
+                        push.order = crate::pusher::Order::observe(self.setup.clock.as_ref());
+                        push.order.event(&mut done);
+                        self.setup.pusher.turn_done(push);
+                        hub.publish(done, now);
+                    }
+                }
                 if job.provider_owned() || job.metadata.get("tool_use_id").is_some() {
                     let key = (job.generation, status);
                     if self.jobs_told.get(&job.id) != Some(&key) {

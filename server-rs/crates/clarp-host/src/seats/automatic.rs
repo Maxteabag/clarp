@@ -380,14 +380,18 @@ async fn tick(app: &App, id: &str, generation: u64, options: &Value, tool: &str)
     }
     if notify && let Some(member) = app.fleet.directory().janitor(id) {
         app.pusher.turn_done(crate::pusher::TurnDone {
+            order: crate::pusher::Order::observe(app.clock.as_ref()),
             // Hotseat exhaustion receipts carry neither a badge nor an unread chat item.
             badge: false,
             unread: false,
             session: member.record.session.clone(),
             persona: member.record.persona.clone(),
+            agent_id: member.record.agent_id.clone(),
             notification_id: run,
             preview: text,
             needs_response: false,
+            event: clarp_kernel::notify_events::Event::Account,
+            ..crate::pusher::TurnDone::default()
         });
     }
     crate::janitors::changed(app);

@@ -15,6 +15,33 @@ fn text<'a>(vector: &'a Value, key: &str) -> &'a str {
     vector[key].as_str().unwrap_or("")
 }
 
+/// What the notification events added to a push (`notify_events`): fields the Python Host
+/// never sent, taken off before its payloads are compared. Everything else still matches.
+fn as_recorded(mut ours: Value, theirs: &Value) -> Value {
+    for key in [
+        "event",
+        "title_loc_key",
+        "title_loc_args",
+        "body_loc_key",
+        "body_loc_args",
+        "revision",
+        "options",
+        "response_type",
+    ] {
+        if theirs.get(key).is_none()
+            && let Some(fields) = ours.as_object_mut()
+        {
+            fields.remove(key);
+        }
+    }
+    if theirs["aps"].get("relevance-score").is_none()
+        && let Some(aps) = ours["aps"].as_object_mut()
+    {
+        aps.remove("relevance-score");
+    }
+    ours
+}
+
 /// What Python takes for true.
 fn truthy(value: &Value) -> bool {
     match value {
@@ -52,6 +79,7 @@ fn a_push_says_what_the_python_hosts_says() {
             notification_id: text(vector, "notification_id"),
             server_instance_id: text(vector, "server_instance_id"),
             needs_response: vector["needs_response"] == true,
+            ..Told::default()
         });
         let id = collapse_id(&ours);
         differ("a finished turn", vector, &ours, id);
@@ -84,7 +112,9 @@ fn a_push_says_what_the_python_hosts_says() {
                 .get("avatar_custom")
                 .is_none_or(|custom| custom == true),
             server_instance_id: &server,
+            ..Asked::default()
         });
+        let ours = as_recorded(ours, &vector["payload"]);
         let id = collapse_id(&ours);
         differ("a request", vector, &ours, id);
     }
