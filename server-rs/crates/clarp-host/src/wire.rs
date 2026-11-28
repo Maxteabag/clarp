@@ -1641,7 +1641,7 @@ pub(crate) fn previewed_entry(entry: &Entry) -> bool {
     match entry {
         Entry::Message(message) => by_hand && !message.text.is_empty(),
         Entry::Reply(reply) => by_hand && !reply.text.is_empty(),
-        Entry::Notice(notice) => !notice.text.is_empty(),
+        Entry::Notice(notice) => notice.code != Notice::TRANSIT && !notice.text.is_empty(),
         Entry::Note(note) => !note.text.is_empty(),
         Entry::Imported(imported) => {
             let row = &imported.row;

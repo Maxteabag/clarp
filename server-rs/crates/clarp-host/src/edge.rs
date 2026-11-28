@@ -1938,12 +1938,11 @@ fn own_line(directory: &Directory, member: &Member, view: &crate::agent::View) -
         view.ended.as_ref(),
         focused,
     );
-    if hides || view.newest_is_form_answer {
-        let at = newest.map_or(member.record.created_at_ms, |preview| {
-            preview.ts_ms.max(member.record.created_at_ms)
-        });
-        row["last_activity"] = json!(at);
-    }
+    // A turn can start or settle during Transit. Its state clock belongs to the
+    // status fields. Rank the chat by the same visible entry that supplied its line.
+    row["last_activity"] = json!(newest.map_or(member.record.created_at_ms, |row| {
+        row.ts_ms.max(member.record.created_at_ms)
+    }));
     (
         row,
         OwnLine {
