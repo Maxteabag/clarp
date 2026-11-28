@@ -39,6 +39,9 @@ agent.
 The picker lists Antigravity conversations from agy's own catalogue, with the
 titles agy gave them. agy prunes old conversations, so only ones whose history
 is still on disk are offered.
+On a Rust Host with `antigravity_acp_only` (contract 217), the browser's
+Antigravity choice uses `agy-acp` for both listing and adoption. The CLI's
+older native-store name `agy` selects that same ACP profile on this Host.
 
 Exit status: `0` the agent exists and its history was verified through `/log`;
 `2` the agent exists but the history was not verified; `1` nothing was changed.

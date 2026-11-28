@@ -27,6 +27,7 @@ export const AgentBackend = Object.freeze({
   CLAUDE: 'claude',
   CODEX: 'codex',
   AGY: 'agy',
+  AGY_ACP: 'agy-acp',
   GROK: 'grok',
   OPENCODE: 'opencode',
   DEEPSEEK: 'deepseek',
