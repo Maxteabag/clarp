@@ -246,20 +246,22 @@ pub struct HostResults {
 impl Engine {
     /// `/server-info` answered: whether this Host searches messages itself.
     pub(crate) fn search_server_info(&mut self, info: &clarp_core::json::Object) {
-        let offered = info
-            .get("capabilities")
-            .and_then(|c| c.get("features"))
-            .and_then(Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE)));
+        let contract_features = info.get("contract").and_then(|c| c.get("features")).and_then(Value::as_object);
+        // Older Hosts can advertise basic search through the list alone.
+        let offered = match contract_features {
+            Some(features) => features.contains_key(FEATURE),
+            None => info
+                .get("capabilities")
+                .and_then(|c| c.get("features"))
+                .and_then(Value::as_array)
+                .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(FEATURE))),
+        };
         if offered != self.search.host.offered {
             self.search.host = HostSearch { offered, ..HostSearch::default() };
             self.changes.push(Change::Search);
         }
-        let positions = info
-            .get("capabilities")
-            .and_then(|c| c.get("features"))
-            .and_then(Value::as_array)
-            .is_some_and(|features| features.iter().any(|f| f.as_str() == Some(clarp_core::chat_find::FEATURE)));
+        // Positions require an explicit contract entry, including on high-numbered Hosts.
+        let positions = contract_features.is_some_and(|features| features.contains_key(clarp_core::chat_find::FEATURE));
         // What the Host offers changed: the find bar's words are asked again
         // the new way (an answer under the old one would be stale).
         let was = (self.search.find.offered, self.search.find.positions);
@@ -324,9 +326,8 @@ impl Engine {
             Some(false) => return true,
             Some(true) => {}
         }
-        let positions = clarp_core::chat_find::Positions::from_json(object);
         let find = &mut self.search.find;
-        if let Some(positions) = positions {
+        if find.positions && let Some(positions) = clarp_core::chat_find::Positions::from_json(object) {
             find.ids = positions.ids;
             find.total = positions.total;
             find.truncated = positions.truncated;
