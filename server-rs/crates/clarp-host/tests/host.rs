@@ -14950,7 +14950,7 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
     let asked = place.root.join("asked");
     let shim = place.root.join("configured-shim");
     let through_shim = place.root.join("configured-shim-calls");
-    let real_shim = Path::new(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
+    let real_shim = PathBuf::from(env!("CARGO_BIN_EXE_clarp-host")).with_file_name("clarp-shim");
     program(
         &shim,
         &format!(
@@ -15889,6 +15889,7 @@ fn an_apps_picker_is_told_the_tools_and_the_models_each_can_run() {
     // Antigravity: the models it lists, each by its name and what it is called, and none
     // of those it is only known to have: a model's name carries its effort.
     let of_agy = &told["providers"]["agy-acp"];
+    assert_eq!(of_agy["past_sessions_backend"], "agy-acp");
     assert_eq!(
         (
             &of_agy["label"],
