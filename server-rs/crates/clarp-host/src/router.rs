@@ -734,10 +734,11 @@ fn unavailable(why: Unavailable) -> Response {
 fn providers() -> Value {
     let rows = TOOLS.iter().map(|(tool, label)| {
         let program = clarp_backend::program(tool);
+        let catalog_backend = clarp_backend::canonical_id(tool);
         json!({
             "id": tool, "label": label,
             "detail": format!("Runs an isolated {label} request on this Host."),
-            "kind": "backend", "catalog_backend": tool,
+            "kind": "backend", "catalog_backend": catalog_backend,
             "installed": program.is_some_and(|program| logins::installed(&program)),
             "effort_options": null,
         })
@@ -798,6 +799,13 @@ async fn set(State(app): State<App>, body: Bytes) -> Response {
         Some(named) => {
             let named = named.as_str().filter(|named| !named.is_empty());
             let provider = rules::provider(Some(named.unwrap_or(rules::DEFAULT_PROVIDER)));
+            // Keep saved routing settings and older clients on the provider
+            // key while both old and ACP spellings select the ACP runner.
+            let provider = if clarp_backend::canonical_id(&provider) == clarp_backend::agy_acp::ID {
+                clarp_backend::LEGACY_AGY.to_owned()
+            } else {
+                provider
+            };
             if !TOOLS.iter().any(|(tool, _)| *tool == provider) {
                 return bad(&not_a_tool(&provider));
             }
@@ -839,7 +847,9 @@ async fn set(State(app): State<App>, body: Bytes) -> Response {
         .directory()
         .janitor(&session)
         .map(|member| member.record.backend.clone());
-    let another = provider.is_some() && provider != tool_now;
+    let backend = provider.as_deref().map(clarp_backend::canonical_id);
+    let another =
+        backend.is_some() && backend != tool_now.as_deref().map(clarp_backend::canonical_id);
     if another && !crate::janitors::tool_can_change(&app, &session) {
         let why = "The message delegator has a conversation with its tool: its tool is not changed";
         return refusal(StatusCode::CONFLICT, why);
@@ -860,7 +870,10 @@ async fn set(State(app): State<App>, body: Bytes) -> Response {
             }
             let run_by = json!({ "executor": "ephemeral", "provider": provider });
             asked.insert("execution".to_string(), run_by);
-            asked.insert("backend".to_string(), json!(provider));
+            asked.insert(
+                "backend".to_string(),
+                json!(clarp_backend::canonical_id(provider)),
+            );
         }
         let mut effects = Vec::new();
         if !asked.is_empty() {

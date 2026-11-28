@@ -412,6 +412,9 @@ async fn told(State(app): State<App>) -> Json<Value> {
         for (tool, row) in providers {
             let harness = clarp_backend::by_id(tool).and_then(|backend| backend.runs_through());
             row["runs_through"] = json!(harness);
+            if tool == clarp_backend::agy_acp::ID {
+                row["past_sessions_backend"] = json!(clarp_backend::agy_acp::ID);
+            }
         }
     }
     if crate::logins::sign_in::keeps(&app) {

@@ -12,8 +12,6 @@
       detail: 'Runs an isolated Claude Code request on this Computer.' },
     { id: 'codex', label: 'Codex', kind: 'backend', catalog_backend: 'codex',
       detail: 'Runs an isolated Codex CLI request on this Computer.' },
-    { id: 'agy', label: 'Antigravity', kind: 'backend', catalog_backend: 'agy',
-      detail: 'Runs an isolated Antigravity request on this Computer.' },
     { id: 'openai', label: 'OpenAI API', kind: 'api', catalog_backend: 'codex',
       detail: 'Uses the configured OpenAI API key directly.',
       effort_options: ['minimal', 'low', 'medium', 'high'] },
@@ -65,11 +63,18 @@
       const d = await r.json();
       const s = d.settings || {};
       providers = catalogue?.providers || {};
-      options = Array.isArray(d.providers) && d.providers.length ? d.providers : FALLBACK_OPTIONS;
+      const offered = Array.isArray(d.providers) && d.providers.length ? d.providers : FALLBACK_OPTIONS;
+      const savedProvider = s.provider || 'openai';
+      const acp = offered.some(o => o.catalog_backend === 'agy-acp');
+      options = offered
+        .filter(o => o.id !== 'agy' || acp || savedProvider === 'agy')
+        .map(o => o.id === 'agy' && o.catalog_backend === 'agy-acp'
+          ? { ...o, id: 'agy-acp', label: 'Antigravity (ACP)' }
+          : o);
       enabled = !!s.enabled;
       fallbackOnly = s.fallback_only !== false;
       confidence = s.confidence_threshold || 0.78;
-      provider = s.provider || 'openai';
+      provider = savedProvider === 'agy' && acp ? 'agy-acp' : savedProvider;
       model = s.model || '';
       effort = s.effort || '';
       timeoutMs = s.timeout_ms || 30000;
