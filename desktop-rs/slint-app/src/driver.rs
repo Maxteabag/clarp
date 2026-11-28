@@ -50,6 +50,8 @@ mod a2a_checks;
 mod row_overlap_checks;
 #[path = "quiet_checks.rs"]
 mod quiet_checks;
+#[path = "notify_checks.rs"]
+mod notify_checks;
 #[path = "conversation_checks.rs"]
 mod conversation_checks;
 // ---- the keyboard after the window loses and regains it
@@ -585,6 +587,7 @@ pub fn start_check(name: &str, out: String) {
         "keymap" => keymap_check(out),
         "voice" => voice_check(out),
         "desktop" => desktop_check(out),
+        "notify-daemon" => notify_checks::notify_daemon_check(out),
         "instance" => instance_check(out),
         "diagnostics" => diagnostics_check(out),
         "preview" => preview_check(out),
