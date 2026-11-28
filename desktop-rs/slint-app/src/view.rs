@@ -372,7 +372,7 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
             kind: "code".into(),
             styled: slint::StyledText::default(),
             text: text.clone().into(),
-            language: language.clone().into(),
+            language: language_name(language).into(),
             level: 0,
             rows: empty(),
             ..MessageBlock::default()
@@ -402,6 +402,68 @@ pub(crate) fn message_block(block: &clarp_engine::blocks::Block, literal: bool) 
         }
         Block::Rule => MessageBlock { kind: "rule".into(), styled: slint::StyledText::default(), text: SharedString::new(), level: 0, rows: empty(), ..MessageBlock::default() },
     }
+}
+
+/// A code fence's tag as its header names it: "python" is Python, "sh"
+/// Shell, an unknown tag gets a capital letter; "" for none (the header
+/// then says Code).
+pub(crate) fn language_name(tag: &str) -> String {
+    let tag = tag.split(|c: char| c.is_whitespace() || c == ',' || c == '{').next().unwrap_or_default().trim();
+    let known = match tag.to_ascii_lowercase().as_str() {
+        "py" | "python" | "python3" => "Python",
+        "swift" => "Swift",
+        "sh" | "shell" | "console" | "shellsession" => "Shell",
+        "bash" => "Bash",
+        "zsh" => "Zsh",
+        "fish" => "Fish",
+        "ps" | "ps1" | "powershell" | "pwsh" => "PowerShell",
+        "js" | "javascript" | "mjs" | "cjs" => "JavaScript",
+        "jsx" => "JSX",
+        "ts" | "typescript" => "TypeScript",
+        "tsx" => "TSX",
+        "rs" | "rust" => "Rust",
+        "go" | "golang" => "Go",
+        "kt" | "kotlin" | "kts" => "Kotlin",
+        "java" => "Java",
+        "c" | "h" => "C",
+        "cpp" | "c++" | "cc" | "cxx" | "hpp" => "C++",
+        "cs" | "csharp" | "c#" => "C#",
+        "fs" | "fsharp" | "f#" => "F#",
+        "objc" | "objective-c" => "Objective-C",
+        "rb" | "ruby" => "Ruby",
+        "php" => "PHP",
+        "json" | "jsonc" | "json5" => "JSON",
+        "jsonl" | "ndjson" => "JSON Lines",
+        "yaml" | "yml" => "YAML",
+        "toml" => "TOML",
+        "xml" => "XML",
+        "html" | "htm" => "HTML",
+        "css" => "CSS",
+        "scss" => "SCSS",
+        "sql" => "SQL",
+        "md" | "markdown" => "Markdown",
+        "diff" | "patch" => "Diff",
+        "dockerfile" | "docker" => "Dockerfile",
+        "makefile" | "make" => "Makefile",
+        "graphql" | "gql" => "GraphQL",
+        "lua" => "Lua",
+        "r" => "R",
+        "dart" => "Dart",
+        "scala" => "Scala",
+        "svelte" => "Svelte",
+        "vue" => "Vue",
+        "slint" => "Slint",
+        "nix" => "Nix",
+        "ini" => "INI",
+        "csv" => "CSV",
+        "text" | "txt" | "plaintext" | "plain" => "Text",
+        _ => "",
+    };
+    if !known.is_empty() {
+        return known.to_owned();
+    }
+    let mut chars = tag.chars();
+    chars.next().map_or(String::new(), |first| first.to_uppercase().chain(chars).collect())
 }
 
 /// A table as Markdown (what its copy copies): its first row the header,
@@ -942,6 +1004,16 @@ mod tests {
         let url = row(&["https://example.com/a/very/long/path/that/does/not/break/anywhere"]);
         assert_eq!(super::table_columns(&[url]), vec![32]);
         assert!(super::table_columns(&[]).is_empty());
+    }
+
+    #[test]
+    fn a_code_fence_tag_reads_as_its_language() {
+        assert_eq!(super::language_name("python"), "Python");
+        assert_eq!(super::language_name("sh"), "Shell");
+        assert_eq!(super::language_name("JSON"), "JSON");
+        assert_eq!(super::language_name("rust ignore"), "Rust");
+        assert_eq!(super::language_name("elixir"), "Elixir");
+        assert_eq!(super::language_name(""), "");
     }
 
     #[test]

@@ -617,18 +617,20 @@ export global BlockBridge {
 export component BlockIcon inherits Rectangle {
     in property <image> icon;
     in property <string> label;
-    in property <length> size: 14px * ChatText.scale;
+    in property <length> size: 16px * ChatText.scale;
     // A toggle that is on (the viewer's wrap) stays lit.
     in property <bool> on;
     callback clicked();
-    width: self.size + 8px;
-    height: self.size + 8px;
+    width: self.size + 12px;
+    height: self.size + 12px;
+    border-radius: 4px;
+    background: touch.has-hover ? Palette.hover : transparent;
     accessible-role: button;
     accessible-label: self.label;
     accessible-action-default => { root.clicked(); }
     Image {
-        x: 4px;
-        y: 4px;
+        x: 6px;
+        y: 6px;
         source: root.icon;
         width: root.size;
         height: root.size;
@@ -644,7 +646,7 @@ export component BlockIcon inherits Rectangle {
 export component CopyIcon inherits Rectangle {
     in property <string> text;
     in property <string> label: @tr("Copy code");
-    in property <length> size: 14px * ChatText.scale;
+    in property <length> size: 16px * ChatText.scale;
     out property <bool> copied;
     width: button.width;
     height: button.height;
@@ -702,19 +704,24 @@ export component Block inherits VerticalLayout {
     // row: a wrapped quote or code line came out lines short and the next
     // message was drawn over it (Slint 1.18 measures a conditional layout
     // at its preferred width).
-    // A code block: a thin line over its code with its language (when the
-    // fence names one) and a copy icon, so nothing lies on the code. A
-    // click on it that did not drag opens it over the window.
+    // A code block: a header row over its code, a hairline between them,
+    // with its language's name ("Code" when the fence names none) and Copy
+    // and Expand icons, so nothing lies on the code. Expand, or a click on
+    // the block that did not drag, opens it over the window.
     if root.block.kind == "code": code-box := Rectangle {
-        property <length> line: 22px * ChatText.scale;
+        property <length> line: 30px * ChatText.scale;
+        property <string> name: root.block.language != "" ? root.block.language : @tr("Code");
         background: Palette.sunken;
-        border-radius: 2px;
-        min-width: code-text.min-width + 20px;
-        preferred-width: code-text.preferred-width + 20px;
+        border-radius: 6px;
+        border-width: 1px;
+        border-color: Palette.border;
+        clip: true;
+        min-width: Math.max(code-text.min-width + 24px, copy-code.width + expand-code.width + 16px);
+        preferred-width: Math.max(code-text.preferred-width + 24px, language.preferred-width + copy-code.width + expand-code.width + 32px);
         height: self.line + code-text.preferred-height + 20px;
         accessible-role: groupbox;
         accessible-id: root.measuring ? "" : "code-block";
-        accessible-label: root.block.language;
+        accessible-label: self.name;
         open-touch := TouchArea {
             enabled: !root.measuring;
             mouse-cursor: root.viewer ? MouseCursor.pointer : MouseCursor.default;
@@ -729,27 +736,39 @@ export component Block inherits VerticalLayout {
                 }
             }
         }
-        Text {
-            x: 10px;
-            width: parent.width - 20px - copy-code.width;
+        language := Text {
+            x: 12px;
+            width: Math.max(0px, (root.viewer ? expand-code.x : copy-code.x) - 16px);
             height: code-box.line;
-            text: root.block.language;
-            color: Palette.faint;
-            font-size: ChatText.detail;
+            text: code-box.name;
+            color: Palette.muted;
+            font-size: ChatText.label;
+            font-family: Palette.body-family;
             vertical-alignment: center;
             overflow: elide;
         }
         copy-code := CopyIcon {
-            x: parent.width - self.width - 2px;
+            x: (root.viewer ? expand-code.x : parent.width - 4px) - self.width;
             y: (code-box.line - self.height) / 2;
+            size: 16px * ChatText.scale;
             accessible-id: root.measuring ? "" : "code-copy";
             text: root.block.text;
         }
-        Rectangle { y: code-box.line; height: 1px; background: Palette.rule; }
+        expand-code := BlockIcon {
+            visible: root.viewer;
+            x: parent.width - self.width - 4px;
+            y: (code-box.line - self.height) / 2;
+            size: 16px * ChatText.scale;
+            accessible-id: root.measuring || !root.viewer ? "" : "code-expand";
+            icon: @image-url("icons/expand.svg");
+            label: @tr("Expand");
+            clicked => { BlockBridge.open(root.block); }
+        }
+        Rectangle { y: code-box.line; height: 1px; background: Palette.border; }
         code-text := Text {
-            x: 10px;
+            x: 12px;
             y: code-box.line + 10px;
-            width: parent.width - 20px;
+            width: parent.width - 24px;
             height: parent.height - code-box.line - 20px;
             text: root.block.text;
             font-family: Palette.code-family;
@@ -801,13 +820,14 @@ export component Block inherits VerticalLayout {
             // opens it over the window.
             Rectangle {
                 visible: table-box.wide && root.viewer;
-                height: self.visible ? 22px * ChatText.scale : 0px;
+                height: self.visible ? 30px * ChatText.scale : 0px;
                 min-width: 0px;
                 BlockIcon {
                     x: parent.width - self.width - 2px;
+                    y: (parent.height - self.height) / 2;
                     accessible-id: root.measuring ? "" : "table-expand";
-                    icon: @image-url("icons/fullscreen.svg");
-                    label: @tr("Full screen");
+                    icon: @image-url("icons/expand.svg");
+                    label: @tr("Expand");
                     clicked => { BlockBridge.open(root.block); }
                 }
             }
