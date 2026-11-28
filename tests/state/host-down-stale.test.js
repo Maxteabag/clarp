@@ -58,8 +58,8 @@ describe('stale live state while the serving Host is down', () => {
     reach.noteHeard(reach.PRIMARY, opened);   // never backwards
     expect(reach.reachOf(reach.PRIMARY).lastOk).toBe(opened + 3_600_000);
     reach.noteFail(reach.PRIMARY, { kind: 'refused' });
-    const down = reach.reachOf(reach.PRIMARY).downSince;
-    expect(reach.silentSince(reach.PRIMARY)).toBe(down);
+    // Down: silent since it was last heard, which the stream kept true.
+    expect(reach.silentSince(reach.PRIMARY)).toBe(opened + 3_600_000);
     reach.noteOk(reach.PRIMARY);
   });
 

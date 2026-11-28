@@ -112,7 +112,6 @@ export function reachOf(id) {
   return reach.hosts[id] || null;
 }
 
-/** Shown as not answering: down, and this device is online (offline is the banner's). */
 /**
  * Nothing is heard from the Host now: it does not answer, or this device has no network. Its
  * last live state is then not happening now (no working state, no timer). Unlike isDown, this
@@ -123,10 +122,14 @@ export function unheard(id) {
   return !reach.deviceOnline || !!(r && r.down);
 }
 
-/** Since when nothing has been heard: the first failure, or the device going offline. */
+/**
+ * Since when nothing has been heard: for a Host that is down, its last answer (kept true by its
+ * stream's events), else its first failure; else when the device went offline.
+ */
 export function silentSince(id) {
   const r = reach.hosts[id];
-  return (r && r.downSince) || reach.offlineSince || (r && r.lastOk) || 0;
+  if (r && r.down) return r.lastOk || r.downSince;
+  return reach.offlineSince || (r && r.lastOk) || 0;
 }
 
 /** The Host was heard at `ts` (an event on its stream): "Last answered" counts from there. */
@@ -135,6 +138,7 @@ export function noteHeard(id, ts) {
   if (r && !r.down && ts > r.lastOk) r.lastOk = ts;
 }
 
+/** Shown as not answering: down, and this device is online (offline is the banner's). */
 export function isDown(id) {
   const r = reach.hosts[id];
   return !!(r && r.down && reach.deviceOnline);
