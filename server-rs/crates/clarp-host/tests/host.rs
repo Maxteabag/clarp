@@ -14975,7 +14975,13 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
     let theirs = vectors["providers"].as_array().unwrap().iter();
     let theirs: Vec<Value> = theirs
         .filter(|row| row["kind"] == "backend")
-        .cloned()
+        .map(|row| {
+            let mut row = row.clone();
+            if row["id"] == "agy" {
+                row["catalog_backend"] = json!("agy-acp");
+            }
+            row
+        })
         .collect();
     let screen = host.get("/orchestrator/settings");
     let ours: Vec<Value> = screen["providers"]
@@ -15029,7 +15035,9 @@ fn the_router_asks_antigravity_or_any_other_tool_of_the_host() {
         (200, &json!("agy")),
         "{on}"
     );
-    let (status, chosen) = set(json!({ "model": "gemini-3-flash", "effort": "high" }));
+    let (status, chosen) = set(json!({
+        "provider": "agy-acp", "model": "gemini-3-flash", "effort": "high"
+    }));
     assert_eq!(status, 200, "{chosen}");
     let settings = host.get("/orchestrator/settings")["settings"].clone();
     assert_eq!(
@@ -27915,6 +27923,10 @@ fn a_new_agent_begins_with_a_conversation_antigravity_kept() {
     // The conversation is offered to whoever makes an agent of Antigravity in that
     // directory, by what its user asked first; in every directory there are two.
     let offered = host.get(&format!("/past-sessions?cwd={cwd}&backend=agy"));
+    assert_eq!(
+        host.get(&format!("/past-sessions?cwd={cwd}&backend=agy-acp")),
+        offered
+    );
     let sessions = offered["sessions"].as_array().unwrap();
     assert_eq!(sessions.len(), 1, "{offered}");
     assert_eq!(
