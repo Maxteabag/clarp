@@ -32,14 +32,14 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
 }
 
-/// Every element whose accessible label is one of `labels`, as (label, x, width).
-fn labelled(item: &ItemRc, labels: &[&str], out: &mut Vec<(String, f32, f32)>) {
+/// Every element whose accessible label is one of `labels`, as (label, x, width, y, height).
+fn labelled(item: &ItemRc, labels: &[&str], out: &mut Vec<(String, f32, f32, f32, f32)>) {
     if let Some(label) = item.accessible_string_property(AccessibleStringProperty::Label).map(|l| l.to_string())
         && labels.contains(&label.as_str())
     {
         let geometry = item.geometry();
         let origin = item.map_to_window(geometry.origin);
-        out.push((label, origin.x, geometry.size.width));
+        out.push((label, origin.x, geometry.size.width, origin.y, geometry.size.height));
     }
     let mut child = item.first_child();
     while let Some(current) = child {
@@ -128,9 +128,16 @@ pub(super) fn polish_check(out: String) {
             labelled(&root, &HARNESSES, &mut marks);
             // The card is the window less its 20 px margins, its content 18 px in.
             let (left, right) = (20.0 + 18.0, NARROW - 20.0 - 18.0);
-            let outside: Vec<String> = marks.iter().filter(|(_, x, w)| *x < left - 0.5 || x + w > right + 0.5).map(|(l, x, w)| format!("{l} {x:.0}..{:.0}", x + w)).collect();
+            let outside: Vec<String> = marks.iter().filter(|(_, x, w, _, _)| *x < left - 0.5 || x + w > right + 0.5).map(|(l, x, w, _, _)| format!("{l} {x:.0}..{:.0}", x + w)).collect();
             check(marks.len() == HARNESSES.len(), &format!("every harness has its mark: {:?}", marks.iter().map(|m| &m.0).collect::<Vec<_>>()));
             check(outside.is_empty(), &format!("every mark, whole, stays inside the {left:.0}..{right:.0} px card: {outside:?}"));
+            // The wrapped lines take their height: the model row starts below the last mark.
+            let bottom = marks.iter().map(|(_, _, _, y, h)| y + h).fold(0.0_f32, f32::max);
+            let mut model_row = Vec::new();
+            labelled(&root, &["MODEL", "Model"], &mut model_row);
+            let caption = model_row.iter().map(|(_, _, _, y, _)| *y).fold(f32::MAX, f32::min);
+            check(marks.iter().map(|m| m.3).fold(0.0_f32, f32::max) > marks.iter().map(|m| m.3).fold(f32::MAX, f32::min), "the marks wrap onto a second line at 520 px");
+            check(caption != f32::MAX && caption >= bottom - 0.5, &format!("nothing below overlaps the marks: the model row starts at {caption:.0}, the marks end at {bottom:.0}"));
             shot(&o2, "polish-02-hub-520");
             true
         })),

@@ -1,6 +1,7 @@
 <script>
   // Start / relaunch an agent: working directory (with completion and
   // favourites), backend, model, effort, and fresh/resume/fork.
+  import { untrack } from 'svelte';
   import {
     app, flash, setSession,
   } from '../stores/app.svelte.js';
@@ -130,17 +131,30 @@
   });
 
   // Backend switch changes the model list; keep the agent's own model only
-  // when the backend still matches.
+  // when the backend still matches. Only a backend switch resets the picks:
+  // the lists are read untracked, so a quiet catalogue refresh never does.
   $effect(() => {
     const canReuse = replaceSid
       && launchBackend(existing.backend) === backend;
     const existingModel = canReuse ? (existing.model || '') : '';
     const existingEffort = canReuse ? (existing.effort || '') : '';
-    modelPreset = models.includes(existingModel) ? existingModel : '';
-    modelCustom = existingModel && !models.includes(existingModel) ? existingModel : '';
-    effort = efforts.includes(existingEffort) ? existingEffort : '';
-    const prefix = existingModel.includes('/') ? existingModel.split('/')[0] : '';
-    modelProvider = modelProviders.some(p => p.id === prefix) ? prefix : '';
+    untrack(() => {
+      modelPreset = models.includes(existingModel) ? existingModel : '';
+      modelCustom = existingModel && !models.includes(existingModel) ? existingModel : '';
+      effort = efforts.includes(existingEffort) ? existingEffort : '';
+      const prefix = existingModel.includes('/') ? existingModel.split('/')[0] : '';
+      modelProvider = modelProviders.some(p => p.id === prefix) ? prefix : '';
+    });
+  });
+
+  // A refreshed catalogue keeps what was picked while it still offers it.
+  $effect(() => {
+    const offered = { models, efforts, providers: modelProviders.map(p => p.id) };
+    untrack(() => {
+      if (modelPreset && !offered.models.includes(modelPreset)) modelPreset = '';
+      if (effort && !offered.efforts.includes(effort)) effort = '';
+      if (modelProvider && !offered.providers.includes(modelProvider)) modelProvider = '';
+    });
   });
 
   // Fork is Claude-only; drop back to fresh rather than leaving it selected

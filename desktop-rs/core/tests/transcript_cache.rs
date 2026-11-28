@@ -87,8 +87,12 @@ fn every_chat_cached_for_a_host_is_listed() {
     cache.save_roster("http://a", &roster_snap).unwrap();
     assert_eq!(cache.load_roster("http://a")["agents"][0]["session"], "rachel");
     assert!(cache.load_roster("http://b").is_empty(), "roster cache is scoped to base_url");
+    cache.save_catalog("http://a", &log(json!({"providers": {"claude": {"label": "Claude"}}}))).unwrap();
+    assert_eq!(cache.load_catalog("http://a")["providers"]["claude"]["label"], "Claude", "the catalogue comes back for its Host");
+    assert!(cache.load_catalog("http://b").is_empty(), "and only for it");
+    assert_eq!(cache.load_roster("http://a")["agents"][0]["session"], "rachel", "beside the roster, not over it");
     let chats = cache.all("http://a").unwrap();
-    assert_eq!(chats.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(), ["mike", "rachel"], "only this Host's chats, by session (.roster files ignored)");
+    assert_eq!(chats.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(), ["mike", "rachel"], "only this Host's chats, by session (.roster and .catalog files ignored)");
     assert_eq!(chats[1].1["turns"][0]["text"], "one");
     std::fs::remove_dir_all(&directory).unwrap();
 }
@@ -102,9 +106,13 @@ fn forgetting_a_host_removes_its_chats_and_agent_list_and_keeps_other_hosts() {
     cache.save("https://a.example", "mike", &snapshot).unwrap();
     cache.save("https://b.example", "rachel", &snapshot).unwrap();
     cache.save_roster("https://a.example", &log(json!({"agents": []}))).unwrap();
+    cache.save_catalog("https://a.example", &log(json!({"providers": {"claude": {"label": "Claude"}}}))).unwrap();
+    cache.save_catalog("https://b.example", &log(json!({"providers": {"codex": {"label": "Codex"}}}))).unwrap();
     cache.forget_host("https://a.example");
     assert!(cache.all("https://a.example").unwrap().is_empty(), "the Host's chats are gone");
     assert!(cache.load_roster("https://a.example").is_empty(), "its agent list too");
+    assert!(cache.load_catalog("https://a.example").is_empty(), "and its model catalogue");
+    assert_eq!(cache.load_catalog("https://b.example")["providers"]["codex"]["label"], "Codex", "another Host's catalogue stays");
     assert_eq!(cache.all("https://b.example").unwrap().len(), 1, "another Host's chat stays");
     let _ = std::fs::remove_dir_all(&directory);
 }
