@@ -17,6 +17,9 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::commands::{close_overlay, open_overlay};
 use crate::{App, AppWindow, ContactCard, DirRow, LaunchHub, McpChoice, PastRow, ProviderChip, StartAgent, pump_now};
+use clarp_core::tr;
+
+// i18n-screen: new session
 
 /// The overlay names this module owns.
 pub const HUB: &str = "new-session";
@@ -530,12 +533,14 @@ fn show(app: &App, window: &AppWindow) {
         let models = choices(&engine.models_for_backend(&s.backend));
         let efforts = choices(&engine.efforts_for_model(&s.backend, &s.model));
         let label = |list: &[(String, String)], id: &str| list.iter().find(|(i, _)| i == id).map(|(_, l)| l.clone()).unwrap_or_else(|| id.to_owned());
-        let model_label = if s.model.is_empty() { "Default".to_owned() } else { label(&models, &s.model) };
+        // i18n: New Session dialog, model and effort choice: the backend's own default (noun-like choice)
+        let model_label = if s.model.is_empty() { tr!("model" => "Default") } else { label(&models, &s.model) };
         let summary = if s.effort.is_empty() { model_label } else { format!("{model_label} · {}", label(&efforts, &s.effort)) };
         globals.set_model_summary(summary.into());
         globals.set_editing_model(s.editing_model);
         let with_default =
-            |list: &[(String, String)]| -> Vec<String> { std::iter::once("Default".to_owned()).chain(list.iter().map(|(_, l)| l.clone())).collect() };
+            // i18n: New Session dialog, model and effort choice: the backend's own default (noun-like choice)
+            |list: &[(String, String)]| -> Vec<String> { std::iter::once(tr!("model" => "Default")).chain(list.iter().map(|(_, l)| l.clone())).collect() };
         globals.set_model_labels(strings(with_default(&models)));
         globals.set_model_index(models.iter().position(|(id, _)| *id == s.model).map_or(0, |i| i as i32 + 1));
         globals.set_effort_labels(strings(with_default(&efforts)));
@@ -544,7 +549,8 @@ fn show(app: &App, window: &AppWindow) {
         globals.set_choosing_directory(s.choosing_directory);
         let folders = directory_choices(&engine, s);
         let loading = directory_timer_running() || engine.launch_directories_loading();
-        globals.set_directory_empty(if engine.connected() && !loading && folders.is_empty() { "No matching directories" } else { "" }.into());
+        // i18n: New Session dialog, folder list: nothing matches what was typed
+        globals.set_directory_empty(if engine.connected() && !loading && folders.is_empty() { tr!("No matching directories") } else { String::new() }.into());
         globals.set_directory_current(if folders.is_empty() { -1 } else { s.directory_index.min(folders.len() - 1) as i32 });
         globals.set_directory_rows(model(folders.into_iter().map(|(path, label)| DirRow { path: path.into(), label: label.into() }).collect()));
         globals.set_show_all(s.show_all);
@@ -557,19 +563,30 @@ fn show(app: &App, window: &AppWindow) {
         globals.set_current(current.map_or(-1, |i| i as i32));
         globals.set_empty_text(
             if !s.query.is_empty() {
-                "No contact matches"
+                // i18n: New Session dialog, contact list: nothing matches what was typed
+                tr!("No contact matches")
             } else if s.show_all {
-                "No contacts"
+                // i18n: New Session dialog, contact list: there are no saved contacts
+                tr!("No contacts")
             } else {
-                "Every contact is in a chat · Show all to open one"
+                // i18n: New Session dialog, contact list: every contact already has a chat; Show all is a toggle in the dialog
+                tr!("Every contact is in a chat · Show all to open one")
             }
             .into(),
         );
         let in_chat = current.is_some_and(|i| rows[i].in_chat);
         let label = if starting(&engine, s) {
-            "Starting…".to_owned()
+            // i18n: New Session dialog, confirm button while the agent starts
+            tr!("Starting…")
         } else {
-            format!("{} · Enter", if !s.new_contact && in_chat { "Open chat" } else { "Create session" })
+            let label = if !s.new_contact && in_chat {
+                // i18n: New Session dialog, confirm button: open the contact's existing chat (imperative)
+                tr!("Open chat")
+            } else {
+                // i18n: New Session dialog, confirm button: start a new agent session (imperative)
+                tr!("Create session")
+            };
+            format!("{label} · Enter")
         };
         globals.set_confirm_label(label.into());
         globals.set_can_confirm(can_confirm(&engine, s));
@@ -781,9 +798,12 @@ pub fn open_contacts(app: &Rc<App>, window: &AppWindow, restore_composer: Option
             state.restore_composer = restore;
         }
     }
-    window.set_switcher_placeholder("Start an idle contact".into());
-    window.set_switcher_empty("No idle contacts".into());
-    window.set_switcher_hint("↑↓ move · Enter open · Esc close".into());
+    // i18n: contact picker, search field placeholder: start a contact that has no running chat (imperative)
+    window.set_switcher_placeholder(tr!("Start an idle contact").into());
+    // i18n: contact picker, empty state
+    window.set_switcher_empty(tr!("No idle contacts").into());
+    // i18n: contact picker, hint line: arrows move, Enter opens, Esc closes (keys stay as they are)
+    window.set_switcher_hint(tr!("↑↓ move · Enter open · Esc close").into());
     crate::commands::refresh_switcher(app, window);
 }
 

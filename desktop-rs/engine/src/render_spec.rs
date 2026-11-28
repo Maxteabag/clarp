@@ -16,6 +16,9 @@ use clarp_core::render_spec::{Accepted, Answer, Form, Meaning, Read, Reading, Re
 use serde_json::{Value, json};
 
 use crate::{Change, Engine};
+use clarp_core::tr;
+
+// i18n-screen: form card
 
 /// What the card draws.
 #[derive(Debug, Clone, PartialEq)]
@@ -225,7 +228,8 @@ impl Engine {
                     view.note.clear();
                 }
                 _ => {
-                    view.note = "Could not send. Check the connection and try again.".into();
+                    // i18n: form card, note above Send: the answers did not reach the Host
+                    view.note = tr!("Could not send. Check the connection and try again.");
                 }
             }
             self.changes.push(Change::Updates);
@@ -259,7 +263,8 @@ impl Engine {
             eprintln!("render spec: event=receipt outcome={} code={}", if code.is_some() { "refused" } else { "unknown" }, code.unwrap_or("none"));
             let Some(code) = code.filter(|_| status > 0) else {
                 // Outcome unknown: the same id goes out again on the next Send.
-                entry.view.note = "Could not send. Check the connection and try again.".into();
+                // i18n: form card, note above Send: the answers did not reach the Host
+                entry.view.note = tr!("Could not send. Check the connection and try again.");
                 self.changes.push(Change::Updates);
                 return true;
             };
@@ -269,22 +274,28 @@ impl Engine {
             let mut read_again = false;
             match refusal.meaning() {
                 Meaning::Reopen => {
-                    entry.view.note = "The form changed. Check your answers and send again.".into();
+                    // i18n: form card, note above Send: the agent changed the form meanwhile
+                    entry.view.note = tr!("The form changed. Check your answers and send again.");
                     read_again = true;
                 }
                 Meaning::AlreadyAnswered => read_again = true,
                 Meaning::Closed => {
                     entry.view.closed = true;
-                    entry.view.note = "This form is closed.".into();
+                    // i18n: form card, note: the form takes no more answers
+                    entry.view.note = tr!("This form is closed.");
                 }
                 Meaning::AppTooOld => {
                     entry.view.closed = true;
-                    entry.view.note = "This Host does not take form answers from the desktop yet.".into();
+                    // i18n: form card, note: the Host is too old for this app's answers
+                    entry.view.note = tr!("This Host does not take form answers from the desktop yet.");
                 }
-                Meaning::Answer => entry.view.note = "The Host did not take these answers. Check them and send again.".into(),
-                Meaning::HostFault => entry.view.note = "The Host cannot check forms right now. Try again later.".into(),
+                // i18n: form card, note above Send: an answer is not valid
+                Meaning::Answer => entry.view.note = tr!("The Host did not take these answers. Check them and send again."),
+                // i18n: form card, note above Send: the Host had a fault
+                Meaning::HostFault => entry.view.note = tr!("The Host cannot check forms right now. Try again later."),
                 Meaning::Other if code == "reused_id" => read_again = true,
-                Meaning::Other => entry.view.note = "The Host refused the form. Try again later.".into(),
+                // i18n: form card, note above Send: any other refusal
+                Meaning::Other => entry.view.note = tr!("The Host refused the form. Try again later."),
             }
             self.changes.push(Change::Updates);
             if read_again {
@@ -342,7 +353,8 @@ fn apply_read(entry: &mut Entry, read: Option<Read>) {
                 // Only a ready or active form takes an answer.
                 view.closed = !matches!(read.status.as_str(), "ready" | "active");
                 if view.closed {
-                    view.note = "This form is closed.".into();
+                    // i18n: form card, note: the form takes no more answers
+                    view.note = tr!("This form is closed.");
                 }
                 eprintln!("render spec: event=read outcome=open keys={} closed={}", form.fields.len(), view.closed);
             }

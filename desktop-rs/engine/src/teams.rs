@@ -109,7 +109,8 @@ impl Engine {
                 t.get("member_agent_ids").and_then(Value::as_array).is_some_and(|m| m.iter().any(|a| a.as_str() == Some(leader_agent_id)))
             });
             if member == Some(false) {
-                self.teams.error = "Team leader must already be a member".into();
+                // i18n: Teams, error: the chosen leader is not in the team
+                self.teams.error = clarp_core::tr!("Team leader must already be a member");
                 self.changes.push(Change::Teams);
                 return;
             }

@@ -8,6 +8,9 @@
 //! agent and for copying.
 
 use serde_json::Value;
+use crate::tr;
+
+// i18n-screen: chat
 
 const HEADER: &str = "[Clarp decision resolved]\nDecision ID: ";
 
@@ -28,12 +31,19 @@ impl Outcome {
     /// The chip's words: the status reads without its colour.
     pub fn label(&self) -> String {
         match self {
-            Self::Approved => "Approved".into(),
-            Self::Declined => "Declined".into(),
+            // i18n: chat, chip on a resolved decision card: the user approved it (past participle)
+            Self::Approved => tr!("preview.decision.approved" => "Approved"),
+            // i18n: chat, chip on a resolved decision card: the user declined it (past participle)
+            Self::Declined => tr!("preview.decision.declined" => "Declined"),
+            // i18n: chat, chip on an answered question card when the answer has no words of its own (past participle)
+            Self::Answered(answer) if answer.is_empty() => tr!("Answered"),
             Self::Answered(answer) => answer.clone(),
-            Self::Discarded => "Discarded".into(),
-            Self::Expired => "Expired".into(),
-            Self::Resolved => "Resolved".into(),
+            // i18n: chat, chip on a decision card the user discarded (past participle)
+            Self::Discarded => tr!("preview.decision.discarded" => "Discarded"),
+            // i18n: chat, chip on a decision card that ran out of time (past participle)
+            Self::Expired => tr!("preview.decision.expired" => "Expired"),
+            // i18n: chat, chip on a decision card resolved in a way this app does not name (past participle)
+            Self::Resolved => tr!("preview.decision.resolved" => "Resolved"),
         }
     }
 
@@ -134,7 +144,7 @@ fn outcome_of(sentence: &str) -> Outcome {
         Outcome::Declined
     } else if let Some(answer) = said.strip_prefix(ANSWERED) {
         let answer = answer.rsplit_once(ANSWER_END).map_or(answer, |(json, _)| json);
-        Outcome::Answered(answer_words(answer).unwrap_or_else(|| "Answered".into()))
+        Outcome::Answered(answer_words(answer).unwrap_or_default())
     } else {
         Outcome::Resolved
     }
@@ -155,11 +165,20 @@ fn answer_words(json: &str) -> Option<String> {
 /// short by the Host, as "Resolved a decision".
 pub fn preview_line(text: &str) -> String {
     if let Some(receipt) = parse(text) {
-        return format!("{} · {}", receipt.question, receipt.outcome.label());
+        // i18n: chat list preview of a resolved decision; {0} is the decision's question, {1} its outcome ("Approved")
+        return tr!("preview.decision" => "{0} · {1}", receipt.question, receipt.outcome.label());
     }
-    let (speaker, rest) = text.strip_prefix("You: ").map_or(("", text), |rest| ("You: ", rest));
-    if rest.starts_with("[Clarp decision resolved]") {
-        return format!("{speaker}Resolved a decision");
+    if let Some(rest) = text.strip_prefix("You: ")
+        && rest.starts_with("[Clarp decision resolved]")
+    {
+        // i18n: chat list preview of a decision the user resolved, cut short by the Host
+        let resolved = tr!("Resolved a decision");
+        // i18n: chat list preview of the user's own last message; {} is that message's preview
+        return tr!("preview.own" => "You: {}", resolved);
+    }
+    if text.starts_with("[Clarp decision resolved]") {
+        // i18n: chat list preview of a decision the user resolved, cut short by the Host
+        return tr!("Resolved a decision");
     }
     crate::text::plain_preview_text(&crate::text::cleaned_display_text(text, false))
 }

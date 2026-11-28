@@ -14,6 +14,9 @@ use serde_json::Value;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::{App, AppWindow, Look, Palette, PrefEditor, Swatch};
+use clarp_core::tr;
+
+// i18n-screen: settings
 
 pub const EDITOR: &str = "pref-editor";
 pub const CONFIRM: &str = "pref-confirm";
@@ -318,7 +321,8 @@ pub fn reset_all(app: &Rc<App>, window: &AppWindow) -> usize {
     everything_changed(app, window);
     let others = crate::catalogue::settings().iter().filter(|s| pref_of(s.id()).is_none()).filter(|s| s.reset(app, window)).count();
     let count = stored + others;
-    notice(vec![format!("{count} setting{} back to the default", if count == 1 { "" } else { "s" })]);
+    // i18n: settings notice after Reset all: how many settings went back to their defaults; {n} is the count
+    notice(vec![tr!("{n} setting back to the default" | "{n} settings back to the default" % count)]);
     refresh_views(app, window);
     count
 }
@@ -343,13 +347,19 @@ fn range_of(spec: &Spec, theme: &str) -> String {
     match spec.kind {
         Kind::Number { min, max, unit, zero, .. } => {
             let zero = zero.map(|z| format!(" (0: {z})")).unwrap_or_default();
-            format!("{min}–{max} {unit}{zero} · default {default}")
+            // i18n: settings value editor, the default value (lowercase, after the range); {} is the value
+            format!("{min}–{max} {unit}{zero} · {}", tr!("default {}", default))
         }
-        Kind::Choice { .. } => format!("default {default}"),
-        Kind::Color { .. } => format!("#rrggbb · the theme's {default}"),
-        Kind::Text { .. } if default.is_empty() => "empty by default".into(),
-        Kind::Text { .. } => format!("default {default}"),
-        Kind::Toggle { .. } => format!("on or off · default {default}"),
+        // i18n: settings value editor, the default value (lowercase, after the range); {} is the value
+        Kind::Choice { .. } => tr!("default {}", default),
+        // i18n: settings value editor for a colour: the format and the theme's own colour; {} is that colour (#rrggbb stays)
+        Kind::Color { .. } => tr!("#rrggbb · the theme's {}", default),
+        // i18n: settings value editor: a text setting is empty unless set
+        Kind::Text { .. } if default.is_empty() => tr!("empty by default"),
+        // i18n: settings value editor, the default value (lowercase, after the range); {} is the value
+        Kind::Text { .. } => tr!("default {}", default),
+        // i18n: settings value editor for a switch: it is on or off, and its default; {} is the default (on or off)
+        Kind::Toggle { .. } => tr!("on or off · default {}", default),
     }
 }
 
@@ -396,8 +406,10 @@ pub fn open_editor(app: &Rc<App>, window: &AppWindow, name: &str) {
 pub(crate) fn open_import(app: &Rc<App>, window: &AppWindow) {
     let editor = window.global::<PrefEditor>();
     editor.set_name("import".into());
-    editor.set_label("Import settings".into());
-    editor.set_description("A settings file exported from Clarp (or written by hand): its valid settings are applied, the rest is reported.".into());
+    // i18n: settings, value editor title for importing a settings file (imperative)
+    editor.set_label(tr!("Import settings").into());
+    // i18n: settings, value editor description for importing a settings file
+    editor.set_description(tr!("A settings file exported from Clarp (or written by hand): its valid settings are applied, the rest is reported.").into());
     editor.set_key("".into());
     editor.set_range("".into());
     editor.set_colour(false);
@@ -524,9 +536,15 @@ pub fn confirm_first(app: &Rc<App>, window: &AppWindow, action: &str) -> bool {
     };
     let editor = window.global::<PrefEditor>();
     let (title, message) = if action == "stop-agent" {
-        (format!("Stop {name}?"), "It stops what it is doing now; the chat stays.".to_owned())
+        // i18n: confirmation title before stopping an agent's turn; {} is the agent's name
+        let title = tr!("Stop {}?", name);
+        // i18n: confirmation message before stopping an agent's turn
+        (title, tr!("It stops what it is doing now; the chat stays."))
     } else {
-        (format!("Release {name}?"), "The agent's session ends and its contact is free again.".to_owned())
+        // i18n: confirmation title before releasing an agent (ending its session, freeing its contact); {} is the agent's name
+        let title = tr!("Release {}?", name);
+        // i18n: confirmation message before releasing an agent
+        (title, tr!("The agent's session ends and its contact is free again."))
     };
     editor.set_confirm_title(title.into());
     editor.set_confirm_message(message.into());
@@ -570,11 +588,13 @@ fn document(path: &std::path::Path, app: &App) -> Result<(), String> {
 /// instead (`CLARP_TEST_TERMINAL_LOG`, `CLARP_TEST_OPEN_URL`).
 pub(crate) fn edit_file(app: &App) -> bool {
     let Some(path) = app.engine.borrow().settings().path().map(std::path::Path::to_path_buf) else {
-        notice(vec!["Settings are kept in memory only (CLARP_SETTINGS=off): there is no file to edit".into()]);
+        // i18n: settings notice: there is no settings file to open (CLARP_SETTINGS=off stays as it is)
+        notice(vec![tr!("Settings are kept in memory only (CLARP_SETTINGS=off): there is no file to edit")]);
         return false;
     };
     if let Err(error) = document(&path, app) {
-        notice(vec![format!("could not write the settings reference: {error}")]);
+        // i18n: settings notice: the reference file beside the settings could not be written; {} is the reason
+        notice(vec![tr!("could not write the settings reference: {}", error)]);
     }
     let editor = std::env::var("VISUAL").ok().filter(|e| !e.trim().is_empty()).or_else(|| std::env::var("EDITOR").ok().filter(|e| !e.trim().is_empty()));
     let file = path.to_string_lossy().into_owned();
@@ -587,13 +607,15 @@ pub(crate) fn edit_file(app: &App) -> bool {
             let (program, arguments) = clarp_core::links::terminal_command(xdg, "Clarp settings", &folder, &command);
             let launcher = clarp_engine::lifecycle::default_terminal_launcher();
             launcher(&clarp_engine::lifecycle::TerminalCommand { program: program.clone(), arguments, directory: folder })
-                .map_err(|e| format!("could not start {program}: {e}"))
+                // i18n: settings notice: the terminal to edit the settings file did not start; {0} is the program, {1} the reason
+                .map_err(|e| tr!("could not start {0}: {1}", program, e))
         }
         None => crate::view::open_file(&path),
     };
     match opened {
         Ok(()) => {
-            notice(vec![format!("Editing {file}: saved changes apply at once")]);
+            // i18n: settings notice after opening the settings file in an editor; {} is the file's path
+            notice(vec![tr!("Editing {}: saved changes apply at once", file)]);
             true
         }
         Err(error) => {
@@ -616,14 +638,17 @@ pub(crate) fn export(app: &Rc<App>, window: &AppWindow) -> bool {
     let text = match serde_json::to_string_pretty(&prefs::export(app.engine.borrow().settings())) {
         Ok(text) => text,
         Err(error) => {
-            notice(vec![format!("could not export: {error}")]);
+            // i18n: settings notice: the settings could not be exported; {} is the reason
+            notice(vec![tr!("could not export: {}", error)]);
             return false;
         }
     };
     let written = std::fs::write(&path, text + "\n");
     notice(vec![match &written {
-        Ok(()) => format!("Exported to {}", path.display()),
-        Err(error) => format!("could not export to {}: {error}", path.display()),
+        // i18n: settings notice: the settings were saved to a file; {} is its path
+        Ok(()) => tr!("Exported to {}", path.display()),
+        // i18n: settings notice: the settings could not be saved to a file; {0} is its path, {1} the reason
+        Err(error) => tr!("could not export to {0}: {1}", path.display(), error),
     }]);
     refresh_views(app, window);
     written.is_ok()
@@ -635,8 +660,10 @@ fn import(app: &Rc<App>, window: &AppWindow, path: &str) -> bool {
         Some(rest) => std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default().join(rest),
         None => std::path::PathBuf::from(path),
     };
-    let file = std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display())).and_then(|text| {
-        serde_json::from_str::<Value>(&text).map_err(|e| format!("{} is not valid JSON: {e}", path.display()))
+    // i18n: settings import error: the file could not be read; {0} is its path, {1} the reason
+    let file = std::fs::read_to_string(&path).map_err(|e| tr!("cannot read {0}: {1}", path.display(), e)).and_then(|text| {
+        // i18n: settings import error: the file is not JSON; {0} is its path, {1} the parser's reason
+        serde_json::from_str::<Value>(&text).map_err(|e| tr!("{0} is not valid JSON: {1}", path.display(), e))
     });
     let file = match file {
         Ok(file) => file,
@@ -646,7 +673,8 @@ fn import(app: &Rc<App>, window: &AppWindow, path: &str) -> bool {
         }
     };
     let (applied, problems) = prefs::import(app.engine.borrow_mut().settings_mut(), &file);
-    let mut lines = vec![format!("Imported {applied} setting{} from {}", if applied == 1 { "" } else { "s" }, path.display())];
+    // i18n: settings notice after an import: how many settings were applied; {n} is the count, {0} the file's path
+    let mut lines = vec![tr!("Imported {n} setting from {0}" | "Imported {n} settings from {0}" % applied, path.display())];
     lines.extend(problems);
     notice(lines);
     everything_changed(app, window);

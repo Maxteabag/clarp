@@ -18,6 +18,9 @@ use serde_json::Value;
 use slint::{Model, ModelRc, SharedString, VecModel};
 
 use crate::{App, AppWindow, ProcessHelper, ProcessJob, commands};
+use clarp_core::tr;
+
+// i18n-screen: processes
 
 pub const OVERLAY: &str = "processes";
 
@@ -200,7 +203,36 @@ fn job_title(job: &Object) -> String {
     if !title.trim().is_empty() {
         return title;
     }
-    if text(job, "kind") == "sub-agent" { "Sub-agent".into() } else { "Background job".into() }
+    if text(job, "kind") == "sub-agent" {
+        // i18n: chat list and processes, title of a helper agent that has none of its own (noun)
+        tr!("Sub-agent")
+    } else {
+        // i18n: chat list and processes, title of a background job that has none of its own (noun)
+        tr!("Background job")
+    }
+}
+
+/// A job's status in plain words (the Host's own word for one this app does not know).
+fn status_word(status: &str) -> String {
+    match status {
+        // i18n: processes, a job's status (lowercase, a timer may follow)
+        "running" => tr!("job status" => "running"),
+        // i18n: processes, a job's status: waiting to start (lowercase)
+        "queued" => tr!("job status" => "queued"),
+        // i18n: processes, a job's status (lowercase, a timer may follow)
+        "active" => tr!("job status" => "active"),
+        // i18n: processes, a job's status: finished (lowercase)
+        "completed" => tr!("job status" => "completed"),
+        // i18n: processes, a job's status (lowercase)
+        "failed" => tr!("job status" => "failed"),
+        // i18n: processes, a job's status (lowercase)
+        "cancelled" => tr!("job status" => "cancelled"),
+        // i18n: processes, a job's status: ended by force (lowercase)
+        "killed" => tr!("job status" => "killed"),
+        // i18n: processes, a job's status the Host does not give (lowercase)
+        "" => tr!("job status" => "unknown"),
+        other => other.to_owned(),
+    }
 }
 
 /// "running 3m · ♥ 8s ago", "cancelled after 14m".
@@ -208,27 +240,46 @@ fn timing(job: &Object, now: i64) -> String {
     let status = text(job, "status");
     let started = json::integer(job, "started_at");
     let heartbeat = json::integer(job, "heartbeat_at");
-    let mut parts = vec![if status.is_empty() { "unknown".to_owned() } else { status.clone() }];
+    let word = status_word(&status);
+    let mut parts = vec![word.clone()];
     if started > 0 {
         let end = if active(&status) { now } else { json::integer(job, "finished_at").max(json::integer(job, "updated_at")).max(started) };
         let elapsed = clarp_core::time_format::compact_duration(end - started);
-        parts[0] = if active(&status) { format!("{status} {elapsed}") } else { format!("{status} after {elapsed}") };
+        parts[0] = if active(&status) {
+            // i18n: processes, a running job's status and how long it has run; {0} the status ("running"), {1} the time ("3m")
+            tr!("{0} {1}", word, elapsed)
+        } else {
+            // i18n: processes, a finished job's status and how long it ran; {0} the status ("cancelled"), {1} the time ("14m")
+            tr!("{0} after {1}", word, elapsed)
+        };
     }
     if active(&status) && heartbeat > 0 {
-        parts.push(format!("♥ {} ago", clarp_core::time_format::compact_duration(now - heartbeat)));
+        parts.push(format!("♥ {}", ago(now - heartbeat)));
     }
     parts.join(" · ")
+}
+
+/// "8s ago": how long since a job's last sign of life.
+fn ago(ms: i64) -> String {
+    // i18n: processes, time since a job's last heartbeat; {} is a short duration ("8s")
+    tr!("{} ago", clarp_core::time_format::compact_duration(ms))
 }
 
 /// ProcessDetailText.logUnavailable.
 fn log_unavailable(reason: &str) -> String {
     match reason {
-        "no_log" => "This process didn't register a log.".into(),
-        "outside_allowed_roots" | "not_absolute" => "Its log is outside the folders Clarp may read.".into(),
-        "missing" => "Its log file is gone.".into(),
-        "forbidden" => "This device may not read process logs.".into(),
-        "not_a_regular_file" | "unreadable" => "Its log can't be read.".into(),
-        other => format!("No log available ({other})."),
+        // i18n: process output: the job has no log to show
+        "no_log" => tr!("This process didn't register a log."),
+        // i18n: process output: the log is in a folder Clarp is not allowed to read
+        "outside_allowed_roots" | "not_absolute" => tr!("Its log is outside the folders Clarp may read."),
+        // i18n: process output: the log file was deleted
+        "missing" => tr!("Its log file is gone."),
+        // i18n: process output: this device is not allowed to read logs
+        "forbidden" => tr!("This device may not read process logs."),
+        // i18n: process output: the log cannot be read
+        "not_a_regular_file" | "unreadable" => tr!("Its log can't be read."),
+        // i18n: process output: no log, with the Host's reason code; {} is that code
+        other => tr!("No log available ({}).", other),
     }
 }
 
@@ -251,10 +302,22 @@ fn timeline(detail: &Object) -> Vec<String> {
             let at = chrono::DateTime::from_timestamp_millis(json::integer(entry, "observed_at"))
                 .map(|t| t.with_timezone(&chrono::Local).format("%H:%M:%S").to_string())
                 .unwrap_or_default();
-            let what = [text(entry, "status"), text(entry, "note")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+            let status = text(entry, "status");
+            let what = [if status.is_empty() { status } else { status_word(&status) }, text(entry, "note")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
             format!("{at}  {what}")
         })
         .collect()
+}
+
+/// "3 running", or "nothing running".
+fn running_count(n: usize) -> String {
+    if n == 0 {
+        // i18n: processes panel, count beside the title: no job runs
+        tr!("nothing running")
+    } else {
+        // i18n: processes panel, count beside the title: how many jobs run; {n} is the count
+        tr!("{n} running" | "{n} running" % n)
+    }
 }
 
 fn job_row(engine: &clarp_engine::Engine, job: &Object, now: i64, all: bool) -> ProcessJob {
@@ -271,7 +334,7 @@ fn job_row(engine: &clarp_engine::Engine, job: &Object, now: i64, all: bool) -> 
         title: job_title(job).into(),
         detail: detail.join(" · ").into(),
         elapsed: if started > 0 && active(&status) { clarp_core::time_format::compact_duration(now - started).into() } else { SharedString::new() },
-        heartbeat: if heartbeat > 0 && active(&status) { format!("{} ago", clarp_core::time_format::compact_duration(now - heartbeat)).into() } else { SharedString::new() },
+        heartbeat: if heartbeat > 0 && active(&status) { ago(now - heartbeat).into() } else { SharedString::new() },
         sub_agent,
         can_stop: stoppable(job),
         outcome: engine.job_outcome(&id).into(),
@@ -290,9 +353,11 @@ pub fn show(app: &App, window: &AppWindow) {
     let (jobs, helpers, name, count, empty) = if session.is_empty() {
         let jobs: Vec<ProcessJob> = engine.background_jobs().iter().filter_map(Value::as_object).map(|j| job_row(&engine, j, now, true)).collect();
         let running = engine.background_jobs().iter().filter_map(Value::as_object).filter(|j| active(&text(j, "status"))).count();
-        let count = if running == 0 { "nothing running".to_owned() } else { format!("{running} running") };
-        let empty = if jobs.is_empty() { "No background jobs.".to_owned() } else { String::new() };
-        (jobs, Vec::new(), "Background jobs".to_owned(), count, empty)
+        let count = running_count(running);
+        // i18n: processes panel, empty state of all background jobs
+        let empty = if jobs.is_empty() { tr!("No background jobs.") } else { String::new() };
+        // i18n: processes panel title when it lists every agent's jobs
+        (jobs, Vec::new(), tr!("Background jobs"), count, empty)
     } else {
         let processes = engine.agent_processes(&session).unwrap_or_default();
         let jobs: Vec<ProcessJob> = json::array(&processes, "jobs")
@@ -316,21 +381,24 @@ pub fn show(app: &App, window: &AppWindow) {
                 ProcessHelper {
                     session: text(helper, "session").into(),
                     name: text(helper, "name").into(),
-                    detail: if status.is_empty() { "helper".into() } else { format!("helper · {status}").into() },
+                    // i18n: processes panel, a helper agent's row detail (noun, lowercase); its status may follow after " · "
+                    detail: if status.is_empty() { tr!("helper").into() } else { format!("{} · {status}", tr!("helper")).into() },
                 }
             })
             .collect();
         let count = |key: &str| json::integer(&processes, key).max(0) as usize;
         let unlisted = count("jobCount").saturating_sub(jobs.len()) + count("runningChildren").saturating_sub(helpers.len());
         let empty = if jobs.is_empty() && helpers.is_empty() && unlisted == 0 {
-            "Nothing running.".to_owned()
+            // i18n: processes panel, empty state of an agent with no jobs or helpers
+            tr!("Nothing running.")
         } else if unlisted > 0 {
-            format!("{unlisted} more reported by the Host, details not loaded yet.")
+            // i18n: processes panel: jobs the Host counts but has not listed yet; {n} is how many
+            tr!("{n} more reported by the Host, details not loaded yet." | "{n} more reported by the Host, details not loaded yet." % unlisted)
         } else {
             String::new()
         };
         let total = count("total");
-        let count = if total == 0 { "nothing running".to_owned() } else { format!("{total} running") };
+        let count = running_count(total);
         (jobs, helpers, engine.chat_name(&session), count, empty)
     };
     let rows: Vec<Row> = jobs.iter().map(|j| Row::Job(j.id.to_string())).chain(helpers.iter().map(|h| Row::Helper(h.session.to_string()))).collect();
@@ -357,8 +425,10 @@ pub fn show(app: &App, window: &AppWindow) {
     window.set_process_cursor(cursor as i32);
     window.set_process_mode(if output.is_empty() { "list".into() } else { "output".into() });
     window.set_process_confirm(match &confirm {
-        Some(Target::Job { title, .. }) => format!("Stop {title}? Only this run stops; a newer one is left alone.").into(),
-        Some(Target::Helper { name, .. }) => format!("Stop {name}? Its current turn ends; the chat stays.").into(),
+        // i18n: processes panel, confirmation before stopping a job; {} is the job's title
+        Some(Target::Job { title, .. }) => tr!("Stop {}? Only this run stops; a newer one is left alone.", title).into(),
+        // i18n: processes panel, confirmation before stopping a helper agent; {} is its name
+        Some(Target::Helper { name, .. }) => tr!("Stop {}? Its current turn ends; the chat stays.", name).into(),
         None => SharedString::new(),
     });
     if !output.is_empty() {
@@ -368,16 +438,20 @@ pub fn show(app: &App, window: &AppWindow) {
         let (lines, most) = tail(&text(&log, "text"), back);
         PANEL.with(|p| p.borrow_mut().back = back.min(most));
         let note = match detail {
-            None => "Reading its output…".to_owned(),
-            Some(Err(error)) => format!("Couldn't read its output: {error}"),
-            Some(Ok(_)) if json::boolean(&log, "available") && lines.is_empty() => "Its log is empty so far.".to_owned(),
+            // i18n: process output, while the job's log is read
+            None => tr!("Reading its output…"),
+            // i18n: process output: the job's log could not be read; {} is the reason
+            Some(Err(error)) => tr!("Couldn't read its output: {}", error),
+            // i18n: process output: the job has written nothing yet
+            Some(Ok(_)) if json::boolean(&log, "available") && lines.is_empty() => tr!("Its log is empty so far."),
             Some(Ok(_)) if json::boolean(&log, "available") => String::new(),
             Some(Ok(_)) => log_unavailable(&text(&log, "reason")),
         };
         let progress = detail.and_then(|d| d.as_ref().ok()).map(|d| text(&json::object(d, "progress"), "text")).unwrap_or_default();
         let events = detail.and_then(|d| d.as_ref().ok()).map(timeline).unwrap_or_default();
         let shown = events.len().saturating_sub(4);
-        window.set_process_output_title(job.as_ref().map(job_title).unwrap_or_else(|| "Background job".into()).into());
+        // i18n: chat list and processes, title of a background job that has none of its own (noun)
+        window.set_process_output_title(job.as_ref().map(job_title).unwrap_or_else(|| tr!("Background job")).into());
         window.set_process_output_status(job.as_ref().map(|j| timing(j, now)).unwrap_or_default().into());
         window.set_process_output_progress(progress.into());
         window.set_process_output_lines(model(lines.into_iter().map(SharedString::from).collect()));
@@ -398,32 +472,74 @@ fn hint(window: &AppWindow) -> String {
         let p = p.borrow();
         (!p.output.is_empty(), p.direct, p.confirm.is_some())
     });
+    // In the hint lines below the keys (y, n, Enter, Esc, j/k, End, x, c) stay as they are.
     if confirm {
-        return "y/Enter stop · n/Esc keep running".into();
+        // i18n: processes panel hint line while a stop is asked: y or Enter stops, n or Esc keeps it running
+        return tr!("y/Enter stop · n/Esc keep running");
     }
+    // i18n: processes panel hint: Esc closes the panel (imperative)
+    let close = tr!("Esc close");
     if output {
-        let stop = if window.get_process_output_stoppable() { " · x stop" } else { "" };
-        let back = if direct { "Esc close" } else { "Esc back" };
-        return format!("j/k scroll · End latest{stop} · c chat · {back}");
+        let mut parts = vec![
+            // i18n: process output hint: j/k scroll the log (imperative)
+            tr!("j/k scroll"),
+            // i18n: process output hint: End jumps to the newest lines
+            tr!("End latest"),
+        ];
+        if window.get_process_output_stoppable() {
+            // i18n: processes panel hint: x stops the job (imperative)
+            parts.push(tr!("x stop"));
+        }
+        // i18n: process output hint: c opens the job's chat
+        parts.push(tr!("c chat"));
+        // i18n: process output hint: Esc goes back to the list (imperative)
+        parts.push(if direct { close } else { tr!("Esc back") });
+        return parts.join(" · ");
     }
     let rows = window.get_process_jobs().row_count() + window.get_process_helpers().row_count();
     if rows == 0 {
-        return "Esc close".into();
+        return close;
     }
-    "j/k move · Enter open · x stop · Esc close".into()
+    // i18n: processes panel hint line: j/k move, Enter opens the output, x stops, Esc closes
+    tr!("j/k move · Enter open · x stop · Esc close")
 }
 
 /// The hints the shortcut bar shows while the panel has the keyboard.
 pub fn hints() -> Vec<crate::Hint> {
     let (output, confirm) = PANEL.with(|p| (!p.borrow().output.is_empty(), p.borrow().confirm.is_some()));
-    let pairs: &[(&str, &str)] = if confirm {
-        &[("Y", "Stop"), ("N", "Keep running")]
+    let pairs: Vec<(&str, String)> = if confirm {
+        vec![
+            // i18n: shortcut bar label: stops the job (imperative verb)
+            ("Y", tr!("verb" => "Stop")),
+            // i18n: shortcut bar label: leaves the job running (imperative)
+            ("N", tr!("Keep running")),
+        ]
     } else if output {
-        &[("J/K", "Scroll"), ("End", "Latest"), ("X", "Stop"), ("C", "Chat"), ("Esc", "Back")]
+        vec![
+            // i18n: shortcut bar label: scrolls the log (imperative verb)
+            ("J/K", tr!("verb" => "Scroll")),
+            // i18n: shortcut bar label: jumps to the newest log lines (adjective used as a short hint)
+            ("End", tr!("Latest")),
+            // i18n: shortcut bar label: stops the job (imperative verb)
+            ("X", tr!("verb" => "Stop")),
+            // i18n: shortcut bar label: opens the job's chat (noun)
+            ("C", tr!("Chat")),
+            // i18n: shortcut bar label: Esc goes back (imperative)
+            ("Esc", tr!("verb" => "Back")),
+        ]
     } else {
-        &[("J/K", "Move"), ("Enter", "Open"), ("X", "Stop"), ("Esc", "Close")]
+        vec![
+            // i18n: shortcut bar label: moves the selection (imperative verb)
+            ("J/K", tr!("verb" => "Move")),
+            // i18n: shortcut bar label: opens the selected item (imperative verb)
+            ("Enter", tr!("verb" => "Open")),
+            // i18n: shortcut bar label: stops the job (imperative verb)
+            ("X", tr!("verb" => "Stop")),
+            // i18n: shortcut bar label: Esc closes the panel (imperative verb)
+            ("Esc", tr!("verb" => "Close")),
+        ]
     };
-    pairs.iter().map(|(keys, label)| crate::Hint { keys: (*keys).into(), label: (*label).into() }).collect()
+    pairs.into_iter().map(|(keys, label)| crate::Hint { keys: keys.into(), label: label.into() }).collect()
 }
 
 /// A key while the panel shows; false for one it leaves alone.
@@ -627,7 +743,8 @@ fn confirm_stop(app: &App, _window: &AppWindow) {
             app.engine.borrow_mut().stop_session(&session);
             PANEL.with(|p| {
                 let p = &mut *p.borrow_mut();
-                p.note = format!("Asked {name} to stop.");
+                // i18n: processes panel note after asking a helper agent to stop; {} is its name
+                p.note = tr!("Asked {} to stop.", name);
                 p.stopped = Some((session, name));
             });
         }

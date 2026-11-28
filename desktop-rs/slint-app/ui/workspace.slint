@@ -108,8 +108,9 @@ export struct PaneView {
     busy: bool,
     // "Working…" under the transcript (Show when ready, agent working).
     working: bool,
-    // Live items' status line ("" when idle), whether the agent works (the
-    // interrupt key works) and that key.
+    // Live items' status line ("" when idle; an interrupted turn's starts
+    // with "■", the one mark the status line keeps out of translation),
+    // whether the agent works (the interrupt key works) and that key.
     live-status: string,
     live-busy: bool,
     live-stop-key: string,
@@ -831,7 +832,7 @@ export component Pane inherits Rectangle {
                 spacing: 10px;
                 Text {
                     text: root.pane.live-status;
-                    color: root.pane.live-busy ? Palette.chrome-text : root.pane.live-status == "■ Interrupted" ? Palette.warning : Palette.muted;
+                    color: root.pane.live-busy ? Palette.chrome-text : root.pane.live-status.starts-with("■") ? Palette.warning : Palette.muted;
                     font-size: 12 * Look.unit;
                     overflow: elide;
                     horizontal-stretch: 1;

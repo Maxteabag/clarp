@@ -223,7 +223,7 @@ impl App {
                 unread: r.unread,
                 name: r.name.clone(),
                 backend: r.backend.clone(),
-                last_message: r.last_message.clone(),
+                last_message: r.preview(),
                 working_directory: r.working_directory.clone(),
             })
             .collect();
@@ -955,14 +955,16 @@ fn main() {
         let text = select_text::message_text(app, &pane, &id);
         match text.map(|text| platform::clipboard::copy(&text)) {
             Some(Ok(())) => {}
-            Some(Err(error)) => app.engine.borrow_mut().report_error(&format!("Could not copy: {error}")),
+            // i18n: error banner: the clipboard did not take the text; {} is the reason
+            Some(Err(error)) => app.engine.borrow_mut().report_error(&clarp_core::tr!("Could not copy: {}", error)),
             None => eprintln!("clarp-slint: no message {id} to copy"),
         }
     }));
     window.on_select_message(|pane, id| with_window(|app, window| select_text::open_message(app, window, &pane, &id)));
     window.on_select_copy_all(|| with_window(|app, window| {
         if let Err(error) = platform::clipboard::copy(&window.get_select_body()) {
-            app.engine.borrow_mut().report_error(&format!("Could not copy: {error}"));
+            // i18n: error banner: the clipboard did not take the text; {} is the reason
+            app.engine.borrow_mut().report_error(&clarp_core::tr!("Could not copy: {}", error));
         }
     }));
     window.on_paste_image(|pane| {
@@ -1127,7 +1129,9 @@ fn main() {
     window.on_create_workspace(|| {
         if let Some(app) = app() {
             let count = app.engine.borrow().panes().workspaces().len();
-            app.engine.borrow_mut().with_panes(|p| p.create_workspace(&format!("Workspace {}", count + 1)));
+            // i18n: name of a new workspace (a set of panes); {} is its number
+            let name = clarp_core::tr!("Workspace {}", count + 1);
+            app.engine.borrow_mut().with_panes(|p| p.create_workspace(&name));
             pump_now(&app);
         }
     });

@@ -14,6 +14,9 @@ use tokio::runtime::Handle;
 use url::Url;
 
 use crate::USER_AGENT;
+use clarp_core::tr;
+
+// i18n-screen: errors
 
 mod media_range;
 pub use media_range::MediaRange;
@@ -233,7 +236,8 @@ impl ApiClient {
     fn send_json(&self, tag: &str, method: Method, url: Option<Url>, body: Body, timeout: Option<Duration>) {
         let tag = tag.to_owned();
         let Some(url) = url else {
-            (self.sink)(ApiReply::Failed { tag, message: "No Host endpoint is configured".into(), status: 0 });
+            // i18n: error banner: no Host address is saved on this computer
+            (self.sink)(ApiReply::Failed { tag, message: tr!("No Host endpoint is configured"), status: 0 });
             return;
         };
         let generation = self.generation.load(Ordering::SeqCst);
@@ -305,7 +309,8 @@ impl ApiClient {
 /// A timeout says how long it waited; anything else is reqwest's own words.
 fn request_error(error: &reqwest::Error, timeout: Option<Duration>) -> String {
     match timeout {
-        Some(timeout) if error.is_timeout() => format!("The Host did not answer within {} s", timeout.as_secs_f32()),
+        // i18n: error banner and tooltips: a request to the Host timed out; {} is a number of seconds ("1.5")
+        Some(timeout) if error.is_timeout() => tr!("The Host did not answer within {} s", timeout.as_secs_f32()),
         _ => error.to_string(),
     }
 }

@@ -19,6 +19,9 @@ use clarp_core::json::{self, Object};
 use serde_json::Value;
 
 use crate::{Change, Engine};
+use clarp_core::tr;
+
+// i18n-screen: artifacts
 
 /// How many bodies the cache keeps, and their total size.
 pub const CACHE_ENTRIES: usize = 24;
@@ -409,7 +412,8 @@ impl Engine {
         match request.kind {
             Kind::Content => {
                 let Some(content) = item.get("content").and_then(Value::as_str) else {
-                    return self.hydration_failed(&id, &request.key, "the Host sent the artifact without its content");
+                    // i18n: artifact card, why it did not load, after "Not loaded:" (lowercase)
+                    return self.hydration_failed(&id, &request.key, &tr!("the Host sent the artifact without its content"));
                 };
                 let updated_at = item.get("updated_at").and_then(Value::as_i64).unwrap_or(0);
                 let version = item.get("version").cloned().unwrap_or(Value::Null);
@@ -429,7 +433,8 @@ impl Engine {
                             eprintln!("Artifacts: {id}'s content does not match the Host's hash; reading it again");
                             self.send_hydration(request);
                         } else {
-                            self.hydration_failed(&id, &request.key, "its content does not match the Host's hash");
+                            // i18n: artifact card, why it did not load, after "Not loaded:" (lowercase): the content arrived damaged
+                            self.hydration_failed(&id, &request.key, &tr!("its content does not match the Host's hash"));
                         }
                         return true;
                     }
@@ -442,7 +447,8 @@ impl Engine {
             }
             Kind::History => {
                 let Some(history) = item.get("plan").and_then(|p| p.get("goal")).and_then(|g| g.get("history")).filter(|h| h.is_array()).cloned() else {
-                    return self.hydration_failed(&id, &request.key, "the Host sent the plan without its history");
+                    // i18n: artifact card, why a plan did not load, after "Not loaded:" (lowercase)
+                    return self.hydration_failed(&id, &request.key, &tr!("the Host sent the plan without its history"));
                 };
                 match &request.digest {
                     Some(_) => {
@@ -483,8 +489,10 @@ impl Engine {
             let shown = self.artifact_summary.wanted.contains(&id) || self.artifact_summary.in_view.as_deref() == Some(id.as_str());
             if shown {
                 let title = self.updates.artifacts().iter().find(|a| id_of(a) == id).map(|a| json::js_string(a.get("title"))).unwrap_or_default();
-                let named = if title.is_empty() { "This artifact".to_owned() } else { format!("“{title}”") };
-                self.set_error(&format!("{named} was deleted on the Host"));
+                // i18n: error banner, the artifact meant when it has no title; or its title in quotation marks (use the language's own quotation marks)
+                let named = if title.is_empty() { tr!("This artifact") } else { tr!("“{}”", title) };
+                // i18n: error banner: an artifact the user had open is gone; {} is "This artifact" or its quoted title
+                self.set_error(&tr!("{} was deleted on the Host", named));
             }
             self.artifact_summary.cache.remove_artifact(&id);
             self.artifact_summary.gone.insert(id.clone());

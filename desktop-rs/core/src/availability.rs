@@ -27,6 +27,9 @@ use chrono::TimeZone;
 use serde_json::Value;
 
 use crate::json::Object;
+use crate::tr;
+
+// i18n-screen: chat list
 
 /// The Host's feature name in `/server-info` (`capabilities.features`).
 pub const FEATURE: &str = "agent_availability";
@@ -180,15 +183,21 @@ pub fn answered(log: &Object, since: Option<i64>) -> bool {
 fn own_words(availability: &Availability) -> Option<String> {
     Some(match availability.state {
         State::Busy => match availability.queue_ahead {
-            0 => "Busy".to_owned(),
-            1 => "Busy · 1 message ahead of you".to_owned(),
-            ahead => format!("Busy · {ahead} messages ahead of you"),
+            // i18n: chat list and chat header, the agent is busy (adjective)
+            0 => tr!("Busy"),
+            // i18n: chat list and chat header, the agent is busy and the user's message waits behind others; {n} is how many
+            ahead => tr!("Busy · {n} message ahead of you" | "Busy · {n} messages ahead of you" % ahead),
         },
-        State::Restarting => "Restarting".to_owned(),
-        State::SwitchingAccount => "Switching account (usage limit)".to_owned(),
-        State::UsageLimit => "Usage limit reached".to_owned(),
-        State::Unresponsive => "Not responding".to_owned(),
-        State::HostUpdating => "Host updating".to_owned(),
+        // i18n: chat list and chat header, the agent is restarting (verb, ongoing)
+        State::Restarting => tr!("Restarting"),
+        // i18n: chat list and chat header, the agent moves to another account because this one hit its usage limit
+        State::SwitchingAccount => tr!("Switching account (usage limit)"),
+        // i18n: chat list and chat header, the agent's account hit its usage limit
+        State::UsageLimit => tr!("Usage limit reached"),
+        // i18n: chat list and chat header, the agent does not answer
+        State::Unresponsive => tr!("Not responding"),
+        // i18n: chat list and chat header, the Host is installing an update (Host is the product name)
+        State::HostUpdating => tr!("Host updating"),
         State::Other(_) => return None,
     })
 }
@@ -203,19 +212,32 @@ fn back(back_at: Option<i64>, clock: Clock) -> Option<String> {
     }
     let seconds = (left + 999) / 1000;
     if seconds < 90 {
-        return Some(format!("back in ~{seconds} s"));
+        // i18n: chat list, when the agent is expected back; {} is a number of seconds (about)
+        return Some(tr!("back in ~{} s", seconds));
     }
     if seconds < 3600 {
-        return Some(format!("back in ~{} min", (seconds + 30) / 60));
+        // i18n: chat list, when the agent is expected back; {} is a number of minutes (about)
+        return Some(tr!("back in ~{} min", (seconds + 30) / 60));
     }
     let local = chrono::Local.timestamp_millis_opt(back_at - clock.host_offset_ms).single()?;
-    Some(format!("back at {}", local.format("%H:%M")))
+    // i18n: chat list, when the agent is expected back; {} is a clock time ("14:05")
+    Some(tr!("back at {}", clock_time(local.time())))
+}
+
+fn clock_time(at: chrono::NaiveTime) -> String {
+    crate::i18n::format::time(crate::i18n::current(), at, crate::i18n::format::Clock::H24)
 }
 
 /// "last sign of life 4 min ago", or "just now" under a minute.
 fn last_alive(alive: i64, clock: Clock) -> String {
     let minutes = (clock.host_now_ms() - alive).max(0) / 60_000;
-    if minutes < 1 { "last sign of life just now".to_owned() } else { format!("last sign of life {minutes} min ago") }
+    if minutes < 1 {
+        // i18n: chat list, after Not responding: the agent's last activity was under a minute ago
+        tr!("last sign of life just now")
+    } else {
+        // i18n: chat list, after Not responding: minutes since the agent's last activity; {} is the number
+        tr!("last sign of life {} min ago", minutes)
+    }
 }
 
 /// The one line for the chat list and the open chat's header: the Host's
@@ -256,13 +278,16 @@ fn header_back(back_at: Option<i64>, clock: Clock) -> Option<String> {
     }
     let seconds = (left + 999) / 1000;
     if seconds < 90 {
-        return Some(format!("~{seconds} s"));
+        // i18n: chat header, how long until the agent is back; {} is a number of seconds (about)
+        return Some(tr!("~{} s", seconds));
     }
     if seconds < 3600 {
-        return Some(format!("~{} min", (seconds + 30) / 60));
+        // i18n: chat header, how long until the agent is back; {} is a number of minutes (about)
+        return Some(tr!("~{} min", (seconds + 30) / 60));
     }
     let local = chrono::Local.timestamp_millis_opt(back_at - clock.host_offset_ms).single()?;
-    Some(format!("until {}", local.format("%H:%M")))
+    // i18n: chat header, until when the agent is away; {} is a clock time ("14:05")
+    Some(tr!("until {}", clock_time(local.time())))
 }
 
 /// The open chat's header subtitle: why the agent cannot answer the user
@@ -277,14 +302,19 @@ pub fn header_line(availability: &Availability, working_audience: &str, clock: C
     }
     let mut line = match availability.state {
         State::Busy => match availability.queue_ahead {
-            0 => "Answering other agents".to_owned(),
-            ahead => format!("Answering other agents · {ahead} ahead of you"),
+            // i18n: chat header, the agent is busy answering other agents
+            0 => tr!("Answering other agents"),
+            // i18n: chat header, the agent answers other agents first; {} is how many messages wait ahead of the user's
+            ahead => tr!("Answering other agents · {} ahead of you", ahead),
         },
-        State::SwitchingAccount => "Switching account".to_owned(),
+        // i18n: chat header, the agent moves to another account
+        State::SwitchingAccount => tr!("Switching account"),
         State::Unresponsive => match availability.last_alive_ms {
             // At least a minute: the Host says so only after three.
-            Some(alive) => format!("No sign of life for {} min", ((clock.host_now_ms() - alive).max(0) / 60_000).max(1)),
-            None => "No sign of life".to_owned(),
+            // i18n: chat header, the agent has shown no activity for this long; {} is a number of minutes
+            Some(alive) => tr!("No sign of life for {} min", ((clock.host_now_ms() - alive).max(0) / 60_000).max(1)),
+            // i18n: chat header, the agent has shown no activity
+            None => tr!("No sign of life"),
         },
         _ if !availability.text.is_empty() => availability.text.clone(),
         _ => own_words(availability)?,

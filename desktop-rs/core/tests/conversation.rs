@@ -329,18 +329,18 @@ fn stamps_and_day_headings_follow_the_calendar() {
     let zone = FixedOffset::east_opt(2 * 3600).unwrap();
     let now = zone.with_ymd_and_hms(2026, 9, 17, 18, 10, 0).unwrap();
     let ms = |y, m, d, h, min| zone.with_ymd_and_hms(y, m, d, h, min, 0).unwrap().timestamp_millis();
-    assert_eq!(chat_stamp(ms(2026, 9, 17, 8, 5), &now), "8:05 AM");
+    assert_eq!(chat_stamp(ms(2026, 9, 17, 8, 5), &now).replace('\u{202f}', " "), "8:05 AM");
     assert_eq!(chat_stamp(ms(2026, 9, 16, 23, 0), &now), "Yesterday");
     assert_eq!(chat_stamp(ms(2026, 9, 13, 12, 0), &now), "Sunday");
-    assert_eq!(chat_stamp(ms(2026, 6, 12, 12, 0), &now), "12 Jun");
+    assert_eq!(chat_stamp(ms(2026, 6, 12, 12, 0), &now), "Jun 12");
     assert_eq!(chat_stamp(ms(2025, 6, 12, 12, 0), &now), "6/12/25");
     assert_eq!(chat_stamp(0, &now), "");
     assert_eq!(day_separator("2026-09-17T06:00:00Z", "", &now), "Today");
     assert_eq!(day_separator("2026-09-17T06:00:00Z", "2026-09-17T05:00:00.123Z", &now), "");
     assert_eq!(day_separator("2026-09-16T12:00:00Z", "", &now), "Yesterday");
-    assert_eq!(day_separator("2026-06-12T12:00:00Z", "", &now), "12 June");
+    assert_eq!(day_separator("2026-06-12T12:00:00Z", "", &now), "June 12");
     assert_eq!(day_separator("not a time", "", &now), "");
-    assert_eq!(clock_time("2026-09-17T16:10:00Z", &zone), "6:10 PM");
+    assert_eq!(clock_time("2026-09-17T16:10:00Z", &zone).replace('\u{202f}', " "), "6:10 PM");
     assert_eq!(clock_time("", &zone), "");
 }
 

@@ -26,6 +26,9 @@ use clarp_core::json::Object;
 use serde_json::Value;
 
 use crate::{Change, Engine};
+use clarp_core::tr;
+
+// i18n-screen: processes
 
 /// The feature in `/server-info`.
 pub const FEATURE: &str = "lane_settings";
@@ -121,20 +124,30 @@ pub fn limits(answer: &Object) -> Option<&str> {
 /// fixed limits. Empty when the answer has no such values at all.
 pub fn free_line(answer: &Object) -> String {
     let Some(held) = answer.get("held").and_then(Value::as_object) else { return String::new() };
-    let parts = [("available_mb", "free"), ("reserve_mb", "kept free"), ("room_mb", "room for kept processes")];
-    if parts.iter().all(|(key, _)| !held.contains_key(*key)) {
+    let keys = ["available_mb", "reserve_mb", "room_mb"];
+    if keys.iter().all(|key| !held.contains_key(*key)) {
         return String::new();
     }
-    let read: Vec<Option<i64>> = parts.iter().map(|(key, _)| held.get(*key).and_then(Value::as_f64).map(|mb| mb.round() as i64)).collect();
+    let read: Vec<Option<i64>> = keys.iter().map(|key| held.get(*key).and_then(Value::as_f64).map(|mb| mb.round() as i64)).collect();
     if read.iter().all(Option::is_none) {
-        return "The Host cannot read its machine's memory, so it keeps the fixed limits".to_owned();
+        // i18n: Settings > Processes, memory line: the Host cannot measure free memory and uses fixed limits
+        return tr!("The Host cannot read its machine's memory, so it keeps the fixed limits");
     }
-    parts
-        .iter()
-        .zip(read)
-        .map(|((_, what), mb)| match mb {
-            Some(mb) => format!("{mb} MB {what}"),
-            None => format!("{what}: not known"),
+    read.iter()
+        .enumerate()
+        .map(|(i, mb)| match (i, mb) {
+            // i18n: Settings > Processes, memory line part: memory free on the Host's machine; {} is megabytes
+            (0, Some(mb)) => tr!("{} MB free", mb),
+            // i18n: Settings > Processes, memory line part: free memory the Host never uses; {} is megabytes
+            (1, Some(mb)) => tr!("{} MB kept free", mb),
+            // i18n: Settings > Processes, memory line part: memory left for kept agent processes; {} is megabytes
+            (_, Some(mb)) => tr!("{} MB room for kept processes", mb),
+            // i18n: Settings > Processes, memory line part: free memory could not be read
+            (0, None) => tr!("free: not known"),
+            // i18n: Settings > Processes, memory line part: the kept-free amount could not be read
+            (1, None) => tr!("kept free: not known"),
+            // i18n: Settings > Processes, memory line part: the room for kept processes could not be read
+            (_, None) => tr!("room for kept processes: not known"),
         })
         .collect::<Vec<_>>()
         .join(" · ")
@@ -145,7 +158,8 @@ pub fn free_line(answer: &Object) -> String {
 pub fn held_line(answer: &Object) -> String {
     let Some(held) = answer.get("held").and_then(Value::as_object) else { return String::new() };
     let count = |object: &Object, key: &str| object.get(key).and_then(Value::as_i64).unwrap_or(0);
-    let mut parts = vec![format!("{} kept", count(held, "lanes")), format!("{} MB", count(held, "memory_mb"))];
+    // i18n: Settings > Processes, held line: how many agent processes are kept running; {} is the number
+    let mut parts = vec![tr!("{} kept", count(held, "lanes")), format!("{} MB", count(held, "memory_mb"))];
     if let Some(tools) = held.get("tools").and_then(Value::as_object) {
         let mut names: Vec<&String> = tools.keys().collect();
         names.sort();
@@ -154,14 +168,16 @@ pub fn held_line(answer: &Object) -> String {
             let busy = count(tool, "busy");
             let mut part = format!("{name} {}", count(tool, "lanes"));
             if busy > 0 {
-                part.push_str(&format!(" ({busy} busy)"));
+                // i18n: Settings > Processes, held line: how many of a tool's processes work now; {} is the number
+                part.push_str(&format!(" ({})", tr!("{} busy", busy)));
             }
             parts.push(part);
         }
     }
     let unanswered = count(held, "unanswered");
     if unanswered > 0 {
-        parts.push(format!("{unanswered} did not answer in time, not counted"));
+        // i18n: Settings > Processes, held line: processes that did not answer and are left out; {} is the number
+        parts.push(tr!("{} did not answer in time, not counted", unanswered));
     }
     parts.join(" · ")
 }
@@ -189,7 +205,8 @@ fn live_text(object: &Object) -> Option<String> {
     let lanes = whole(object.get("lanes"))?;
     let busy = whole(object.get("busy")).unwrap_or(0);
     let idle = whole(object.get("idle")).unwrap_or((lanes - busy).max(0));
-    Some(format!("{lanes} · {busy} busy · {idle} idle"))
+    // i18n: Settings > Processes, live processes line: {0} processes in all, {1} working now, {2} waiting
+    Some(tr!("{0} · {1} busy · {2} idle", lanes, busy, idle))
 }
 
 /// The processes that live now (`live`): the total with how many are busy and
@@ -203,7 +220,8 @@ pub fn live_group(answer: &Object) -> Option<Group> {
         summary.push_str(&format!(" · {mb} MB"));
     }
     if let Some(n) = held.and_then(|h| whole(h.get("unanswered"))).filter(|n| *n > 0) {
-        summary.push_str(&format!(" · {n} did not answer in time"));
+        // i18n: Settings > Processes, live processes summary: processes that did not answer; {} is the number
+        summary.push_str(&format!(" · {}", tr!("{} did not answer in time", n)));
     }
     let mut lines = Vec::new();
     if let Some(tools) = live.get("tools").and_then(Value::as_object) {
@@ -219,7 +237,8 @@ pub fn live_group(answer: &Object) -> Option<Group> {
             }
         }
     }
-    Some(Group { title: "Live processes".to_owned(), summary, lines })
+    // i18n: Settings > Processes, group title: the agent processes running now
+    Some(Group { title: tr!("Live processes"), summary, lines })
 }
 
 /// The turns that started their tool anew in the last hour
@@ -238,7 +257,8 @@ pub fn cold_starts_group(answer: &Object) -> Option<Group> {
         .map(|(name, n)| (tool_name(&name), n.to_string()))
         .collect();
     lines.sort();
-    Some(Group { title: "Cold starts, last hour".to_owned(), summary: total.to_string(), lines })
+    // i18n: Settings > Processes, group title: how many turns had to start their tool from scratch in the last hour
+    Some(Group { title: tr!("Cold starts, last hour"), summary: total.to_string(), lines })
 }
 
 impl Engine {
@@ -357,7 +377,8 @@ impl Engine {
                 eprintln!("Engine: GET /lane-settings failed ({status}): {message}");
                 // A change's refusal stays shown over the read after it.
                 if self.lanes.error.is_empty() {
-                    self.lanes.error = format!("Could not read the kept processes: {message}");
+                    // i18n: Settings > Processes, error: the Host's process settings could not be read; {} is the error
+                    self.lanes.error = tr!("Could not read the kept processes: {}", message);
                     self.changes.push(Change::HostStatus);
                 }
                 true

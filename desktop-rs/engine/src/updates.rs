@@ -13,6 +13,9 @@ use clarp_net::SseSignal;
 use serde_json::{Value, json};
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: updates
 
 /// Attention, jobs and artifacts follow the sidebar instead of competing
 /// with it for the Host on a cold start.
@@ -96,8 +99,9 @@ pub(crate) struct Updates {
     jobs: JobTracker,
     /// Bumped whenever the job tracker changes (Qt `processRevision`).
     process_revision: u64,
-    /// artifact id -> how its latest answer (a form's, a decision's) went.
-    artifact_status: std::collections::HashMap<String, String>,
+    /// artifact id -> how its latest answer (a form's, a decision's) went,
+    /// and the tone the card draws it in.
+    artifact_status: std::collections::HashMap<String, (String, StatusTone)>,
     /// "purpose:artifact" -> the bytes fetched for it, or why not.
     artifact_bytes: std::collections::HashMap<String, Result<Vec<u8>, String>>,
     /// A transcript image request is owned by this Host connection.
@@ -146,6 +150,26 @@ pub enum TranscriptImageReply {
     Pending,
     Received(Result<Vec<u8>, String>),
     Abandoned,
+}
+
+/// How a card's status line reads: plain, a failure or a success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StatusTone {
+    #[default]
+    Plain,
+    Danger,
+    Success,
+}
+
+impl StatusTone {
+    /// The name the card's `status-tone` takes.
+    pub fn name(self) -> &'static str {
+        match self {
+            StatusTone::Plain => "",
+            StatusTone::Danger => "danger",
+            StatusTone::Success => "success",
+        }
+    }
 }
 
 impl Engine {
@@ -269,13 +293,29 @@ impl Engine {
     /// or "Not sent: …" ("" before any, and once a decision's is in).
     pub fn artifact_status(&self, artifact_id: &str) -> &str {
         on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.artifact_status(artifact_id));
-        self.updates.artifact_status.get(artifact_id).map_or("", String::as_str)
+        self.updates.artifact_status.get(artifact_id).map_or("", |(text, _)| text.as_str())
+    }
+
+    /// The tone the card draws its status in (the text is in the user's
+    /// language, so the card never reads it for this).
+    pub fn artifact_status_tone(&self, artifact_id: &str) -> StatusTone {
+        on_peer!(self.owner_ref(artifact_id), |engine, _local| engine.artifact_status_tone(artifact_id));
+        self.updates.artifact_status.get(artifact_id).map_or(StatusTone::Plain, |(_, tone)| *tone)
     }
 
     /// A card the window could not open or send says why.
     pub fn set_artifact_status(&mut self, artifact_id: &str, status: &str) {
-        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.set_artifact_status(artifact_id, status));
-        self.updates.artifact_status.insert(artifact_id.to_owned(), status.to_owned());
+        self.set_artifact_status_in(artifact_id, status, StatusTone::Plain);
+    }
+
+    /// A card's status that reports a failure (drawn as one).
+    pub fn set_artifact_problem(&mut self, artifact_id: &str, status: &str) {
+        self.set_artifact_status_in(artifact_id, status, StatusTone::Danger);
+    }
+
+    fn set_artifact_status_in(&mut self, artifact_id: &str, status: &str, tone: StatusTone) {
+        on_peer!(self.owner_mut(artifact_id), |engine, _local| engine.set_artifact_status_in(artifact_id, status, tone));
+        self.updates.artifact_status.insert(artifact_id.to_owned(), (status.to_owned(), tone));
         self.changes.push(Change::Updates);
     }
 
@@ -359,7 +399,8 @@ impl Engine {
             object.insert("expected_revision".into(), json!(revision));
         }
         self.updates.pending_actions.insert(key);
-        self.updates.artifact_status.insert(artifact_id.to_owned(), "Sending…".into());
+        // i18n: card status while its answer goes to the Host
+        self.updates.artifact_status.insert(artifact_id.to_owned(), (tr!("Sending…"), StatusTone::Plain));
         self.changes.push(Change::Updates);
         let path = format!("/decisions/{}/{action}", clarp_core::endpoint::percent_encode_segment(decision_id));
         self.api.post_json(&format!("decision-answer:{artifact_id}|{decision_id}"), &path, body, None);
@@ -378,7 +419,8 @@ impl Engine {
             return;
         }
         let submission = uuid::Uuid::new_v4().to_string();
-        self.updates.artifact_status.insert(artifact_id.to_owned(), "Sending…".into());
+        // i18n: card status while its answer goes to the Host
+        self.updates.artifact_status.insert(artifact_id.to_owned(), (tr!("Sending…"), StatusTone::Plain));
         self.changes.push(Change::Updates);
         let path = format!("/artifacts/{}/submit", clarp_core::endpoint::percent_encode_segment(artifact_id));
         let mut body = json!({"submission_id": submission, "version": version.clone(), "answers": answers});
@@ -675,8 +717,9 @@ impl Engine {
         } else if let Some(action) = tag.strip_prefix("update-action:") {
             self.updates.pending_actions.remove(action);
             if let Some(job_id) = action.strip_prefix("job:") {
-                let outcome = if object.get("changed") == Some(&Value::Bool(false)) { "Already stopped" } else { "Stopped" };
-                self.updates.job_outcomes.insert(job_id.to_owned(), outcome.into());
+                // i18n: processes, outcome beside a background job after Stop: it had already ended, or it is now stopped (past participle)
+                let outcome = if object.get("changed") == Some(&Value::Bool(false)) { tr!("Already stopped") } else { tr!("job" => "Stopped") };
+                self.updates.job_outcomes.insert(job_id.to_owned(), outcome);
                 self.changes.push(Change::Processes);
             }
             self.changes.push(Change::Updates);
@@ -694,7 +737,13 @@ impl Engine {
                 && json::string(object, "submission_id") == submission
                 && json::string(object, "artifact_id") == artifact
                 && object.get("version").map(Value::to_string).as_deref() == Some(version);
-            let status = if echoed { "Answers accepted".to_owned() } else { "Not sent: the Host's receipt did not match these answers".to_owned() };
+            let status = if echoed {
+                // i18n: card status after sending answers: the Host took them
+                (tr!("Answers accepted"), StatusTone::Success)
+            } else {
+                // i18n: card status: refused because the Host's receipt differs from the answers sent
+                (tr!("Not sent: the Host's receipt did not match these answers"), StatusTone::Danger)
+            };
             self.updates.artifact_status.insert(artifact.to_owned(), status);
             self.changes.push(Change::Updates);
         } else {
@@ -766,18 +815,21 @@ impl Engine {
             self.updates.pending_actions.remove(action);
             self.updates.error = detail.to_owned();
             if let Some(job_id) = action.strip_prefix("job:") {
-                self.updates.job_outcomes.insert(job_id.to_owned(), format!("Not stopped: {detail}"));
+                // i18n: processes, outcome beside a background job whose Stop failed; {} is the reason
+                self.updates.job_outcomes.insert(job_id.to_owned(), tr!("Not stopped: {}", detail));
                 self.changes.push(Change::Processes);
             }
             self.changes.push(Change::Updates);
         } else if let Some(rest) = tag.strip_prefix("decision-answer:") {
             let (artifact, decision) = rest.split_once('|').unwrap_or((rest, ""));
             self.updates.pending_actions.remove(&format!("decision:{decision}"));
-            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
+            // i18n: card status: the answer or decision was not sent; {} is the reason
+            self.updates.artifact_status.insert(artifact.to_owned(), (tr!("Not sent: {}", detail), StatusTone::Danger));
             self.changes.push(Change::Updates);
         } else if let Some(rest) = tag.strip_prefix("form-submit:") {
             let artifact = rest.split('|').next().unwrap_or_default();
-            self.updates.artifact_status.insert(artifact.to_owned(), format!("Not sent: {detail}"));
+            // i18n: card status: the form's answers were not sent; {} is the reason
+            self.updates.artifact_status.insert(artifact.to_owned(), (tr!("Not sent: {}", detail), StatusTone::Danger));
             self.changes.push(Change::Updates);
         } else {
             return false;

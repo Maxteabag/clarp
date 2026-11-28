@@ -543,7 +543,8 @@ impl Engine {
             eprintln!("Engine: tool explanations setting failed: {detail}");
             self.live.explanations = None;
             self.api.get("tool-explanations-settings", "/tool-explanations/settings", &[]);
-            self.set_error(&format!("Could not change tool explanations: {detail}"));
+            // i18n: error banner: the tool explanations choice was not saved; {} is the Host's reason
+            self.set_error(&clarp_core::tr!("Could not change tool explanations: {}", detail));
             return true;
         }
         if self.viewport_failure(tag) {

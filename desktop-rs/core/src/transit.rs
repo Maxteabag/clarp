@@ -9,6 +9,9 @@ use chrono::{DateTime, TimeZone};
 use serde_json::{Value, json};
 
 use crate::json::{self, Object};
+use crate::tr;
+
+// i18n-screen: profile
 
 pub const FEATURE: &str = "agent_backend_transit";
 pub const ROW_TITLE: &str = "Backend";
@@ -22,11 +25,56 @@ pub const TOOLS_FEATURE: &str = "agent_backend_transit_tools";
 pub const CONFIRM_BODY_TOOLS: &str = "Carries messages, tool results and attachments.";
 
 /// What a move's confirmation says comes along, by what the Host carries.
-pub fn confirm_body(carries_tools: bool) -> &'static str {
-    if carries_tools { CONFIRM_BODY_TOOLS } else { CONFIRM_BODY }
+pub fn confirm_body(carries_tools: bool) -> String {
+    if carries_tools {
+        // i18n: profile, confirmation of moving an agent to another backend: what the move takes along
+        tr!("Carries messages, tool results and attachments.")
+    } else {
+        // i18n: profile, confirmation of moving an agent to another backend: what it keeps and how long it takes
+        tr!("Keeps persona, goals and messages. Takes about a minute.")
+    }
 }
 pub const NO_ANSWER: &str = "Couldn't reach the Host. Try again.";
 pub const OPTIONS_FAILED: &str = "Couldn't read the backends";
+
+// The words above in the app's language (the constants stay the English the
+// checks compare with).
+
+/// `ROW_TITLE`.
+pub fn row_title() -> String {
+    // i18n: agent profile, row title and picker title: the AI tool the agent runs on (Claude, Codex) (noun)
+    tr!("Backend")
+}
+
+/// `TURN_BLOCKED`.
+pub fn turn_blocked() -> String {
+    // i18n: agent profile, Backend row note: the agent cannot move while its turn runs
+    tr!("Stop the current turn first")
+}
+
+/// `DEFAULT_MARK`.
+pub fn default_mark() -> String {
+    // i18n: agent profile, Backend picker: marks the model the backend uses by default (adjective-like label, also a choice)
+    tr!("model" => "Default")
+}
+
+/// `SWITCH_BODY`.
+pub fn switch_body() -> String {
+    // i18n: agent profile, confirmation of switching the agent's model: the conversation stays
+    tr!("Keeps conversation.")
+}
+
+/// `NO_ANSWER`.
+pub fn no_answer() -> String {
+    // i18n: agent profile, error moving an agent: the Host did not answer
+    tr!("Couldn't reach the Host. Try again.")
+}
+
+/// `OPTIONS_FAILED`.
+pub fn options_failed() -> String {
+    // i18n: agent profile, Backend picker error: the list of backends could not be read
+    tr!("Couldn't read the backends")
+}
 
 /// Whether a `/server-info` answer offers the feature.
 pub fn offered_by(info: &Object) -> bool {
@@ -51,11 +99,13 @@ pub fn value(backend: &str, model: &str) -> String {
 }
 
 pub fn confirm_title(agent: &str, backend: &str, model: &str) -> String {
-    format!("Move {agent} to {}?", value(backend, model))
+    // i18n: agent profile, confirmation title: move the agent to another backend; {0} is the agent's name, {1} the backend (and model, "Claude · Opus 5.5")
+    tr!("Move {0} to {1}?", agent, value(backend, model))
 }
 
 pub fn switch_title(agent: &str, model: &str) -> String {
-    format!("Switch {agent} to {model}?")
+    // i18n: agent profile, confirmation title: switch the agent to another model; {0} is the agent's name, {1} the model
+    tr!("Switch {0} to {1}?", agent, model)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,13 +132,17 @@ impl Phase {
     }
 
     /// A running phase in plain words; empty for done and failed.
-    pub fn words(self) -> &'static str {
+    pub fn words(self) -> String {
         match self {
-            Self::Reading => "reading the conversation",
-            Self::Translating => "translating",
-            Self::Registering => "starting the new session",
-            Self::Switching => "switching",
-            Self::Done | Self::Failed => "",
+            // i18n: agent profile, phase of a move to another backend, after "Moving to Codex…" (lowercase)
+            Self::Reading => tr!("reading the conversation"),
+            // i18n: agent profile, phase of a move to another backend: the conversation is converted for the new backend (lowercase)
+            Self::Translating => tr!("translating"),
+            // i18n: agent profile, phase of a move to another backend (lowercase)
+            Self::Registering => tr!("starting the new session"),
+            // i18n: agent profile, phase of a move to another backend (lowercase)
+            Self::Switching => tr!("switching"),
+            Self::Done | Self::Failed => String::new(),
         }
     }
 
@@ -102,11 +156,13 @@ impl Phase {
 /// the model ("Switching to Sonnet…").
 pub fn progress(backend: &str, model: &str, switch_only: bool, phase: Phase) -> String {
     if switch_only {
-        return format!("Switching to {model}…");
+        // i18n: agent profile, Backend row while the model changes; {} is the model's name
+        return tr!("Switching to {}…", model);
     }
-    let moving = format!("Moving to {backend}…");
+    // i18n: agent profile, Backend row while the agent moves; {} is the backend's name
+    let moving = tr!("Moving to {}…", backend);
     match phase.words() {
-        "" => moving,
+        words if words.is_empty() => moving,
         words => format!("{moving} {words}"),
     }
 }
@@ -196,19 +252,31 @@ where
     Tz::Offset: std::fmt::Display,
 {
     match code.trim().to_ascii_lowercase().as_str() {
-        "not_installed" => "Not installed on this Host".into(),
-        "signed_out" => "Not signed in".into(),
-        "not_supported" => "Can't carry a conversation there yet".into(),
+        // i18n: agent profile, Backend picker: why a backend is dimmed
+        "not_installed" => tr!("Not installed on this Host"),
+        // i18n: agent profile, Backend picker: why a backend is dimmed (no account signed in)
+        "signed_out" => tr!("Not signed in"),
+        // i18n: agent profile, Backend picker: why a backend is dimmed (the Host cannot move a conversation to it)
+        "not_supported" => tr!("Can't carry a conversation there yet"),
         "usage_limit" => match until_ms.and_then(|ms| now.timezone().timestamp_millis_opt(ms).single()) {
-            Some(until) => format!("At its usage limit until {}", clock(&until, now)),
-            None => "At its usage limit".into(),
+            // i18n: agent profile, Backend picker: why a backend is dimmed; {} is a time ("01:00" or "Tue 01:00")
+            Some(until) => tr!("At its usage limit until {}", clock(&until, now)),
+            // i18n: agent profile, Backend picker: why a backend is dimmed
+            None => tr!("At its usage limit"),
         },
         "error" => {
             let line = detail.lines().next().unwrap_or_default().trim();
             let short: String = if line.chars().count() > 80 { line.chars().take(79).collect::<String>() + "…" } else { line.to_owned() };
-            if short.is_empty() { "Couldn't check".into() } else { format!("Couldn't check: {short}") }
+            if short.is_empty() {
+                // i18n: agent profile, Backend picker: the Host could not check this backend
+                tr!("Couldn't check")
+            } else {
+                // i18n: agent profile, Backend picker: the Host could not check this backend; {} is its error, as it said it
+                tr!("Couldn't check: {}", short)
+            }
         }
-        _ => "Not available".into(),
+        // i18n: agent profile, Backend picker: why a backend is dimmed, when the Host gives no known reason
+        _ => tr!("Not available"),
     }
 }
 
@@ -217,25 +285,42 @@ fn clock<Tz: TimeZone>(at: &DateTime<Tz>, now: &DateTime<Tz>) -> String
 where
     Tz::Offset: std::fmt::Display,
 {
-    if at.date_naive() == now.date_naive() { at.format("%H:%M").to_string() } else { at.format("%a %H:%M").to_string() }
+    use crate::i18n::{self, format};
+    let tag = i18n::current();
+    let time = format::time(tag, at.time(), format::Clock::H24);
+    if at.date_naive() == now.date_naive() {
+        time
+    } else {
+        // i18n: a weekday and a clock time, "Tue 01:00"; {0} is the weekday, {1} the time
+        tr!("{0} {1}", format::weekday(tag, at.date_naive()), time)
+    }
 }
 
 /// A refused start (`POST /agent-transit`) in plain words. `unavailable` is
 /// the target's own reason from the options, for `backend_unavailable`.
 pub fn refusal(status: u16, code: &str, unavailable: &str) -> String {
     match code.trim().to_ascii_lowercase().as_str() {
-        "turn_running" => TURN_BLOCKED.into(),
-        "messages_waiting" => "Messages are waiting for this agent. Try again once they have gone.".into(),
-        "transit_running" => "A move is already running".into(),
-        "unknown_backend" => "This Host doesn't offer that backend".into(),
-        "unknown_model" => "This Host doesn't offer that model".into(),
-        "same_backend_and_model" => "It already runs on that backend and model".into(),
-        "not_supported" => "Can't carry a conversation there yet".into(),
+        "turn_running" => turn_blocked(),
+        // i18n: agent profile, error moving an agent: messages still wait for it
+        "messages_waiting" => tr!("Messages are waiting for this agent. Try again once they have gone."),
+        // i18n: agent profile, error moving an agent: another move runs
+        "transit_running" => tr!("A move is already running"),
+        // i18n: agent profile, error moving an agent
+        "unknown_backend" => tr!("This Host doesn't offer that backend"),
+        // i18n: agent profile, error moving an agent
+        "unknown_model" => tr!("This Host doesn't offer that model"),
+        // i18n: agent profile, error moving an agent: nothing would change
+        "same_backend_and_model" => tr!("It already runs on that backend and model"),
+        // i18n: agent profile, Backend picker: why a backend is dimmed (the Host cannot move a conversation to it)
+        "not_supported" => tr!("Can't carry a conversation there yet"),
         "backend_unavailable" if !unavailable.is_empty() => unavailable.into(),
-        "backend_unavailable" => "Not available".into(),
-        _ if status == 0 => NO_ANSWER.into(),
-        _ if status == 404 => "This Host cannot move agents".into(),
-        _ => "Couldn't start the move".into(),
+        // i18n: agent profile, Backend picker: why a backend is dimmed, when the Host gives no known reason
+        "backend_unavailable" => tr!("Not available"),
+        _ if status == 0 => no_answer(),
+        // i18n: agent profile, error moving an agent: the Host is too old to move agents
+        _ if status == 404 => tr!("This Host cannot move agents"),
+        // i18n: agent profile, error moving an agent, for any other reason
+        _ => tr!("Couldn't start the move"),
     }
 }
 
@@ -427,7 +512,8 @@ impl Flow {
             Phase::Failed => {
                 self.request_id.clear();
                 self.ended_transit = event.transit_id.clone();
-                let reason = if event.error.is_empty() { "the move failed".to_owned() } else { event.error.clone() };
+                // i18n: agent profile, a move to another backend failed and the Host gave no reason (lowercase, follows other words)
+                let reason = if event.error.is_empty() { tr!("the move failed") } else { event.error.clone() };
                 Step::Failed { backend: event.backend.clone(), reason }
             }
             phase => Step::Moving { transit_id: event.transit_id.clone(), backend: event.backend.clone(), phase },

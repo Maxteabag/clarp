@@ -41,6 +41,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
 PLIST
 plutil -lint "$app/Contents/Info.plist"
 
+# Info.plist's words per language (the microphone question), one
+# <lang>.lproj/InfoPlist.strings each; macOS picks the user's language.
+for lproj in "$root"/desktop-rs/macos/*.lproj; do
+    cp -R "$lproj" "$app/Contents/Resources/"
+    plutil -lint "$app/Contents/Resources/$(basename "$lproj")/InfoPlist.strings"
+done
+
 codesign --force --sign - --timestamp=none "$app"
 codesign --verify --strict --verbose=2 "$app"
 mkdir -p "$(dirname "$zip")"

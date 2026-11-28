@@ -69,6 +69,8 @@ async fn token_for(host: &str, settings: &Settings) -> String {
 
 /// Runs the terminal and returns the process's exit code.
 pub fn run(parsed: Result<(String, String), String>, settings: Settings) -> i32 {
+    // This process writes its own lines: in the app's language.
+    clarp_core::i18n::set_current(clarp_core::i18n::resolve(&crate::language::stored(&settings)));
     let (session, host) = match parsed {
         Ok(parsed) => parsed,
         Err(message) => {
@@ -83,7 +85,8 @@ pub fn run(parsed: Result<(String, String), String>, settings: Settings) -> i32 
     // Keys are read on a thread of their own: the same channel brings the
     // Enter that closes the window after a refusal.
     let mut keys = terminal::read_into_channel(std::io::stdin());
-    println!("Opening {session}'s terminal on {host}…");
+    // i18n: agent terminal window, first line while it connects; {0} is the agent's session name, {1} the Host's address
+    println!("{}", clarp_core::tr!("Opening {0}'s terminal on {1}…", session, host));
     let opened = runtime.block_on(async {
         let token = token_for(&host, &settings).await;
         terminal::open(&host, &session, &token).await
@@ -112,7 +115,8 @@ pub fn run(parsed: Result<(String, String), String>, settings: Settings) -> i32 
 /// before it is read.
 fn hold(sentence: &str, keys: Option<&mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>>) -> i32 {
     let mut out = std::io::stdout();
-    let _ = writeln!(out, "\r\n{sentence}\r\nPress Enter to close.");
+    // i18n: agent terminal window, last line after it ended (Enter is the key)
+    let _ = writeln!(out, "\r\n{sentence}\r\n{}", clarp_core::tr!("Press Enter to close."));
     let _ = out.flush();
     if let Some(keys) = keys {
         // What was typed before the sentence showed does not close it.

@@ -12,6 +12,9 @@ use clarp_core::protocol::display_name;
 use serde_json::{Value, json};
 
 use crate::{Change, Engine};
+use clarp_core::tr;
+
+// i18n-screen: profile
 
 #[derive(Default)]
 pub(crate) struct Profile {
@@ -179,7 +182,8 @@ impl Engine {
 
     /// The UI could not open the agent's directory.
     pub fn agent_files_open_failed(&mut self) {
-        self.set_error("The agent directory is not available on this desktop");
+        // i18n: agent profile, error banner: the agent's working folder is on another machine
+        self.set_error(&tr!("The agent directory is not available on this desktop"));
     }
 
     // ---- voices ------------------------------------------------------------
@@ -355,18 +359,21 @@ impl Engine {
             self.profile.media_directory = directory;
         }
         let Some(directory) = self.profile.media_directory.clone() else {
-            self.set_error("Unable to cache chat images locally");
+            // i18n: error banner: chat pictures could not be saved on this computer
+            self.set_error(&tr!("Unable to cache chat images locally"));
             return false;
         };
         if let Err(error) = std::fs::create_dir_all(&directory) {
             eprintln!("Engine: could not create the media cache: {error}");
-            self.set_error("Unable to cache chat images locally");
+            // i18n: error banner: chat pictures could not be saved on this computer
+            self.set_error(&tr!("Unable to cache chat images locally"));
             return false;
         }
         let path = directory.join(clarp_core::media::media_file_name(&self.base_url, asset));
         if let Err(error) = std::fs::write(&path, bytes) {
             eprintln!("Engine: could not cache {}: {error}", path.display());
-            self.set_error("Unable to cache chat image");
+            // i18n: error banner: a chat picture could not be saved on this computer
+            self.set_error(&tr!("Unable to cache chat image"));
             return false;
         }
         let url = url::Url::from_file_path(&path).map(|u| u.to_string()).unwrap_or_default();
@@ -454,7 +461,8 @@ impl Engine {
                 let confidence = decision.get("confidence").and_then(Value::as_f64).unwrap_or(0.0);
                 self.profile.orchestrator_last_decision = format!("{action}: {target} ({confidence:.2})");
             } else if object.contains_key("recent_decisions") {
-                self.profile.orchestrator_last_decision = "No decisions logged yet.".into();
+                // i18n: Orchestrator profile: empty state of its last routing decision
+                self.profile.orchestrator_last_decision = tr!("No decisions logged yet.");
             }
             self.profile.orchestrator_loading = false;
             self.changes.push(Change::Orchestrator);
@@ -477,7 +485,7 @@ impl Engine {
                 self.profile.loading = false;
                 // A Host without plans has none to show: no error.
                 if status != 404 {
-                    self.profile.error = load_failed("the plan", message, status);
+                    self.profile.error = load_failed(Loaded::Plan, message, status);
                 }
                 self.changes.push(Change::Profile);
             }
@@ -494,7 +502,7 @@ impl Engine {
                 if status == 404 {
                     self.profile.prompts_missing = true;
                 } else {
-                    self.profile.error = load_failed("the prompt history", message, status);
+                    self.profile.error = load_failed(Loaded::Prompts, message, status);
                 }
                 self.changes.push(Change::Profile);
             }
@@ -515,10 +523,32 @@ impl Engine {
 
 /// A failed profile request in plain words, said once: what could not load
 /// and what the Host said, without the status twice.
-fn load_failed(what: &str, message: &str, status: u16) -> String {
+/// What a profile reads that may fail to load.
+#[derive(Clone, Copy)]
+enum Loaded {
+    Plan,
+    Prompts,
+}
+
+fn load_failed(what: Loaded, message: &str, status: u16) -> String {
+    // In the lines below, {} or {0} is the Host's own error text and {1} or {} its HTTP status number.
     if status == 0 {
-        return format!("Could not load {what}: {message}");
+        return match what {
+            // i18n: agent profile, error: the agent's plan did not load; {} is the error as the network said it
+            Loaded::Plan => tr!("Could not load the plan: {}", message),
+            // i18n: agent profile, error: the agent's earlier prompts did not load; {} is the error as the network said it
+            Loaded::Prompts => tr!("Could not load the prompt history: {}", message),
+        };
     }
     let said = message.strip_prefix(&format!("HTTP {status}")).unwrap_or(message).trim();
-    if said.is_empty() { format!("Could not load {what} (the Host answered {status})") } else { format!("Could not load {what}: {said} (the Host answered {status})") }
+    match (what, said.is_empty()) {
+        // i18n: agent profile, error: the agent's plan did not load; {} is the Host's HTTP status number
+        (Loaded::Plan, true) => tr!("Could not load the plan (the Host answered {})", status),
+        // i18n: agent profile, error: the agent's plan did not load; {0} is the Host's reason, {1} its HTTP status number
+        (Loaded::Plan, false) => tr!("Could not load the plan: {0} (the Host answered {1})", said, status),
+        // i18n: agent profile, error: the agent's earlier prompts did not load; {} is the Host's HTTP status number
+        (Loaded::Prompts, true) => tr!("Could not load the prompt history (the Host answered {})", status),
+        // i18n: agent profile, error: the agent's earlier prompts did not load; {0} is the Host's reason, {1} its HTTP status number
+        (Loaded::Prompts, false) => tr!("Could not load the prompt history: {0} (the Host answered {1})", said, status),
+    }
 }

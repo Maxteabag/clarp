@@ -33,6 +33,12 @@ pub trait AudioOutput: Send {
 
 pub const MISSING_BACKEND: &str = "No audio output device is available";
 
+/// `MISSING_BACKEND` in the app's language.
+fn missing_backend() -> String {
+    // i18n: voice replies error: this computer has no speaker or headphones to play on
+    clarp_core::tr!("No audio output device is available")
+}
+
 pub fn select() -> Box<dyn AudioOutput> {
     match std::env::var("CLARP_AUDIO_OUTPUT").as_deref() {
         Ok("null") => Box::new(Silent::default()),
@@ -47,7 +53,7 @@ pub struct Unavailable;
 
 impl AudioOutput for Unavailable {
     fn play(&mut self, _playback: Playback, _rate: f64, events: Sink) {
-        events(OutputEvent::Ended { result: Err(MISSING_BACKEND.into()), missing_backend: true });
+        events(OutputEvent::Ended { result: Err(missing_backend()), missing_backend: true });
     }
     fn stop(&mut self) {}
     fn pause(&mut self) {}
@@ -169,7 +175,7 @@ fn speaker_thread(inbox: std::sync::mpsc::Receiver<Command>, device: bool) {
                         }
                         Err(error) => {
                             eprintln!("AudioController: no output device: {error}");
-                            events(OutputEvent::Ended { result: Err(MISSING_BACKEND.into()), missing_backend: true });
+                            events(OutputEvent::Ended { result: Err(missing_backend()), missing_backend: true });
                             continue;
                         }
                     }

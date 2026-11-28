@@ -14,6 +14,9 @@
 use serde_json::Value;
 
 use crate::json::Object;
+use crate::tr;
+
+// i18n-screen: send while working
 
 /// The Host's feature name in `/server-info` (`capabilities.features`).
 pub const FEATURE: &str = "send_while_busy";
@@ -36,6 +39,24 @@ pub const FOOTER: &str = "Stops and sends if steering is unavailable.";
 /// The waiting line's dim words before Stop and send when the Host gives no
 /// reason of its own.
 pub const CANT_STEER: &str = "Can't steer this turn";
+
+/// `TITLE` in the app's language.
+pub fn title() -> String {
+    // i18n: Settings > Chats, row title: what Send does while the agent's turn runs
+    tr!("Send while working")
+}
+
+/// `FOOTER` in the app's language.
+pub fn footer() -> String {
+    // i18n: Settings > Chats, note under the Send while working choices
+    tr!("Stops and sends if steering is unavailable.")
+}
+
+/// `CANT_STEER` in the app's language.
+pub fn cant_steer() -> String {
+    // i18n: chat, waiting message strip: dim words before the Stop and send button when the running turn cannot take the message
+    tr!("Can't steer this turn")
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Mode {
@@ -64,20 +85,26 @@ impl Mode {
         Mode::ALL.into_iter().find(|m| m.wire() == value)
     }
 
-    pub fn label(self) -> &'static str {
+    pub fn label(self) -> String {
         match self {
-            Mode::Steer => "Steer now",
-            Mode::AfterTurn => "After the turn",
-            Mode::StopAndSend => "Stop and send",
+            // i18n: Settings > Chats > Send while working, and Send's menu during a turn: choice that reads the message into the running turn now (imperative)
+            Mode::Steer => tr!("Steer now"),
+            // i18n: Settings > Chats > Send while working, and Send's menu during a turn: choice that sends the message once the turn has ended
+            Mode::AfterTurn => tr!("After the turn"),
+            // i18n: Settings > Chats > Send while working, and Send's menu during a turn: choice that stops the turn, then sends (imperative)
+            Mode::StopAndSend => tr!("Stop and send"),
         }
     }
 
     /// One line about the choice.
-    pub fn about(self) -> &'static str {
+    pub fn about(self) -> String {
         match self {
-            Mode::Steer => "Joins current turn.",
-            Mode::AfterTurn => "Waits for current turn.",
-            Mode::StopAndSend => "Stops turn and sends.",
+            // i18n: description under the Steer now choice: the message joins the running turn
+            Mode::Steer => tr!("Joins current turn."),
+            // i18n: description under the After the turn choice: the message waits until the turn ends
+            Mode::AfterTurn => tr!("Waits for current turn."),
+            // i18n: description under the Stop and send choice: the turn is stopped and the message sent
+            Mode::StopAndSend => tr!("Stops turn and sends."),
         }
     }
 

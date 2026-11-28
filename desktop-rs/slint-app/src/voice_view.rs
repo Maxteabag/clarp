@@ -45,11 +45,14 @@ fn fill(app: &App, window: &AppWindow) {
             id: voice.id.as_str().into(),
             label: voice.label.as_str().into(),
             status: if voice.current {
-                "Current".to_owned()
+                // i18n: voice picker, the agent's present voice (adjective)
+                clarp_core::tr!("voice" => "Current")
             } else if !voice.taken_by.is_empty() {
-                format!("Used by {}", voice.taken_by)
+                // i18n: voice picker, a voice another agent has; {} is that agent's name
+                clarp_core::tr!("Used by {}", voice.taken_by)
             } else {
-                "Available".to_owned()
+                // i18n: voice picker, a free voice (adjective)
+                clarp_core::tr!("voice" => "Available")
             }
             .into(),
             current: voice.current,

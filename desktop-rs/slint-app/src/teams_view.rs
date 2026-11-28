@@ -13,6 +13,9 @@ use serde_json::Value;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::{App, AppWindow, Palette, TeamMemberView, TeamMessageView, TeamView, commands, pump_now};
+use clarp_core::tr;
+
+// i18n-screen: teams
 
 thread_local! {
     static GROUPED: Cell<bool> = const { Cell::new(true) };
@@ -90,15 +93,15 @@ pub fn show(app: &App, window: &AppWindow) {
             let id = text(&team, "team_id");
             let name = text(&team, "name");
             let latest = text(&team, "latest_message");
-            let subtitle = format!(
-                "{}{}",
-                if text(&team, "parent_team_id").is_empty() { "" } else { "Subteam · " },
-                if latest.is_empty() { format!("{} members", members_of(&team).len()) } else { latest }
-            );
+            // i18n: Teams list, a team's member count; {n} is the count
+            let line = if latest.is_empty() { tr!("{n} member" | "{n} members" % members_of(&team).len()) } else { latest };
+            // i18n: Teams list, before the line of a team inside another team (noun)
+            let subtitle = if text(&team, "parent_team_id").is_empty() { line } else { format!("{} · {line}", tr!("Subteam")) };
             TeamView {
                 selected: id == selected,
                 initial: name.chars().next().map_or_else(|| "?".to_owned(), |c| c.to_uppercase().to_string()).into(),
-                name: if name.is_empty() { "Team".into() } else { name.into() },
+                // i18n: Teams, a team without a name (noun)
+                name: if name.is_empty() { tr!("Team").into() } else { name.into() },
                 colour: hex_colour(&text(&team, "color")).unwrap_or(faint),
                 depth: depth as i32,
                 unread: json::js_number(team.get("unread_count")) as i32,
@@ -112,22 +115,28 @@ pub fn show(app: &App, window: &AppWindow) {
         Some(team) => {
             let members = members_of(team);
             let leader = text(team, "leader_agent_id");
-            let subtitle = format!(
-                "{} members{}",
-                members.len(),
-                if leader.is_empty() { String::new() } else { format!("  ·  leader {}", engine.agent_name_by_id(&leader)) }
-            );
+            // i18n: Teams list, a team's member count; {n} is the count
+            let count = tr!("{n} member" | "{n} members" % members.len());
+            let subtitle = if leader.is_empty() {
+                count
+            } else {
+                // i18n: Teams, header line: the team's leader; {} is the agent's name (lowercase, after the member count)
+                format!("{count}  ·  {}", tr!("leader {}", engine.agent_name_by_id(&leader)))
+            };
             let views = members.iter().map(|id| TeamMemberView { id: id.into(), name: engine.agent_name_by_id(id).into() }).collect();
-            (first_or(&text(team, "name"), "Team"), subtitle, views, json::truthy(team.get("nudge_enabled")))
+            // i18n: Teams, a team without a name (noun)
+            (first_or(&text(team, "name"), &tr!("Team")), subtitle, views, json::truthy(team.get("nudge_enabled")))
         }
-        None => ("Select a team".to_owned(), String::new(), Vec::new(), false),
+        // i18n: Teams, title when no team is chosen (imperative)
+        None => (tr!("Select a team"), String::new(), Vec::new(), false),
     };
     let messages: Vec<TeamMessageView> = engine
         .team_messages()
         .iter()
         .filter_map(Value::as_object)
         .map(|m| TeamMessageView {
-            source: first_or(&text(m, "source_name"), "Agent").into(),
+            // i18n: agent profile, the agent's name when it has none (noun)
+            source: first_or(&text(m, "source_name"), &tr!("Agent")).into(),
             text: text(m, "text").into(),
             session: text(m, "source_session").into(),
         })
@@ -214,7 +223,8 @@ fn open_edit(app: &App, window: &AppWindow) {
     let engine = app.engine.borrow();
     let Some(team) = engine.team(engine.selected_team_id()).cloned() else { return };
     let members = members_of(&team);
-    let mut choices = vec![(String::new(), "No leader".to_owned())];
+    // i18n: Teams, edit dialog: the team has no leader (choice)
+    let mut choices = vec![(String::new(), tr!("No leader"))];
     for choice in engine.team_agent_choices() {
         let id = choice.get("id").and_then(Value::as_str).unwrap_or_default().to_owned();
         if members.contains(&id) {

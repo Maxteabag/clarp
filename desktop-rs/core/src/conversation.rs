@@ -15,6 +15,9 @@ use serde_json::{Value, json};
 use crate::json::{self, Object};
 pub use crate::list_ops::{ListOp, replay};
 use crate::protocol::{Message, describe_subagent_cell};
+use crate::tr;
+
+// i18n-screen: chat
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -547,7 +550,8 @@ impl Conversation {
         let event = json!({
             "activity_status": "running",
             "activity_action": "thinking",
-            "activity_summary": "Working",
+            // i18n: chat, working indicator shown at once after the user sends, before the Host reports (verb, ongoing)
+            "activity_summary": tr!("Working"),
         });
         self.apply_activity_event(event.as_object().expect("literal object"));
     }

@@ -13,6 +13,9 @@ use serde_json::Value;
 
 use crate::json::Object;
 use crate::protocol::Agent;
+use crate::tr;
+
+// i18n-screen: chat
 
 /// The Host's feature name in `/server-info` (`capabilities.features`).
 pub const FEATURE: &str = "stalled_turn";
@@ -23,13 +26,22 @@ pub const ROW_STATUS: &str = "Seems stuck";
 /// The indicator's Stop button: the existing Stop.
 pub const STOP_LABEL: &str = "Stop";
 
+/// `ROW_STATUS` in the app's language.
+pub fn row_status() -> String {
+    // i18n: chat list, status of an agent whose turn shows no progress for minutes
+    tr!("Seems stuck")
+}
+
 /// The open chat's working indicator while the turn seems stuck: whole
 /// minutes since `stalled_since`, and a line for the user's queued words.
 pub fn indicator(stalled_since: i64, now_ms: i64, queued: bool) -> String {
     let minutes = (now_ms - stalled_since).max(0) / 60_000;
-    let mut text = format!("Seems stuck · no progress for {minutes} min");
+    // i18n: chat, working indicator of a turn with no progress; {} is a number of minutes
+    let mut text = tr!("Seems stuck · no progress for {} min", minutes);
     if queued {
-        text.push_str(" · Your message is waiting");
+        text.push_str(" · ");
+        // i18n: chat, after "Seems stuck": the user's message waits behind the stuck turn
+        text.push_str(&tr!("Your message is waiting"));
     }
     text
 }

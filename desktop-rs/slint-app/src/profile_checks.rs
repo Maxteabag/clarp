@@ -88,7 +88,7 @@ pub(super) fn profile_check(out: String) {
                 return false;
             }
             check(info.name == "Rachel" && info.session == "rachel" && info.backend == "claude", &format!("the profile is Rachel's: {} {}", info.name, info.backend));
-            check(info.folder.as_str() == folder3 && info.context_used == "50000 / 200000 tokens", &format!("with its folder and context: {} {}", info.folder, info.context_used));
+            check(info.folder.as_str() == folder3 && info.context_used == "50,000 / 200,000 tokens", &format!("with its folder and context: {} {}", info.folder, info.context_used));
             check(info.plan_title == "Ship it" && bridge.get_plan().row_count() == 1, "and the current plan");
             check(bridge.get_prompts().row_count() == 20 && info.prompts_more, "the first 20 prompts, with more to load");
             let models: Vec<String> = bridge.get_models().iter().map(|m| m.to_string()).collect();

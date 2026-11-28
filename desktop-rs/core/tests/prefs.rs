@@ -262,7 +262,7 @@ fn the_time_format_setting_switches_the_clock() {
     clarp_core::time_format::set_clock_24h(true);
     assert_eq!(clarp_core::time_format::chat_stamp(evening, &now), "18:10");
     clarp_core::time_format::set_clock_24h(false);
-    assert_eq!(clarp_core::time_format::chat_stamp(evening, &now), "6:10 PM");
+    assert_eq!(clarp_core::time_format::chat_stamp(evening, &now).replace('\u{202f}', " "), "6:10 PM");
 }
 
 #[test]

@@ -164,7 +164,7 @@ export component Updates inherits Rectangle {
             }
             if root.attention.length > 0: Text {
                 // i18n: Updates page, line beside the title; {n} is how many items wait for the user to answer or act
-                text: @tr("{n} need attention" | "{n} need attention" % root.attention.length);
+                text: @tr("{n} needs attention" | "{n} need attention" % root.attention.length);
                 color: Palette.danger;
                 font-size: 11 * Look.unit;
                 vertical-alignment: center;

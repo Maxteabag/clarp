@@ -10,6 +10,9 @@
 //! keep their plain sessions, so with the option off nothing changes.
 
 use crate::protocol::Agent;
+use crate::tr;
+
+// i18n-screen: chat list
 
 /// The device preference (never a Host's): off unless set.
 pub const SETTING: &str = "connection/allHosts";
@@ -117,8 +120,10 @@ pub fn host_badges(setting: bool, paired_hosts: usize) -> bool {
 pub fn moved_line(agent: &Agent) -> String {
     match (agent.moved_to_host.as_str(), agent.moved_to.as_str()) {
         ("", "") => String::new(),
-        ("", id) => format!("Moved to {id}"),
-        (host, _) => format!("Moved to {host}"),
+        // i18n: chat list, quiet line of an agent moved to another Host; {} is that Host's id
+        ("", id) => tr!("Moved to {}", id),
+        // i18n: chat list, quiet line of an agent moved to another Host; {} is that Host's name
+        (host, _) => tr!("Moved to {}", host),
     }
 }
 

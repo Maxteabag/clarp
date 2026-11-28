@@ -20,6 +20,9 @@ use serde_json::Value;
 use crate::json::Object;
 use crate::live_present::{Entry, Kind};
 use crate::protocol::Message;
+use crate::tr;
+
+// i18n-screen: chat
 
 pub const FEATURE: &str = "chat_view";
 /// The Host lets an agent answer from a fork while its own turn works.
@@ -47,7 +50,8 @@ pub const TOOL_ACTIVITY_IN_CONVERSATION: &str = "Applies in Session view";
 /// Under `live:`, so a click or O toggles it as it does a live row.
 pub const WORK_PREFIX: &str = "live:work:";
 
-/// The chat menu's entries: (value, label). "default" follows Settings.
+/// The chat menu's entries: (value, English label; `menu_label` gives the
+/// words in the app's language). "default" follows Settings.
 pub const MENU: [(&str, &str); 3] = [("default", "Follow Settings"), (CONVERSATION, "Conversation"), (SESSION, "Session")];
 
 /// A value from the Host or the settings file: `conversation`, `session`,
@@ -73,24 +77,43 @@ pub fn effective(own: Option<&str>, clean: bool, host: &str) -> &'static str {
 }
 
 /// The words for an effective view.
-pub fn label(view: &str) -> &'static str {
+pub fn label(view: &str) -> String {
     match decoded(view) {
-        Some(CONVERSATION) => "Conversation",
-        _ => "Session",
+        // i18n: chat menu and profile, name of the chat view that shows messages and replies only (noun)
+        Some(CONVERSATION) => tr!("chat view" => "Conversation"),
+        // i18n: chat menu and profile, name of the chat view that also shows the agent's work (noun)
+        _ => tr!("chat view" => "Session"),
     }
 }
 
 /// The words for a menu value ("default" reads Follow Settings).
-pub fn menu_label(value: &str) -> &'static str {
-    MENU.iter().find(|(v, _)| *v == value).map_or("Follow Settings", |(_, label)| label)
+pub fn menu_label(value: &str) -> String {
+    match value {
+        CONVERSATION | SESSION => label(value),
+        // i18n: chat menu choice: this chat uses the choice made in Settings
+        _ => tr!("Follow Settings"),
+    }
+}
+
+/// Clean chat's title and description (Settings), in the app's language.
+pub fn clean_title() -> String {
+    // i18n: Settings, row title: every chat shows only messages and replies (noun phrase, a setting's name)
+    tr!("Clean chat")
+}
+
+pub fn clean_detail() -> String {
+    // i18n: Settings, description under the Clean chat row
+    tr!("Messages and replies only.")
 }
 
 /// The quiet line after a write the Host refused.
 pub fn refused(host: &str) -> String {
     if host.trim().is_empty() {
-        "Saved on this device only.".to_owned()
+        // i18n: chat, quiet note after the Host refused to save the chat's view choice
+        tr!("Saved on this device only.")
     } else {
-        format!("Not saved on {}. Kept locally.", host.trim())
+        // i18n: chat, quiet note after the Host refused to save the chat's view choice; {} is the Host's name
+        tr!("Not saved on {}. Kept locally.", host.trim())
     }
 }
 
@@ -238,17 +261,19 @@ pub fn status_words(activity: &Object) -> String {
             }
             let label = tool.map(|t| text(t, "label")).unwrap_or_default();
             if !label.is_empty() {
-                return format!("Running {}", label.lines().next().unwrap_or_default());
+                // i18n: chat list and Running box, what the agent runs now; {} is the command or tool's label
+                return tr!("Running {}", label.lines().next().unwrap_or_default());
             }
-            tool_words(&tool.map(|t| text(t, "name")).unwrap_or_default()).to_owned()
+            tool_words(&tool.map(|t| text(t, "name")).unwrap_or_default())
         }
         // A turn held for the machine looks like any working turn (the
         // owner, 25 Nov 2026): no words of its own, whatever the Host sends.
-        "limited" if held_for_the_machine(activity) => "Working".to_owned(),
+        // i18n: chat list and Running box, the agent is working (verb, ongoing)
+        "limited" if held_for_the_machine(activity) => tr!("Working"),
         "waiting" | "limited" | "background" if !headline.is_empty() => headline,
-        "limited" => limited_words(activity).to_owned(),
+        "limited" => limited_words(activity),
         "thinking" if !headline.is_empty() => headline,
-        _ => step_words(&state, "").unwrap_or_default().to_owned(),
+        _ => step_words(&state, "").unwrap_or_default(),
     }
 }
 
@@ -264,38 +289,53 @@ pub fn held_for_the_machine(activity: &Object) -> bool {
 /// headline: `waits_for` (Rust Host contract 188, feature `waits_for`) tells
 /// the machine's pressure and the network from a usage limit; without it
 /// (an older Host) `limited` is a usage limit, as before.
-pub fn limited_words(activity: &Object) -> &'static str {
+pub fn limited_words(activity: &Object) -> String {
     match activity.get("waits_for").and_then(Value::as_str).unwrap_or_default() {
-        "machine" => "Working",
-        "network" => "Waiting for the network",
-        _ => "Waiting for the usage limit",
+        // i18n: chat list and Running box, the agent is working (verb, ongoing)
+        "machine" => tr!("Working"),
+        // i18n: chat list and Running box, the turn waits until the network is back
+        "network" => tr!("Waiting for the network"),
+        // i18n: chat list and Running box, the turn waits until the account's usage limit resets
+        _ => tr!("Waiting for the usage limit"),
     }
 }
 
 /// The kind of a step in plain words; None for none.
-pub fn step_words(state: &str, tool: &str) -> Option<&'static str> {
+pub fn step_words(state: &str, tool: &str) -> Option<String> {
     match state {
-        "thinking" => Some("Thinking"),
-        "responding" => Some("Writing"),
-        "compacting" => Some("Compacting"),
-        "waiting" => Some("Waiting"),
-        "limited" => Some("Waiting for the usage limit"),
+        // i18n: chat list and Running box, the agent is thinking (verb, ongoing)
+        "thinking" => Some(tr!("Thinking")),
+        // i18n: chat list and Running box, the agent is writing its reply (verb, ongoing)
+        "responding" => Some(tr!("Writing")),
+        // i18n: chat list and Running box, the agent is shortening its context (verb, ongoing)
+        "compacting" => Some(tr!("Compacting")),
+        // i18n: chat list and Running box, the agent is waiting (verb, ongoing)
+        "waiting" => Some(tr!("Waiting")),
+        // i18n: chat list and Running box, the turn waits until the account's usage limit resets
+        "limited" => Some(tr!("Waiting for the usage limit")),
         "tool" => Some(tool_words(tool)),
         _ => None,
     }
 }
 
 /// A tool's kind in plain words, never its text.
-pub fn tool_words(name: &str) -> &'static str {
+pub fn tool_words(name: &str) -> String {
     let name = name.trim().to_ascii_lowercase();
     match name.as_str() {
-        "bash" | "shell" | "exec_command" => "Running a command",
-        "read" | "glob" | "grep" | "ls" | "view" => "Reading files",
-        "edit" | "write" | "multiedit" | "notebookedit" | "apply_patch" => "Editing files",
-        "websearch" | "webfetch" | "web_search" => "Searching the web",
-        "task" | "agent" => "Working with a helper",
-        _ if name.contains("clarp-admin") || name.contains("prompt") => "Messaging another agent",
-        _ => "Using a tool",
+        // i18n: chat list and Running box, the kind of step running now
+        "bash" | "shell" | "exec_command" => tr!("Running a command"),
+        // i18n: chat list and Running box, the kind of step running now
+        "read" | "glob" | "grep" | "ls" | "view" => tr!("Reading files"),
+        // i18n: chat list and Running box, the kind of step running now
+        "edit" | "write" | "multiedit" | "notebookedit" | "apply_patch" => tr!("Editing files"),
+        // i18n: chat list and Running box, the kind of step running now
+        "websearch" | "webfetch" | "web_search" => tr!("Searching the web"),
+        // i18n: chat list and Running box, the kind of step running now: a helper agent does part of the work
+        "task" | "agent" => tr!("Working with a helper"),
+        // i18n: chat list and Running box, the kind of step running now
+        _ if name.contains("clarp-admin") || name.contains("prompt") => tr!("Messaging another agent"),
+        // i18n: chat list and Running box, the kind of step running now
+        _ => tr!("Using a tool"),
     }
 }
 
@@ -310,18 +350,21 @@ pub fn main_turn_line(main: &Object, name: &str) -> Option<String> {
         return None;
     }
     let mut line = if text(main, "audience") != "agents" {
-        "Also working".to_owned()
+        // i18n: Running box, second line: the agent's own turn also runs while a fork answers
+        tr!("Also working")
     } else if name.trim().is_empty() {
-        "Also working with another agent".to_owned()
+        // i18n: Running box, second line: the agent's own turn also runs, with an unnamed agent
+        tr!("Also working with another agent")
     } else {
-        format!("Also working with {}", name.trim())
+        // i18n: Running box, second line: the agent's own turn also runs; {} is the other agent's name
+        tr!("Also working with {}", name.trim())
     };
     let activity = main.get("activity").and_then(Value::as_object);
     let state = activity.map(|a| text(a, "state")).unwrap_or_default();
     let tool = activity.and_then(|a| a.get("tool")).and_then(Value::as_object).map(|t| text(t, "name")).unwrap_or_default();
     if let Some(step) = step_words(&state, &tool) {
         line.push_str(" · ");
-        line.push_str(step);
+        line.push_str(&step);
     }
     Some(line)
 }
@@ -331,8 +374,8 @@ pub fn main_turn_line(main: &Object, name: &str) -> Option<String> {
 pub fn second_line(failed: usize, other: Option<&str>) -> String {
     let failure = match failed {
         0 => None,
-        1 => Some("1 step failed".to_owned()),
-        n => Some(format!("{n} steps failed")),
+        // i18n: Running box, second line: how many steps of the turn failed; {n} is the count
+        n => Some(tr!("{n} step failed" | "{n} steps failed" % n)),
     };
     [failure, other.map(str::to_owned)].into_iter().flatten().filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")
 }
@@ -349,7 +392,13 @@ pub const STOP_PREFIX: &str = "live:stop:";
 /// activity.
 pub fn working_with(name: &str) -> String {
     let name = name.trim();
-    format!("Working with {}", if name.is_empty() { "another agent" } else { name })
+    if name.is_empty() {
+        // i18n: Running box, a turn another agent's message started, when that agent has no name
+        tr!("Working with another agent")
+    } else {
+        // i18n: Running box, a turn another agent's message started; {} is that agent's name
+        tr!("Working with {}", name)
+    }
 }
 
 /// Whether a turn is one between agents (`audience` `agents`).

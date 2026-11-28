@@ -16,6 +16,9 @@ use clarp_core::json::{self, Object};
 use serde_json::Value;
 
 use crate::{Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: form card
 
 struct Entry {
     log: EventLog,
@@ -238,13 +241,15 @@ impl Engine {
             let status = match result {
                 Ok(()) => {
                     entry.failures = 0;
-                    std::mem::take(&mut entry.error_shown).then(|| "Event log synced".to_owned())
+                    // i18n: form card status: the form's recorded events reached the Host again
+                    std::mem::take(&mut entry.error_shown).then(|| tr!("Event log synced"))
                 }
                 Err(error) => {
                     eprintln!("Engine: {} form events for {} not synced: {error}", batch.ids.len(), entry.log.artifact_id());
                     entry.failures += 1;
                     entry.error_shown = true;
-                    Some(format!("Event log: {} awaiting sync ({error})", entry.log.pending()))
+                    // i18n: form card status: recorded events wait to reach the Host; {0} is how many, {1} the error
+                    Some(tr!("Event log: {0} awaiting sync ({1})", entry.log.pending(), error))
                 }
             };
             (entry.log.artifact_id().to_owned(), status)
@@ -275,7 +280,8 @@ impl Engine {
                 eprintln!("Engine: the form's draft events are not queued: {error}");
                 let artifact = entry.log.artifact_id().to_owned();
                 drop(store);
-                self.set_artifact_status(&artifact, &format!("Event log: {error}"));
+                // i18n: form card status: the form's event recording failed; {} is the error
+                self.set_artifact_status(&artifact, &tr!("Event log: {}", error));
                 return;
             }
         }

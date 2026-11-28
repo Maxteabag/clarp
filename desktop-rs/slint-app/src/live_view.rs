@@ -136,7 +136,7 @@ fn box_look(
     let step = activity.and_then(|a| {
         let text = |o: &clarp_core::json::Object, key: &str| o.get(key).and_then(|v| v.as_str()).unwrap_or_default().trim().to_ascii_lowercase();
         let tool = a.get("tool").and_then(|t| t.as_object()).map(|t| text(t, "name")).unwrap_or_default();
-        chat_view::step_words(&text(a, "state"), &tool).map(str::to_owned)
+        chat_view::step_words(&text(a, "state"), &tool)
     });
     chat_view::BoxLook {
         title,

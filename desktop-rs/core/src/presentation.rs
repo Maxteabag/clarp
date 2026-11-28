@@ -16,6 +16,9 @@ use crate::conversation::{self, presented_display_cells};
 use crate::json::Object;
 use crate::list_ops::ListOp;
 use crate::protocol::{Message, parse_iso_date};
+use crate::tr;
+
+// i18n-screen: chat
 
 /// Chats → Tool activity: 0 grouped, 1 always visible, 2 group old, 3 hide
 /// when done (stored as "Hidden" before #653: the same index, so a stored
@@ -168,7 +171,8 @@ impl<'a> Pass<'a> {
         if count == 0 {
             return String::new();
         }
-        let mut label = format!("{count} tool call{}", if count == 1 { "" } else { "s" });
+        // i18n: chat, label of a group of tool calls in the transcript; {n} is how many
+        let mut label = tr!("{n} tool call" | "{n} tool calls" % count);
         let start = parse_iso_date(&self.rows[rows.start].timestamp);
         let mut end = parse_iso_date(&self.rows[rows.end - 1].timestamp);
         // The following assistant message closes the interval. Never count
@@ -182,15 +186,19 @@ impl<'a> Pass<'a> {
         if let (Some(start), Some(end)) = (start, end) {
             let seconds = (end - start).num_seconds();
             if seconds > 0 {
-                let mut elapsed = String::new();
-                if seconds >= 3600 {
-                    elapsed += &format!("{}h ", seconds / 3600);
-                }
-                if seconds >= 60 {
-                    elapsed += &format!("{}m ", seconds / 60 % 60);
-                }
-                elapsed += &format!("{}s", seconds % 60);
-                label += &format!(" · {elapsed} elapsed");
+                use crate::i18n::{self, format};
+                let tag = i18n::current();
+                let n = |v: i64| format::number(tag, v);
+                let elapsed = if seconds >= 3600 {
+                    let secs = format::span(tag, format::Span::Seconds, &n(seconds % 60), "");
+                    format!("{} {secs}", format::span(tag, format::Span::HoursMinutes, &n(seconds / 3600), &n(seconds / 60 % 60)))
+                } else if seconds >= 60 {
+                    format::span(tag, format::Span::MinutesSeconds, &n(seconds / 60), &n(seconds % 60))
+                } else {
+                    format::span(tag, format::Span::Seconds, &n(seconds), "")
+                };
+                // i18n: chat, after the tool-call count of a group: how long the calls took; {} is a duration ("1m 5s")
+                label += &format!(" · {}", tr!("{} elapsed", elapsed));
             }
         }
         label
@@ -588,3 +596,20 @@ pub fn set_chat_activity(settings: &mut crate::settings::Settings, key: &str, mo
 /// follows the global choice.
 pub const CHAT_ACTIVITY_CHOICES: [(&str, &str); 5] =
     [("follow", "Follow Settings"), ("0", "Grouped"), ("1", "Always visible"), ("2", "Group old"), ("3", "Hide when done")];
+
+/// A Tool activity choice's words in the app's language, by its value
+/// (`CHAT_ACTIVITY_CHOICES`); "follow" and anything unknown read Follow Settings.
+pub fn chat_activity_label(value: &str) -> String {
+    match value {
+        // i18n: Tool activity choice: tool calls fold into one group per turn (adjective)
+        "0" => tr!("Grouped"),
+        // i18n: Tool activity choice: every tool call stays shown
+        "1" => tr!("Always visible"),
+        // i18n: Tool activity choice: older tool calls fold, the newest stay shown (imperative-like setting name)
+        "2" => tr!("Group old"),
+        // i18n: Tool activity choice: a turn's tool calls disappear once it is done
+        "3" => tr!("Hide when done"),
+        // i18n: chat menu choice: this chat uses the choice made in Settings
+        _ => tr!("Follow Settings"),
+    }
+}

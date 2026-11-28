@@ -47,6 +47,14 @@ impl Engine {
     pub fn narrator_level_description(&self) -> &'static str {
         self.narrator.borrow().level_description()
     }
+    /// `narrator_detail_levels` in the app's language.
+    pub fn narrator_detail_level_names() -> [String; 5] {
+        clarp_core::narrator::detail_level_names()
+    }
+    /// `narrator_level_description` in the app's language.
+    pub fn narrator_level_words(&self) -> String {
+        self.narrator.borrow().level_description_words()
+    }
 
     /// The experiment on or off (the switcher's "plain-English tools").
     pub fn set_narrator_enabled(&mut self, enabled: bool) {

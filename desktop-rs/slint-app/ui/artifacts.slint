@@ -133,8 +133,10 @@ export struct ArtifactItem {
     label: string,
     outcome: string,
     failed: bool,
-    // The status worth a badge: draft, failed, cancelled, expired ("" for none).
+    // The status worth a badge: draft, failed, cancelled, expired ("" for none),
+    // in the user's language; badge-failed draws it as a failure.
     badge: string,
+    badge-failed: bool,
     title: string,
     summary: string,
     progress: string,
@@ -145,6 +147,8 @@ export struct ArtifactItem {
     countdown-set: bool,
     countdown-line: string,
     countdown-note: string,
+    // The countdown was cancelled (its note is drawn muted).
+    countdown-cancelled: bool,
     // The artifact's Markdown body where the card shows it, and drawn.
     note: string,
     note-styled: styled-text,
@@ -154,6 +158,9 @@ export struct ArtifactItem {
     // the browser.
     browser: bool,
     status-text: string,
+    // How the status reads: "danger", "success" or "" (plain); the text is
+    // in the user's language, so it is never compared.
+    status-tone: string,
     // The keyboard's card in the chat (J/K).
     selected: bool,
     // decision / question: what is asked, why, how urgent; while pending
@@ -413,7 +420,7 @@ component CountdownBody inherits VerticalLayout {
     spacing: 3px;
     if !root.artifact.countdown-set: Text {
         text: root.artifact.countdown-note;
-        color: root.artifact.countdown-note == "Cancelled" ? Palette.muted : Palette.warning;
+        color: root.artifact.countdown-cancelled ? Palette.muted : Palette.warning;
         font-size: ChatText.label;
     }
     if root.artifact.countdown-set: Text {
@@ -642,7 +649,7 @@ component DecisionBody inherits VerticalLayout {
         }
         if root.artifact.status-text != "": Text {
             text: root.artifact.status-text;
-            color: root.artifact.status-text.starts-with("Not ") || root.artifact.status-text.starts-with("Choose") ? Palette.danger : Palette.muted;
+            color: root.artifact.status-tone == "danger" ? Palette.danger : Palette.muted;
             font-size: ChatText.detail;
             overflow: elide;
             vertical-alignment: center;
@@ -1365,10 +1372,10 @@ export component ArtifactCard inherits Rectangle {
                 height: 18px * ChatText.scale;
                 width: badge-text.preferred-width + 12px;
                 border-radius: self.height / 2;
-                background: (root.artifact.badge == "Failed" ? Palette.danger : Palette.muted).with-alpha(0.16);
+                background: (root.artifact.badge-failed ? Palette.danger : Palette.muted).with-alpha(0.16);
                 badge-text := Text {
                     text: root.artifact.badge;
-                    color: root.artifact.badge == "Failed" ? Palette.danger : Palette.muted;
+                    color: root.artifact.badge-failed ? Palette.danger : Palette.muted;
                     font-size: ChatText.note;
                 }
             }
@@ -1474,7 +1481,7 @@ export component ArtifactCard inherits Rectangle {
             if root.artifact.hints.length > 0: HintRow { artifact: root.artifact; }
             if root.artifact.status-text != "": Text {
                 text: root.artifact.status-text;
-                color: root.artifact.status-text.starts-with("Not ") ? Palette.danger : root.artifact.status-text == "Answers accepted" ? Palette.success : Palette.muted;
+                color: root.artifact.status-tone == "danger" ? Palette.danger : root.artifact.status-tone == "success" ? Palette.success : Palette.muted;
                 font-size: ChatText.detail;
                 overflow: elide;
                 vertical-alignment: center;

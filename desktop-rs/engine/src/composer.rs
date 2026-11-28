@@ -8,6 +8,9 @@ use clarp_core::json::{self, Object};
 use serde_json::{Value, json};
 
 use crate::{Change, Engine, Message};
+use clarp_core::tr;
+
+// i18n-screen: composer
 
 /// Drafts change on every keystroke; writing settings per key blocked typing
 /// in the C++ client, so text waits in memory until the composer has been
@@ -118,7 +121,8 @@ impl Engine {
         let metadata = std::fs::metadata(path).ok();
         let valid = metadata.as_ref().is_some_and(|m| m.is_file() && m.len() > 0 && m.len() <= clarp_core::attachments::MAX_UPLOAD_BYTES);
         if !valid || session.is_empty() {
-            self.set_error("Choose a readable file no larger than 50 MB");
+            // i18n: composer, error banner when attaching a file that cannot be read or is too big
+            self.set_error(&tr!("Choose a readable file no larger than 50 MB"));
             return;
         }
         let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_owned());
@@ -127,7 +131,8 @@ impl Engine {
             Ok(bytes) => bytes,
             Err(error) => {
                 eprintln!("Engine: could not read {}: {error}", canonical.display());
-                self.set_error(&format!("Could not read {name}"));
+                // i18n: composer, error banner: an attached file could not be read; {} is its name
+                self.set_error(&tr!("Could not read {}", name));
                 return;
             }
         };
@@ -177,7 +182,8 @@ impl Engine {
     /// Sends the composer with the choice from Send's menu for this message.
     pub fn send_composer_with_mode(&mut self, session: &str, target: &str, text: &str, queue_if_busy: bool, mode: Option<clarp_core::send_while_working::Mode>) -> bool {
         let Some(outbound) = clarp_core::attachments::outbound_text(text, &self.attachments(session)) else {
-            self.set_error("Wait for attachments to finish uploading or remove them");
+            // i18n: composer, error banner on Send while attachments still upload
+            self.set_error(&tr!("Wait for attachments to finish uploading or remove them"));
             return false;
         };
         if session.is_empty() || target.is_empty() || outbound.is_empty() {
@@ -224,7 +230,8 @@ impl Engine {
             slot["status"] = json!("failed");
             self.store_attachments(&session, attachments);
             if object.is_some() {
-                self.set_error("Upload completed without a file path");
+                // i18n: composer, error banner: the Host's answer to an upload lacked the file's place
+                self.set_error(&tr!("Upload completed without a file path"));
             }
             return true;
         }

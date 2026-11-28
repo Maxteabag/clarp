@@ -12,6 +12,7 @@ use clarp_core::send_while_working::{self as sww, Mode};
 use serde_json::json;
 
 use crate::{Change, Engine};
+use clarp_core::tr;
 
 const WRITE_TAG: &str = "send-settings-write";
 const READ_TAG: &str = "send-settings";
@@ -172,7 +173,8 @@ impl Engine {
             self.send_while_working.mode = Some(before);
             self.changes.push(Change::Preferences);
         }
-        self.set_error(&format!("{} not saved: {message}", sww::TITLE));
+        // i18n: error banner: the Send while working choice was not saved on the Host; {0} is that setting's name, {1} the Host's reason
+        self.set_error(&tr!("{0} not saved: {1}", sww::title(), message));
         true
     }
 }

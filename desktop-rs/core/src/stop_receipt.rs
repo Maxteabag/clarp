@@ -24,6 +24,9 @@
 use serde_json::Value;
 
 use crate::json::Object;
+use crate::tr;
+
+// i18n-screen: chat
 
 /// Where a receipt came from: our own `/stop`'s answer, or the interrupted
 /// state's detail (someone, anywhere, stopped the chat).
@@ -117,20 +120,27 @@ impl StopReceipt {
         self.actor.as_deref() == Some("user")
     }
 
-    /// " by Theo", " by ops (unverified)"; "" when the actor is unknown or
-    /// is you. `name` gives an agent session's display name.
-    fn by(&self, name: &dyn Fn(&str) -> Option<String>) -> String {
-        let Some(actor) = &self.actor else { return String::new() };
+    /// "Stopped by Theo", "Stopped by ops (unverified)"; "Stopped" when the
+    /// actor is unknown or is you. `name` gives an agent session's display name.
+    fn stopped_by(&self, name: &dyn Fn(&str) -> Option<String>) -> String {
+        // i18n: chat, line after a Stop: the turn was stopped (past participle)
+        let stopped = || tr!("Stopped");
+        let Some(actor) = &self.actor else { return stopped() };
         if self.by_you() {
-            return String::new();
+            return stopped();
         }
         let who = match actor.strip_prefix("agent:") {
             Some(session) => name(session).unwrap_or_else(|| session.to_owned()),
             None => actor.clone(),
         };
         // Someone else's Stop the Host could not confirm says so.
-        let mark = if self.actor_verified == Some(false) { " (unverified)" } else { "" };
-        format!(" by {who}{mark}")
+        if self.actor_verified == Some(false) {
+            // i18n: chat, line after a Stop: who stopped the turn, which the Host could not confirm; {} is a name (an agent or a person)
+            tr!("Stopped by {} (unverified)", who)
+        } else {
+            // i18n: chat, line after a Stop: who stopped the turn; {} is a name (an agent or a person)
+            tr!("Stopped by {}", who)
+        }
     }
 
     /// The chat's line ("" when the transcript's own Stop line says it all).
@@ -139,12 +149,14 @@ impl StopReceipt {
     pub fn said(&self, name: &dyn Fn(&str) -> Option<String>, waiting: bool) -> Said {
         if self.origin == Origin::Response {
             if self.ok == Some(false) {
-                return Said::Error("Stop did not take effect".into());
+                // i18n: chat, error after pressing Stop: the turn did not stop
+                return Said::Error(tr!("Stop did not take effect"));
             }
             // A newer Host that terminated nothing and committed no effect
             // did nothing (the runtime refused, or there was no such agent).
             if self.from_newer_host() && !self.effects_known() && self.terminated == Some(0) {
-                return Said::Error("Stop did not take effect".into());
+                // i18n: chat, error after pressing Stop: the turn did not stop
+                return Said::Error(tr!("Stop did not take effect"));
             }
         }
         if let Some(text) = &self.text {
@@ -152,9 +164,10 @@ impl StopReceipt {
         }
         let mut parts = Vec::new();
         if !self.by_you() {
-            let mut head = format!("Stopped{}", self.by(name));
+            let mut head = self.stopped_by(name);
             if let Some(reason) = &self.reason {
-                head = format!("{head}: {reason}");
+                // i18n: chat, line after a Stop: who stopped it, then the reason they gave; {0} "Stopped by Theo", {1} the reason
+                head = tr!("{0}: {1}", head, reason);
             }
             parts.push(head);
         } else if let Some(reason) = &self.reason {
@@ -162,21 +175,25 @@ impl StopReceipt {
         }
         if waiting {
             match self.queue_paused {
-                Some(true) => parts.push("queue paused".into()),
-                Some(false) => parts.push("queue not paused".into()),
+                // i18n: chat, part of the line after a Stop: the waiting messages were held (lowercase, joined with " · "; the line's first letter is capitalised)
+                Some(true) => parts.push(tr!("queue paused")),
+                // i18n: chat, part of the line after a Stop: the waiting messages were not held (lowercase, joined with " · ")
+                Some(false) => parts.push(tr!("queue not paused")),
                 None => {}
             }
         }
         match self.goals_paused {
             Some(0) | None => {}
-            Some(1) => parts.push("1 goal paused".into()),
-            Some(n) => parts.push(format!("{n} goals paused")),
+            // i18n: chat, part of the line after a Stop: how many of the agent's goals were paused (lowercase, joined with " · "); {n} is the count
+            Some(n) => parts.push(tr!("{n} goal paused" | "{n} goals paused" % n)),
         }
         if self.origin == Origin::Response && !self.effects_known() && self.actor.is_none() {
             if !self.from_newer_host() && self.terminated == Some(0) {
-                parts[0] = "Stop sent".into();
+                // i18n: chat, line after a Stop to an older Host: the stop request was sent
+                parts[0] = tr!("Stop sent");
             }
-            parts.push("effects unknown".into());
+            // i18n: chat, part of the line after a Stop: the Host did not say what the stop did (lowercase, joined with " · ")
+            parts.push(tr!("effects unknown"));
         }
         // A line that starts with an effect ("Queue paused") reads as a sentence.
         let line = parts.join(" · ");

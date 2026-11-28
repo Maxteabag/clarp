@@ -9,6 +9,9 @@ use fancy_regex::Regex;
 use serde_json::{Map, Value, json};
 
 use crate::json::Object;
+use crate::tr;
+
+// i18n-screen: window
 
 const MAXIMUM_DEPTH: usize = 8;
 const MAXIMUM_PANES: usize = 16;
@@ -544,14 +547,16 @@ impl PaneTree {
             self.conflict_latest = result.latest.clone();
         }
         let warning = if result.settings_error {
-            "Workspace layout could not be saved. Check available storage."
+            // i18n: window banner: the pane layout could not be written to disk
+            tr!("Workspace layout could not be saved. Check available storage.")
         } else if result.conflict {
-            "Another window saved a newer layout. This window's layout is kept in recovery."
+            // i18n: window banner: another Clarp window saved its pane layout later; this window's is kept as a recovery copy
+            tr!("Another window saved a newer layout. This window's layout is kept in recovery.")
         } else {
-            ""
+            String::new()
         };
         if warning != self.save_warning {
-            self.save_warning = warning.to_owned();
+            self.save_warning = warning;
             self.signals.push(Signal::WorkspaceSaveWarningChanged);
         }
     }

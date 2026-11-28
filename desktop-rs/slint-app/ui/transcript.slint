@@ -624,21 +624,16 @@ component PromptLine inherits Rectangle {
             name: root.prompt.sender;
             initial: root.prompt.initial;
         }
+        // The sender and the verb are one text, so each language orders them.
         Text {
-            text: root.prompt.sender;
+            text: root.prompt.expanded || root.prompt.line == ""
+                // i18n: chat, row for a prompt another agent sent into this chat; {} is the sending agent's name (stays as it is) (verb, past: "Arnold prompted")
+                ? @tr("{} prompted", root.prompt.sender)
+                // i18n: chat, folded row for a prompt another agent sent into this chat, before the prompt's first line; {} is the sending agent's name (verb, past: "Arnold prompted · …")
+                : @tr("{} prompted ·", root.prompt.sender);
             color: Palette.accent;
             font-size: ChatText.detail;
             font-weight: 600;
-            vertical-alignment: center;
-        }
-        Text {
-            text: root.prompt.expanded || root.prompt.line == ""
-                // i18n: chat, row for a prompt another agent sent into this chat: the word after the agent's name, which is drawn just before it in its own colour (verb, past: "Arnold prompted")
-                ? @tr("prompted")
-                // i18n: chat, folded row for a prompt another agent sent into this chat: the word after the agent's name, before the prompt's first line (verb, past: "Arnold prompted · …")
-                : @tr("prompted ·");
-            color: Palette.muted;
-            font-size: ChatText.detail;
             vertical-alignment: center;
         }
         // The rest of the line: its first line, elided to the bubble.

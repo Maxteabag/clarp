@@ -64,11 +64,11 @@ fn described(id: &str, target: String, key: &str) -> Item {
     Item {
         kind: Kind::Command,
         target,
-        label: entry.map_or(id, |e| e.label).into(),
+        label: entry.map_or_else(|| id.to_owned(), |e| e.label_text()),
         detail: String::new(),
         key: key.into(),
         group: entry.map_or("view", |e| e.group),
-        description: entry.map_or("", |e| e.description).into(),
+        description: entry.map_or_else(String::new, |e| e.description_text()),
         aliases: entry.map_or(&[][..], |e| e.aliases),
         value: String::new(),
         entry: entry.map_or("", |e| e.id),
@@ -162,7 +162,13 @@ pub fn commands(toggles: Toggles) -> Vec<Item> {
     .collect();
     rows.retain(|c| c.target != "preview-versions" || toggles.preview_versions);
     if let Some(queue) = rows.iter_mut().find(|c| c.target == "toggle-queue") {
-        queue.label = if toggles.queue_shown { "Hide queue" } else { "Show queue" }.into();
+        queue.label = if toggles.queue_shown {
+            // i18n: command palette: hide the waiting messages (imperative)
+            clarp_core::tr!("Hide queue")
+        } else {
+            // i18n: command palette: show the waiting messages (imperative)
+            clarp_core::tr!("Show queue")
+        };
     }
     rows
 }
@@ -182,7 +188,13 @@ pub fn settings(rows: &[SettingRow]) -> Vec<Item> {
             continue;
         }
         let (target, value) = match kind.as_str() {
-            "toggle" => (format!("settingrow:{id}:1"), if *on { "On" } else { "Off" }.to_owned()),
+            "toggle" => (format!("settingrow:{id}:1"), if *on {
+                // i18n: command palette, a switch setting's value (adjective)
+                clarp_core::tr!("On")
+            } else {
+                // i18n: command palette, a switch setting's value (adjective)
+                clarp_core::tr!("Off")
+            }),
             "choice" | "number" => (format!("settingpicker:{id}"), detail.clone()),
             "action" => (format!("settingrow:{id}:1"), String::new()),
             _ => continue,
@@ -216,7 +228,8 @@ pub fn picker(id: &str, options: &[(String, String, String, bool)], query: &str)
                 group: "settings",
                 description: description.clone(),
                 aliases: &[],
-                value: if *current { "Current".into() } else { String::new() },
+                // i18n: command palette, settings picker: marks the value in use (adjective)
+                value: if *current { clarp_core::tr!("Current") } else { String::new() },
                 entry: "",
             };
             Some((score, item))
@@ -235,7 +248,10 @@ pub fn rank(items: Vec<Item>, query: &str) -> Vec<Item> {
     let mut scored: Vec<(u32, usize, Item)> = items
         .into_iter()
         .filter_map(|item| {
-            let score = crate::catalogue::score(query, &item.label, item.aliases, &format!("{} {}", item.description, item.group))?;
+            // Shown in the app's language; a catalogue entry is also found by its English words.
+            let shown = crate::catalogue::score(query, &item.label, item.aliases, &format!("{} {}", item.description, item.group));
+            let english = crate::catalogue::find(item.entry).and_then(|e| crate::catalogue::entry_score(query, &e));
+            let score = shown.max(english)?;
             Some((score, crate::catalogue::order(item.entry), item))
         })
         .collect();
@@ -313,8 +329,10 @@ pub fn contacts(engine: &Engine, query: &str) -> Vec<Item> {
         .map(|name| Item {
             kind: Kind::Contact,
             target: name.to_owned(),
-            label: format!("Start {name}"),
-            detail: format!("New session · {backend} · ~"),
+            // i18n: command palette, row that starts a saved contact (imperative); {} is the contact's name
+            label: clarp_core::tr!("Start {}", name),
+            // i18n: command palette, detail under a contact row: a new session on a backend in the home folder (~ stays); {} is the backend
+            detail: clarp_core::tr!("New session · {} · ~", backend),
             key: String::new(),
             group: "contact",
             description: String::new(),
@@ -337,7 +355,8 @@ pub fn hosts(engine: &Engine, query: &str) -> Vec<Item> {
         .filter(|host| needle.is_empty() || [host.label(), host.url.clone()].iter().any(|f| f.to_lowercase().contains(&needle)))
         .map(|host| Item {
             kind: Kind::Host,
-            label: format!("Switch to {}", host.label()),
+            // i18n: command palette, row that switches to another saved Host (imperative); {} is the Host's name
+            label: clarp_core::tr!("Switch to {}", host.label()),
             detail: host.url.clone(),
             target: host.url,
             key: String::new(),

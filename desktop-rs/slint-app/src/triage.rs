@@ -115,10 +115,18 @@ pub fn in_scope(scope: &str, row: &AgentRow, pending: &HashSet<String>, snoozed:
 /// "Thu 08:00" past today.
 pub fn label(snooze: &Snooze) -> String {
     if snooze.until <= 0 {
-        return "next message".into();
+        // i18n: chat list, after the snooze mark: the chat wakes at the agent's next message (lowercase)
+        return clarp_core::tr!("next message");
     }
     let Some(at) = Local.timestamp_millis_opt(snooze.until).single() else { return String::new() };
-    if at.date_naive() == Local::now().date_naive() { at.format("%H:%M").to_string() } else { at.format("%a %H:%M").to_string() }
+    let tag = clarp_core::i18n::current();
+    let time = clarp_core::i18n::format::time(tag, at.time(), clarp_core::i18n::format::Clock::H24);
+    if at.date_naive() == Local::now().date_naive() {
+        time
+    } else {
+        // i18n: a weekday and a clock time, "Tue 01:00"; {0} is the weekday, {1} the time
+        clarp_core::tr!("{0} {1}", clarp_core::i18n::format::weekday(tag, at.date_naive()), time)
+    }
 }
 
 /// When a snooze of `how` started now ends: "message" (0: its next

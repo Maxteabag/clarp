@@ -45,12 +45,13 @@ fn fill(app: &App, window: &AppWindow) {
                 .iter()
                 .map(|s| OverviewSchedule {
                     id: text(s, "schedule_id").into(),
-                    title: format!("{}  ·  {}", if text(s, "name").is_empty() { "Scheduled task".into() } else { text(s, "name") }, text(s, "cron_expression")).into(),
+                    // i18n: agent profile and overview, a scheduled task without a name (noun)
+                    title: format!("{}  ·  {}", if text(s, "name").is_empty() { clarp_core::tr!("Scheduled task") } else { text(s, "name") }, text(s, "cron_expression")).into(),
                     prompt: text(s, "prompt").into(),
                     on: s.get("enabled").and_then(Value::as_bool).unwrap_or(false),
                 })
                 .collect();
-            let preview = [&row.last_message, &row.status_text, &row.state].into_iter().find(|t| !t.is_empty()).cloned().unwrap_or_default();
+            let preview = [row.preview(), row.status_text.clone(), row.state.clone()].into_iter().find(|t| !t.is_empty()).unwrap_or_default();
             OverviewCard {
                 session: row.session.as_str().into(),
                 name: row.name.as_str().into(),
@@ -87,7 +88,7 @@ fn fill(app: &App, window: &AppWindow) {
         .map(|row| OverviewArchived {
             session: row.session.as_str().into(),
             name: row.name.as_str().into(),
-            preview: if row.last_message.is_empty() { row.session.as_str().into() } else { row.last_message.as_str().into() },
+            preview: { let last = row.preview(); if last.is_empty() { row.session.as_str().into() } else { last.into() } },
         })
         .collect();
     bridge.set_archived(ModelRc::new(VecModel::from(archived)));

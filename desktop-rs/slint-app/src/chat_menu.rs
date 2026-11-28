@@ -12,6 +12,9 @@ use clarp_engine::Engine;
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::{App, AppWindow, ChatChoice, ChatMenu};
+use clarp_core::tr;
+
+// i18n-screen: chat menu
 
 /// A chat's choice for messages between agents, and the words for each.
 pub const COORDINATION: [(&str, &str); 3] = [("default", "Follow Settings"), ("show", "Show"), ("hide", "Hide")];
@@ -23,8 +26,8 @@ pub fn activity_value(engine: &Engine, session: &str) -> String {
 
 /// The words for the chat's Tool activity choice ("Follow Settings",
 /// "Grouped", …).
-pub fn activity_label(value: &str) -> &'static str {
-    clarp_core::presentation::CHAT_ACTIVITY_CHOICES.iter().find(|(v, _)| *v == value).map_or("Follow Settings", |(_, label)| label)
+pub fn activity_label(value: &str) -> String {
+    clarp_core::presentation::chat_activity_label(value)
 }
 
 /// Sets the chat's Tool activity: "follow" or a mode's index.
@@ -33,8 +36,15 @@ pub fn set_activity(engine: &mut Engine, session: &str, value: &str) {
 }
 
 /// The words for the chat's messages-between-agents choice.
-pub fn coordination_label(value: &str) -> &'static str {
-    COORDINATION.iter().find(|(v, _)| *v == value).map_or("Follow Settings", |(_, label)| label)
+pub fn coordination_label(value: &str) -> String {
+    match value {
+        // i18n: chat menu, messages between agents: show them (imperative verb)
+        "show" => tr!("verb" => "Show"),
+        // i18n: chat menu, messages between agents: hide them (imperative verb)
+        "hide" => tr!("verb" => "Hide"),
+        // i18n: chat menu choice: this chat uses the choice made in Settings
+        _ => tr!("Follow Settings"),
+    }
 }
 
 /// The menu's rows for the chat on pane `pane_id`, its current values marked.
@@ -43,14 +53,15 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let menu = window.global::<ChatMenu>();
     let activity = activity_value(&engine, session);
     let coordination = engine.chat_coordination_choice(session);
-    let choices = |list: &[(&str, &str)], now: &str| -> ModelRc<ChatChoice> {
+    let choices = |list: Vec<(&str, String)>, now: &str| -> ModelRc<ChatChoice> {
         ModelRc::new(VecModel::from(
-            list.iter().map(|(value, label)| ChatChoice { value: (*value).into(), label: (*label).into(), current: *value == now }).collect::<Vec<_>>(),
+            list.into_iter().map(|(value, label)| ChatChoice { value: value.into(), label: label.into(), current: value == now }).collect::<Vec<_>>(),
         ))
     };
-    menu.set_activity_choices(choices(&clarp_core::presentation::CHAT_ACTIVITY_CHOICES, &activity));
+    let worded = |list: &[(&'static str, &str)], word: fn(&str) -> String| list.iter().map(|(value, _)| (*value, word(value))).collect::<Vec<_>>();
+    menu.set_activity_choices(choices(worded(&clarp_core::presentation::CHAT_ACTIVITY_CHOICES, activity_label), &activity));
     menu.set_activity_label(SharedString::from(activity_label(&activity)));
-    menu.set_coordination_choices(choices(&COORDINATION, &coordination));
+    menu.set_coordination_choices(choices(worded(&COORDINATION, coordination_label), &coordination));
     menu.set_coordination_label(SharedString::from(coordination_label(&coordination)));
     menu.set_coordination_shown(engine.chat_hidden_coordination(session));
     // Conversation or Session view (#702): Follow Settings shows what it
@@ -58,18 +69,30 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
     let offered = engine.chat_view_offered(session);
     let own = engine.chat_view_menu_value(session);
     menu.set_view_shown(offered);
-    menu.set_view_choices(choices(&clarp_core::chat_view::MENU, own));
+    menu.set_view_choices(choices(worded(&clarp_core::chat_view::MENU, clarp_core::chat_view::menu_label), own));
     menu.set_view_label(SharedString::from(view_label(&engine, session)));
     menu.set_activity_shown(!(offered && engine.chat_view_conversation(session)));
     // Snooze, kept on this device (triage.rs).
     let snooze = engine.roster().rows().iter().find(|r| r.session == session).and_then(|row| crate::triage::snooze_of(&engine, row));
-    menu.set_snooze_label(snooze.as_ref().map_or_else(|| "Off".to_owned(), |s| format!("Until {}", crate::triage::label(s))).into());
-    let snooze_choices: Vec<(&str, &str)> = if snooze.is_some() {
-        vec![("wake", "Wake now"), ("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
-    } else {
-        vec![("message", "Until its next message"), ("hour", "For an hour"), ("morning", "Until tomorrow 08:00")]
+    let snooze_label = match snooze.as_ref() {
+        // i18n: chat menu, Snooze row value: snoozed until a time or event; {} is "14:05" or "next message"
+        Some(s) => tr!("Until {}", crate::triage::label(s)),
+        // i18n: chat menu, Snooze row value: the chat is not snoozed (adjective)
+        None => tr!("snooze" => "Off"),
     };
-    menu.set_snooze_choices(choices(&snooze_choices, ""));
+    menu.set_snooze_label(snooze_label.into());
+    let mut snooze_choices: Vec<(&str, String)> = Vec::new();
+    if snooze.is_some() {
+        // i18n: chat menu, Snooze choice: end the snooze now (imperative)
+        snooze_choices.push(("wake", tr!("Wake now")));
+    }
+    // i18n: chat menu, Snooze choice: quiet until the agent writes again
+    snooze_choices.push(("message", tr!("Until its next message")));
+    // i18n: chat menu, Snooze choice: quiet for one hour
+    snooze_choices.push(("hour", tr!("For an hour")));
+    // i18n: chat menu, Snooze choice: quiet until 08:00 tomorrow (keep the time as written)
+    snooze_choices.push(("morning", tr!("Until tomorrow 08:00")));
+    menu.set_snooze_choices(choices(snooze_choices, ""));
 }
 
 /// The words for the chat's view: its own choice, or "Follow Settings ·
@@ -77,7 +100,8 @@ fn fill(app: &App, window: &AppWindow, session: &str) {
 pub fn view_label(engine: &Engine, session: &str) -> String {
     let own = engine.chat_view_menu_value(session);
     if own == "default" {
-        format!("Follow Settings · {}", clarp_core::chat_view::label(engine.chat_view(session)))
+        // i18n: chat menu, view row value: follows Settings, then what that is; {} is "Conversation" or "Session"
+        tr!("Follow Settings · {}", clarp_core::chat_view::label(engine.chat_view(session)))
     } else {
         clarp_core::chat_view::menu_label(own).to_owned()
     }

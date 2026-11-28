@@ -442,7 +442,10 @@ impl Engine {
         let mut incoming = incoming;
         // Words are made here, as the popup is shown: in the app's language now.
         let title = [incoming.title_text(), incoming.persona.clone()].into_iter().find(|t| !t.is_empty()).unwrap_or_else(|| session.clone());
-        let mut body = incoming.body_text().unwrap_or_else(|| clarp_core::decision_receipt::preview_line(&incoming.preview));
+        let mut body = incoming
+            .body_text()
+            .or_else(|| event.get("preview_parts").and_then(Value::as_object).and_then(clarp_core::chat_preview::line))
+            .unwrap_or_else(|| clarp_core::decision_receipt::preview_line(&incoming.preview));
         // An approval's answers in the card's own words, where Updates lists it.
         if incoming.response_type == "approval" {
             let listed = self.attention_items().iter().filter_map(Value::as_object).find(|i| json::string(i, "decision_id") == incoming.decision_id).cloned();

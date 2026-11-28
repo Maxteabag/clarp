@@ -1,0 +1,6 @@
+/* Clarp.app's Info.plist in English. tools/macos-bundle.sh copies every
+   <lang>.lproj folder here into the bundle; the other languages come from the
+   translation pipeline as nb.lproj, zh-Hans.lproj, hi.lproj, es.lproj and fr.lproj. */
+
+/* macOS asks the user for the microphone with this sentence the first time Clarp records (dictating a message) */
+"NSMicrophoneUsageDescription" = "Clarp records your voice when you dictate a message.";

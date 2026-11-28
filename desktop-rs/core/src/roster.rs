@@ -14,6 +14,9 @@ use crate::list_ops::ListOp;
 use crate::protocol::{Agent, display_name, is_busy_state};
 use crate::text::name_order;
 use crate::time_format::compact_duration;
+use crate::tr;
+
+// i18n-screen: chat list
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Role {
@@ -98,6 +101,8 @@ pub struct AgentRow {
     pub state: String,
     pub status_text: String,
     pub last_message: String,
+    /// The Host's preview parts of the last message (`chat_preview::line`).
+    pub last_message_preview: Option<Object>,
     pub last_completed_message: String,
     pub last_activity: i64,
     /// The running turn's start (epoch ms), or None: idle, or an older Host.
@@ -140,6 +145,12 @@ pub struct AgentRow {
 }
 
 impl AgentRow {
+    /// The chat list's line for the last message, in the app's language:
+    /// the Host's preview parts worded here, else its English line.
+    pub fn preview(&self) -> String {
+        self.last_message_preview.as_ref().and_then(crate::chat_preview::line).unwrap_or_else(|| self.last_message.clone())
+    }
+
     /// A helper's chat: its role is `helper`, or the Host says the chat was
     /// a helper's (`helper_chat`, contract 177).
     pub fn is_helpers_chat(&self) -> bool {
@@ -233,6 +244,7 @@ impl Roster {
             state: if live { agent.latest_state.clone() } else { "offline".into() },
             status_text: if live { agent.status_text.clone() } else { String::new() },
             last_message: agent.last_message.clone(),
+            last_message_preview: agent.last_message_preview.clone(),
             last_completed_message: agent.last_completed_message.clone(),
             last_activity: agent.last_activity,
             turn_started_at: agent.turn_started_at,
@@ -431,6 +443,7 @@ impl Roster {
             {
                 agent.head_revision = old.head_revision;
                 agent.last_message = old.last_message.clone();
+                agent.last_message_preview = old.last_message_preview.clone();
                 agent.last_completed_message = old.last_completed_message.clone();
             }
             if agent.latest_state_timestamp < old.latest_state_timestamp {
@@ -855,7 +868,13 @@ pub fn describe_agent_processes(roster: &Roster, jobs: &JobTracker, session: &st
                 let sub_agent = is_sub_agent(job);
                 let mut title = json::string(job, "title").trim().to_owned();
                 if title.is_empty() {
-                    title = if sub_agent { "Sub-agent" } else { "Background job" }.into();
+                    title = if sub_agent {
+                        // i18n: chat list and processes, title of a helper agent that has none of its own (noun)
+                        tr!("Sub-agent")
+                    } else {
+                        // i18n: chat list and processes, title of a background job that has none of its own (noun)
+                        tr!("Background job")
+                    };
                 }
                 json!({
                     "jobId": json::string(job, "job_id"),

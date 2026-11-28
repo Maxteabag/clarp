@@ -251,7 +251,8 @@ pub(crate) fn stamp(epoch_millis: i64) -> String {
 /// message's time.
 pub(crate) fn row_stamp(busy: bool, turn_started_at: Option<i64>, last_activity: i64) -> String {
     match turn_started_at {
-        Some(started) if busy => format!("working {}", clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started)),
+        // i18n: chat list row stamp while the agent works; {} is how long ("6m 39s") (lowercase)
+        Some(started) if busy => clarp_core::tr!("working {}", clarp_core::time_format::turn_elapsed(chrono::Utc::now().timestamp_millis() - started)),
         _ => stamp(last_activity),
     }
 }
@@ -294,7 +295,8 @@ pub(crate) fn one_line(text: &str) -> String {
 /// `host_offset_ms`: the row's Host clock minus this machine's, for the
 /// wait in its availability line.
 pub(crate) fn chat_row(row: &clarp_core::roster::AgentRow, depth: usize, selected: &str, host_offset_ms: i64) -> ChatRow {
-    let preview = one_line(if !row.last_message.is_empty() { &row.last_message } else { &row.working_directory });
+    let last = row.preview();
+    let preview = one_line(if !last.is_empty() { &last } else { &row.working_directory });
     let activity = row_activity(row, clarp_core::availability::Clock::now(host_offset_ms));
     let mut chat = ChatRow {
         session: row.session.clone().into(),
@@ -327,7 +329,7 @@ pub(crate) fn row_activity(row: &clarp_core::roster::AgentRow, clock: clarp_core
     if let Some(line) = row.availability.as_ref().and_then(|a| clarp_core::availability::line(a, clock)) {
         line
     } else if row.stalled_since.is_some() {
-        clarp_core::stall::ROW_STATUS.to_owned()
+        clarp_core::stall::row_status()
     } else if row.busy && !row.status_text.is_empty() {
         one_line(&row.status_text)
     } else {
@@ -502,7 +504,9 @@ pub(crate) fn choose_attachment(session: String) {
         return;
     }
     let spawned = std::thread::Builder::new().name("attach-dialog".into()).spawn(move || {
-        let chosen = rfd::FileDialog::new().set_title("Attach files").pick_files().unwrap_or_default();
+        // i18n: composer, title of the system file dialog for attaching files (imperative)
+        let title = clarp_core::tr!("Attach files");
+        let chosen = rfd::FileDialog::new().set_title(title).pick_files().unwrap_or_default();
         if chosen.is_empty() {
             return;
         }
@@ -727,7 +731,8 @@ pub(crate) fn message_row(
     } else if !row.activity_label.is_empty() {
         row.activity_label.clone()
     } else {
-        format!("{count} tool call{}", if count == 1 { "" } else { "s" })
+        // i18n: chat, label of a group of tool calls in the transcript; {n} is how many
+        clarp_core::tr!("{n} tool call" | "{n} tool calls" % count)
     };
     // A group is keyed by its first member (presentation `toggle_group`).
     let group_id = if row.group_label.is_empty() { String::new() } else { m.id.clone() };

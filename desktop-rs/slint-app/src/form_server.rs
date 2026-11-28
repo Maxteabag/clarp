@@ -18,6 +18,9 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use serde_json::{Value, json};
+use clarp_core::tr;
+
+// i18n-screen: form card
 
 /// The largest request body a page may post.
 const MAX_BODY: usize = 1 << 20;
@@ -251,7 +254,8 @@ fn handle(stream: TcpStream, port: u16) {
                     Ok(_) => events_changed(events.key),
                     Err(error) => {
                         eprintln!("clarp-slint: a form's draft events were not queued: {error}");
-                        show_status(form.artifact_id.clone(), format!("Event log: {error}"));
+                        // i18n: form card status: the form's event recording failed; {} is the error
+                        show_status(form.artifact_id.clone(), tr!("Event log: {}", error));
                     }
                 }
             }
@@ -357,7 +361,11 @@ fn page(html: &str, draft: &Value, event_log: bool, origins: &[String], internal
     if interactive { sources.insert(0, internal_origin.to_owned()); }
     let connect = if sources.is_empty() { "'none'".to_owned() } else { sources.join(" ") };
     let policy = format!("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; connect-src {connect}; frame-src 'none'; form-action 'none'; base-uri 'none'; object-src 'none'");
-    let network_info = format!("<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\"><summary>Network access</summary>{}</details>", if origins.is_empty() { "External connections blocked".to_owned() } else { origins.join("<br>") });
+    // i18n: an opened form or report page, small box in its corner: title of the list of web addresses it may reach (noun)
+    let network_title = tr!("Network access");
+    // i18n: an opened form or report page, corner box: the page may reach no outside address
+    let blocked = tr!("External connections blocked");
+    let network_info = format!("<details style=\"position:fixed;top:8px;right:8px;background:#1a1b26;color:#e7e1dc;padding:6px;font:14px sans-serif\"><summary>{network_title}</summary>{}</details>", if origins.is_empty() { blocked } else { origins.join("<br>") });
     let bridge = format!(
         r#"(() => {{
   let saved = {saved}, custom = null;

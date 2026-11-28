@@ -638,7 +638,7 @@ fn appearance() -> Vec<Setting> {
                     .iter()
                     .map(|theme| {
                         let text = |key: &str| theme.get(key).and_then(Value::as_str).unwrap_or_default().to_owned();
-                        Choice::new(text("id"), format!("{} · {}", text("label"), crate::view::theme_font(theme))).about(text("detail"))
+                        Choice::new(text("id"), format!("{} · {}", reading_theme::local(&text("label")), crate::view::theme_font(theme))).about(reading_theme::local(&text("detail")))
                     })
                     .collect()
             },
