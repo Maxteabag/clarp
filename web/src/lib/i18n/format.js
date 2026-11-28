@@ -68,11 +68,21 @@ export function formatRelative(t, now = Date.now(), style = 'long', locale = i18
   return rtf.format(Math.trunc(secs / size), unit);
 }
 
+/**
+ * A wait counted down: "in 5 seconds", "in 2 minutes", "om 30 sekunder". Seconds stay seconds
+ * (formatRelative would say "now" under 45 s); a minute or more is whole minutes.
+ */
+export function formatCountdown(ms, style = 'long', locale = i18n.locale) {
+  const secs = Math.max(1, Math.ceil(ms / 1000));
+  const rtf = relativeFormat(locale, style, 'always');
+  return secs < 60 ? rtf.format(secs, 'second') : rtf.format(Math.round(secs / 60), 'minute');
+}
+
 const rtfs = new Map();
-function relativeFormat(locale, style) {
-  const k = locale + style;
+function relativeFormat(locale, style, numeric = 'auto') {
+  const k = locale + style + numeric;
   let f = rtfs.get(k);
-  if (!f) { f = new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style }); rtfs.set(k, f); }
+  if (!f) { f = new Intl.RelativeTimeFormat(locale, { numeric, style }); rtfs.set(k, f); }
   return f;
 }
 

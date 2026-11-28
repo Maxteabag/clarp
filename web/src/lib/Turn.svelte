@@ -2,6 +2,7 @@
   import { renderTool, renderTurnBodyCached } from './render.js';
   import LiveMessage from './live/LiveMessage.svelte';
   import { lazyHighlight } from './highlight.js';
+  import { blockChrome } from './blocks.js';
   import { cellRow, systemNotice } from '@core/live-present.js';
   import CellRow from './live/CellRow.svelte';
   import TurnNotice from './live/TurnNotice.svelte';
@@ -60,6 +61,7 @@
   class:unsent={!!turn.optimistic && !turn.failed}
   class:failed={!!turn.failed}
   use:lazyHighlight={html}
+  use:blockChrome={html}
 >
   <!-- The work comes before the words it led to, as in the live turn. -->
   {#each cells as cell (cell.id)}<CellRow row={cell} />{/each}

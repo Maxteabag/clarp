@@ -10,6 +10,10 @@
   import { coordination, setCoordinationVisibility } from '../stores/coordination.svelte.js';
   import { live } from '../stores/live.svelte.js';
   import LanguageSetting from './LanguageSetting.svelte';
+  import { formatRelative } from './i18n/format.js';
+  import { lastSeenAt } from '@core/host-reach.js';
+  import { t } from '../stores/i18n.svelte.js';
+  import { isDown, openPanel, reach } from '../stores/reach.svelte.js';
 
   let { open = $bindable() } = $props();
 
@@ -54,7 +58,14 @@
         {#each knownHosts() as h (h.id)}
           <div class="hosts-row">
             <span class="hosts-name" title={h.url}>{h.name || h.url}</span>
-            <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}{#if h.via === 'host'} · via this Host{/if}</span>
+            {#if hostsState.allHosts && isDown(h.id)}
+              <!-- Its line opens the full Host-down panel (HostDownDialog). -->
+              <button type="button" class="hosts-state hosts-down" onclick={() => { openPanel(h.id); open = false; }}>
+                {t('host_down.list_row', { host: reach.hosts[h.id]?.label || h.name || h.url, when: formatRelative(lastSeenAt(reach.hosts[h.id]) || reach.now, reach.now) })}
+              </button>
+            {:else}
+              <span class="hosts-state">{hostsState.allHosts ? (STATE_WORDS[hostsState.live[h.id]?.state] || 'Connecting') : 'Not read'}{#if h.via === 'host'} · via this Host{/if}</span>
+            {/if}
             {#if h.via !== 'host'}
               <button class="hosts-remove" type="button" aria-label={`Remove ${h.name || h.url}`} title="Remove"
                       onclick={() => removeHost(h.id)}>×</button>
@@ -150,6 +161,7 @@
 {/if}
 
 <style>
+.hosts-down { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; text-decoration: underline dotted; }
   .hosts-list { display: flex; flex-direction: column; border: 1px solid var(--ink-edge); border-radius: 8px; margin: 4px 0 12px; }
   .hosts-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-top: 1px solid var(--ink-edge); font: 400 13px/1.3 var(--font-body); }
   .hosts-row:first-child { border-top: 0; }

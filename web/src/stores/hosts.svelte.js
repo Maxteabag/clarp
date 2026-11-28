@@ -21,6 +21,8 @@ import { normalizeMoved } from '@core/agent-moved.js';
 import { originOf, readIds, resolveAllHosts, PREFERENCE_KEY } from '@core/all-hosts.js';
 import { visibleSessions } from '@core/session-select.js';
 import { clog } from '../lib/net.js';
+import { fetchFailure, peerAttempt } from '@core/host-reach.js';
+import { noteFail, noteOk, reachOf, trackHost, untrackHost, untrackOthers } from './reach.svelte.js';
 
 const KEY = 'clarp.hosts.v1';
 const POLL_MS = 15000;
@@ -61,6 +63,8 @@ function persist() {
 
 export function setAllHosts(on) {
   hostsState.allHosts = !!on;
+  // Hosts no longer read are no longer asked, nor shown as down.
+  if (!on) untrackOthers();
   try {
     localStorage.setItem(PREFERENCE_KEY, on ? '1' : '0');
     localStorage.setItem(CHOSEN_KEY, '1');
@@ -87,32 +91,61 @@ export function readHosts() {
  * on once, unless the user has chosen it themselves (the shared one-time default ran before any
  * peer could be counted).
  */
-async function readPeers() {
+let peersInFlight = null;
+function readPeers() {
+  if (!peersInFlight) peersInFlight = readPeersOnce().finally(() => { peersInFlight = null; });
+  return peersInFlight;
+}
+
+async function readPeersOnce() {
   if (!peersSupported) return;
   let body;
   try {
     const r = await fetch('/peers/snapshot', { cache: 'no-store' });
     // 404: a Host without the feature; 403: a limited device (peers are full scope). Neither is
     // asked again, and neither is said: the list is this Host's and any pasted ones.
-    if (r.status === 404 || r.status === 403) { peersSupported = false; return; }
+    if (r.status === 404 || r.status === 403) {
+      peersSupported = false;
+      untrackOthers(id => !id.startsWith('peer:'));
+      return;
+    }
     if (!r.ok) return;
     body = await r.json();
   } catch (_) {
     return;
   }
   const entries = Object.entries((body && body.peers) || {}).filter(([, p]) => p && typeof p === 'object');
+  const priorPeers = new Map(hostsState.peers.map(p => [p.id, p.name]));
+  // A peer gone from the serving Host's registry is no longer asked about.
+  const present = new Set(entries.map(([key]) => 'peer:' + key));
+  for (const p of hostsState.peers) if (!present.has(p.id)) { untrackHost(p.id); delete hostsState.live[p.id]; }
   hostsState.peers = entries.map(([key, p]) => ({
-    id: 'peer:' + key, url: String(p.url || ''), name: String(p.name || key),
+    id: 'peer:' + key, url: String(p.url || ''),
+    name: p.reachable ? String(p.name || key) : String(priorPeers.get('peer:' + key) || p.name || key),
     serverId: String(p.server_id || ''), via: 'host',
   }));
   for (const [key, p] of entries) {
     const id = 'peer:' + key;
     const prior = hostsState.live[id];
+    // A peer that does not answer is named by its registry key; keep the name it last gave.
+    const name = p.reachable ? String(p.name || key) : String(prior?.name || p.name || key);
     hostsState.live[id] = {
       state: p.reachable ? 'live' : p.error === 'refused' ? 'refused' : 'offline',
-      name: String(p.name || key), serverId: String(p.server_id || ''),
+      name, serverId: String(p.server_id || ''),
       rows: p.reachable ? rowsFromSnapshot(p.snapshot) : (prior?.rows || []), at: Date.now(),
     };
+    // Whether it answers, per Host (stores/reach.svelte.js). The serving Host read it, so a
+    // failure here says nothing of this device's own network.
+    // Only while its chats are listed: with the option off a peer is read for its name alone.
+    if (!hostsState.allHosts) continue;
+    trackHost(id, {
+      label: name, url: String(p.url || ''), key: String(p.server_id || '') || id,
+      via: 'host', probe: readPeers,
+    });
+    if (p.reachable) noteOk(id);
+    // A peer already down counts a failure only when its own probe asked; the 15 s read would
+    // otherwise run its backoff ahead.
+    else if (!reachOf(id)?.down || reachOf(id)?.inFlight) noteFail(id, peerAttempt(p.error));
   }
   if (hostsState.peers.length) {
     try {
@@ -129,19 +162,31 @@ async function readPeers() {
 
 async function getJson(origin, path, token) {
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  let timedOut = false;
+  const t0 = Date.now();
+  const timer = setTimeout(() => { timedOut = true; ctrl.abort(); }, TIMEOUT_MS);
+  let r;
   try {
-    const r = await fetch(origin + path, {
+    r = await fetch(origin + path, {
       method: 'GET', mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer',
       headers: { Authorization: 'Bearer ' + token }, signal: ctrl.signal,
     });
-    if (r.status === 401 || r.status === 403) return { refused: true, status: r.status };
-    if (!r.ok) return { offline: true, status: r.status };
-    return { body: await r.json() };
   } catch (_) {
     // A network error, a timeout, or a Host that does not list this app's origin (CORS):
-    // a page cannot tell these apart.
-    return { offline: true };
+    // a page cannot tell the last ones apart, only whether our own timeout fired.
+    clearTimeout(timer);
+    return { offline: true, attempt: fetchFailure({ timedOut, sameOrigin: false, ms: Date.now() - t0 }) };
+  }
+  try {
+    if (r.status === 401 || r.status === 403) return { refused: true, status: r.status, attempt: { kind: 'http', status: r.status } };
+    if (r.status === 404) return { offline: true, status: r.status, attempt: { kind: 'not_this_host', status: 404 } };
+    if (!r.ok) return { offline: true, status: r.status, attempt: { kind: 'http', status: r.status } };
+    try {
+      return { body: await r.json() };
+    } catch (_) {
+      // An answer that is not JSON is not a Clarp Host.
+      return { offline: true, status: r.status, attempt: { kind: 'not_this_host', status: r.status } };
+    }
   } finally {
     clearTimeout(timer);
   }
@@ -165,16 +210,34 @@ export function rowsFromSnapshot(snapshot) {
 async function readOne(host) {
   const prior = hostsState.live[host.id];
   if (!prior) hostsState.live[host.id] = { state: 'connecting', name: host.name, serverId: host.serverId, rows: [] };
+  trackHost(host.id, {
+    label: host.name || host.url, url: host.url, key: host.serverId || host.url, via: 'direct',
+    probe: () => readSaved(host.id),
+  });
   const info = await getJson(host.url, '/server-info', host.token);
+  const infoId = info.body ? String(info.body.server_id || '') : '';
+  if (info.body && host.serverId && infoId && infoId !== host.serverId
+      && !(Array.isArray(info.body.previous_server_ids) && info.body.previous_server_ids.includes(host.serverId))) {
+    // Another Clarp Host answers at this address now.
+    hostsState.live[host.id] = { ...(hostsState.live[host.id] || {}), state: 'offline' };
+    noteFail(host.id, { kind: 'not_this_host', status: 200 });
+    return;
+  }
   if (!info.body) {
     hostsState.live[host.id] = { ...(hostsState.live[host.id] || {}), state: info.refused ? 'refused' : 'offline' };
+    noteFail(host.id, info.attempt || { kind: 'network' });
     return;
   }
   const snapshot = await getJson(host.url, '/agents/snapshot', host.token);
   if (!snapshot.body) {
     hostsState.live[host.id] = { ...(hostsState.live[host.id] || {}), state: snapshot.refused ? 'refused' : 'offline' };
+    noteFail(host.id, snapshot.attempt || { kind: 'network' });
     return;
   }
+  noteOk(host.id, {
+    hostVersion: String(info.body.version || info.body.clarp_version || ''),
+    contract: Number(info.body.contract && info.body.contract.host) || 0,
+  });
   const name = String(info.body.name || host.name || host.url);
   const serverId = String(info.body.server_id || host.serverId || '');
   if (name !== host.name || serverId !== host.serverId) {
@@ -197,7 +260,8 @@ export async function pollNow() {
   running = true;
   try {
     if (hostsState.allHosts) await readPeers();
-    const pasted = readHosts().filter(h => h.via !== 'host');
+    // A Host that is down is asked on its own backoff (stores/reach.svelte.js), not here.
+    const pasted = readHosts().filter(h => h.via !== 'host' && !reachOf(h.id)?.down);
     await Promise.all(pasted.map(h => readOne(h).catch(() => {})));
   } finally {
     running = false;
@@ -253,7 +317,40 @@ export async function addHost(url, token, primaryServerId = '') {
 export function removeHost(id) {
   hostsState.saved = hostsState.saved.filter(h => h.id !== id);
   delete hostsState.live[id];
+  untrackHost(id);
   persist();
+}
+
+/** Reads one saved Host now, by id (its probe while it does not answer). */
+function readSaved(id) {
+  const host = hostsState.saved.find(h => h.id === id);
+  return host ? readOne(host) : Promise.resolve();
+}
+
+/**
+ * Changes a saved Host's address or token (the panel's Edit address and Pair again), then reads
+ * it at once. Returns '' or why it was not changed.
+ */
+export async function updateHost(id, { url, token } = {}) {
+  const at = hostsState.saved.findIndex(h => h.id === id);
+  if (at < 0) return 'That Host is not saved on this device.';
+  const next = { ...hostsState.saved[at] };
+  if (url !== undefined) {
+    const origin = originOf(url);
+    if (!origin) return 'Give the Host\'s address, like https://studio.example.ts.net.';
+    if (origin === location.origin) return 'That is the Host this app is served by.';
+    next.url = origin;
+  }
+  if (token !== undefined) {
+    const secret = String(token || '').trim();
+    if (!secret) return 'Give a token paired with that Host.';
+    next.token = secret;
+  }
+  hostsState.saved[at] = next;
+  persist();
+  trackHost(id, { url: next.url });
+  await readOne(next).catch(() => {});
+  return '';
 }
 
 /** Opens a chat of another Host in that Host's own web app (its origin, its own sign-in). */
