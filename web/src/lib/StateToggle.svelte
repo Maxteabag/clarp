@@ -44,6 +44,14 @@
     width: 22px;
     height: 22px;
     flex: 0 0 auto;
+    position: relative;
+  }
+  /* A finger-sized target around the small dot (44 px), so a near miss on the
+     phone dock does not land on the button beside it. */
+  .state-inspector-toggle.compact::after {
+    content: '';
+    position: absolute;
+    inset: -11px;
   }
   .state-inspector-toggle:hover, .state-inspector-toggle.active {
     background: #24283b;

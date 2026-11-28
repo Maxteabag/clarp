@@ -134,7 +134,8 @@ pub(super) fn polish_check(out: String) {
             // The wrapped lines take their height: the model row starts below the last mark.
             let bottom = marks.iter().map(|(_, _, _, y, h)| y + h).fold(0.0_f32, f32::max);
             let mut model_row = Vec::new();
-            labelled(&root, &["MODEL", "Model"], &mut model_row);
+            // The hub's own caption: the Start dialog, always in the tree though hidden, has "Model" too.
+            labelled(&root, &["MODEL"], &mut model_row);
             let caption = model_row.iter().map(|(_, _, _, y, _)| *y).fold(f32::MAX, f32::min);
             check(marks.iter().map(|m| m.3).fold(0.0_f32, f32::max) > marks.iter().map(|m| m.3).fold(f32::MAX, f32::min), "the marks wrap onto a second line at 520 px");
             check(caption != f32::MAX && caption >= bottom - 0.5, &format!("nothing below overlaps the marks: the model row starts at {caption:.0}, the marks end at {bottom:.0}"));

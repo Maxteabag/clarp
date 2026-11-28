@@ -72,7 +72,7 @@
 
   <span class="dock-spacer"></span>
 
-  <StateToggle compact />
+  <span class="dock-state"><StateToggle compact /></span>
 
   <button id="chatBtn" class="chat-btn" aria-label={t('dock.type_message')}
           onclick={() => chatOpen = !chatOpen}>
@@ -83,3 +83,11 @@
 
   <DockControls />
 </nav>
+
+<style>
+  /* The inspector's dot keeps its 44 px target clear of the chat button. */
+  .dock-state {
+    display: flex;
+    margin: 0 12px;
+  }
+</style>
