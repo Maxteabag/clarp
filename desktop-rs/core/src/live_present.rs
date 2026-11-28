@@ -334,6 +334,23 @@ fn known_kind(kind: &str) -> bool {
     matches!(kind, "message" | "reasoning" | "tool" | "plan" | "diff" | "compaction")
 }
 
+/// How long a thought took, when both its ends are known.
+fn thought_ms(item: &Object) -> Option<i64> {
+    let started = int(item, "started_at_ms").filter(|at| *at > 0)?;
+    let ended = int(item, "ended_at_ms").filter(|at| *at > 0)?;
+    Some(ended - started)
+}
+
+/// A finished thought with nothing to show: no words, no headline and not
+/// even a second long. It gets no row at all (CL-071).
+pub(crate) fn empty_thought(item: &Object) -> bool {
+    text(item, "kind") == "reasoning"
+        && is_terminal(text(item, "status"))
+        && text(item, "title").trim().is_empty()
+        && text(item, "text").trim().is_empty()
+        && thought_ms(item).is_none_or(|ms| ms < 1000)
+}
+
 fn explore_category(item: &Object) -> Option<&str> {
     let tool = object(item, "tool")?;
     let category = text(tool, "category");
@@ -348,7 +365,7 @@ pub fn present(view: &LiveView, rows: &[Message], options: &Options) -> Presente
     let items: Vec<&Object> = view
         .items()
         .into_iter()
-        .filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind")))
+        .filter(|i| text(i, "turn_id") == turn_id && known_kind(text(i, "kind")) && !empty_thought(i))
         .filter(|i| !(options.veil && turn.is_some_and(|t| view.veiled(t, i))))
         .collect();
     let durable = durable(rows);
@@ -759,11 +776,11 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
         "reasoning" => {
             entry.kind = Kind::Reasoning;
             let title = text(item, "title");
-            let head = if is_terminal(&status) {
-                let ms = int(item, "ended_at_ms").unwrap_or(0) - int(item, "started_at_ms").unwrap_or(0);
-                format!("Thought for {}", worked(ms))
-            } else {
-                "Thinking".to_owned()
+            let head = match thought_ms(item) {
+                _ if !is_terminal(&status) => "Thinking".to_owned(),
+                // No length, or under a second: no made-up "0s" (CL-071).
+                Some(ms) if ms >= 1000 => format!("Thought for {}", worked(ms)),
+                _ => "Thought".to_owned(),
             };
             entry.title = if title.is_empty() { head } else { format!("{head}: {title}") };
             let body: Vec<String> = text(item, "text").lines().map(str::to_owned).collect();

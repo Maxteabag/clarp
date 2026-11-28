@@ -13,6 +13,7 @@
     backendLabel, catalogBackendIds, allowedBackendForContact, launchBackend, canSelectBackend,
   } from '@core/agent-launch.js';
   import { AgentBackend } from '@core/protocol.js';
+  import { backends, loadBackendCatalogue } from '../stores/backends.svelte.js';
   import { pathTail } from './render.js';
 
   let { open = $bindable(), name = '', replaceSid = '', onDone } = $props();
@@ -62,7 +63,9 @@
     },
   };
 
-  let catalogue = $state(FALLBACK);
+  // The Host's catalogue as cached on the device, at once; refreshed quietly
+  // each time the dialog opens.
+  let catalogue = $derived(backends.catalogue || FALLBACK);
   let cwd = $state('~');
   let backend = $state(AgentBackend.CLAUDE);
   let mode = $state('fresh');
@@ -147,18 +150,8 @@
     if (mode === 'resume' && !canResume) mode = 'fresh';
   });
 
-  let catalogueLoaded = false;
-  async function loadCatalogue() {
-    if (catalogueLoaded) return;
-    try {
-      const r = await fetch('/agent-model-options');
-      if (!r.ok) throw new Error(String(r.status));
-      const d = await r.json();
-      if (d && d.providers) catalogue = d;
-    } catch (_) {
-      catalogue = FALLBACK;
-    }
-    catalogueLoaded = true;
+  function loadCatalogue() {
+    loadBackendCatalogue({ force: true });
   }
 
   let suggestTimer = null;

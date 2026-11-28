@@ -72,6 +72,22 @@ describe('thinking rows', () => {
     const live = replay('turn-full', 2);
     expect(liveRows(liveItems(live), { ...on, now: T0 + 300 })[0].label).toBe('Thinking');
   });
+
+  // CL-071: never "Thought for 0s".
+  it('say only "Thought" under a second, and leave out a thought with nothing to show', () => {
+    const thought = (id, ordinal, title, text, started, ended) => ({ id, kind: 'reasoning',
+      status: 'completed', ordinal, title, text, started_at_ms: started, ended_at_ms: ended });
+    const rows = liveRows([
+      thought('a', 1, 'Reading the code', 'Reading the code', 1000, 1000),
+      thought('b', 2, '', '', 2000, 2400),
+      thought('c', 3, '', 'Some words', 3000, 3200),
+      thought('d', 4, 'Weighing it', '', null, 9000),
+      thought('e', 5, 'Long one', 'x', 10000, 31000),
+      thought('f', 6, '', '', 32000, 36000),
+    ], { ...on, now: 50000 });
+    expect(rows.map(r => r.label)).toEqual(
+      ['Thought: Reading the code', 'Thought', 'Thought: Weighing it', 'Thought for 21s: Long one', 'Thought for 4s']);
+  });
 });
 
 describe('explore groups', () => {

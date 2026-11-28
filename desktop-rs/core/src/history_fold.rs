@@ -359,7 +359,7 @@ fn turn(
         .flat_map(|(_, items)| items.iter())
         .filter_map(|i| Some((i.get("tool")?.get("call_id")?.as_str()?, *i)))
         .collect();
-    let mut reasoning: Vec<&Object> = retired.iter().flat_map(|(_, items)| items.iter().copied()).filter(|i| i.get("kind").and_then(Value::as_str) == Some("reasoning")).collect();
+    let mut reasoning: Vec<&Object> = retired.iter().flat_map(|(_, items)| items.iter().copied()).filter(|i| i.get("kind").and_then(Value::as_str) == Some("reasoning") && !live_present::empty_thought(i)).collect();
     let ordinal = |i: &Object| i.get("ordinal").and_then(Value::as_i64).unwrap_or(0);
 
     // The turn's items in the order they were written: each row's text,

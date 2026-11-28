@@ -631,3 +631,41 @@ fn a_live_message_with_a_less_than_sign_keeps_streaming() {
         );
     }
 }
+
+/// Codex tells its thinking only once it is over (`item.completed`): the item begins and ends
+/// in the same moment here. It took the time since the turn was last busy, not "0s".
+#[test]
+fn thinking_told_only_once_it_is_over_lasts_since_the_turn_was_last_busy() {
+    let mut hub = Hub::new("e1", "a1", "s1");
+    let mut client = View::new();
+    let mut sent = hub.begin_turn("s1", "c1", "t-1", Some(1_000), "user", 1_000);
+    let (snapshot, _) = hub.snapshot(1_000).unwrap();
+    client.apply_snapshot(&snapshot);
+    let at = |client: &View, id: &str| {
+        let item = client.items().into_iter().find(|item| item["id"] == id).unwrap().clone();
+        (item["started_at_ms"].as_i64().unwrap(), item["ended_at_ms"].as_i64().unwrap())
+    };
+    sent.extend(hub.reasoning_text("r1", "**Reading the code**", Some("t-1"), 22_000));
+    sent.extend(hub.done("r1", "completed", None, Some("t-1"), 22_000));
+    let tool = ToolStart {
+        name: "shell",
+        call_id: "c1",
+        category: "exec",
+        label: "cargo test",
+        command: Some("cargo test"),
+        input_preview: None,
+    };
+    sent.extend(hub.tool_start("x1", &tool, "running", Some("t-1"), 22_100));
+    sent.extend(hub.done("x1", "completed", None, Some("t-1"), 25_000));
+    sent.extend(hub.reasoning_text("r2", "**Weighing the failure**", Some("t-1"), 31_000));
+    sent.extend(hub.done("r2", "completed", None, Some("t-1"), 31_000));
+    // Thinking that streams keeps the moment its first words came.
+    sent.extend(hub.reasoning_text("r3", "**Streaming**", Some("t-1"), 32_000));
+    sent.extend(hub.done("r3", "completed", None, Some("t-1"), 34_000));
+    for event in &sent {
+        assert!(client.apply_event(event).is_empty(), "a client takes {event}");
+    }
+    assert_eq!(at(&client, "r1"), (1_000, 22_000), "since the turn began");
+    assert_eq!(at(&client, "r2"), (25_000, 31_000), "since the tool before it ended");
+    assert_eq!(at(&client, "r3"), (32_000, 34_000));
+}

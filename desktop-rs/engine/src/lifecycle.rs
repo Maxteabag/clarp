@@ -177,6 +177,17 @@ impl Engine {
         self.reset_model_catalog_result();
     }
 
+    /// The catalog last cached for this Host, shown until the Host answers
+    /// again (and then quietly replaced): New Session lists its harnesses
+    /// and models at once. Empty when nothing is cached for this Host.
+    pub(crate) fn restore_cached_catalog(&mut self) {
+        let cached = self.transcript_cache.as_ref().map(|cache| cache.load_catalog(&self.cache_key)).unwrap_or_default();
+        if cached != self.launch.catalog {
+            self.launch.catalog = cached;
+            self.changes.push(Change::Launch);
+        }
+    }
+
     fn load_model_catalog(&mut self) {
         self.reset_model_catalog_result();
         self.api.get("model-catalog", "/agent-model-options", &[]);
@@ -768,6 +779,12 @@ impl Engine {
             return true;
         }
         if tag == "model-catalog" {
+            if *object != self.launch.catalog
+                && let Some(cache) = &self.transcript_cache
+                && let Err(error) = cache.save_catalog(&self.cache_key, object)
+            {
+                eprintln!("clarp-engine: catalog cache: {error}");
+            }
             self.launch.catalog = object.clone();
             self.launch.catalog_result = Some(true);
             self.changes.push(Change::Launch);

@@ -39,6 +39,9 @@ impl Engine {
         self.reset_live();
         self.base_url = normalized.clone();
         self.cache_key = normalized.clone();
+        // Never the last Host's harnesses and models: this one's, as cached.
+        self.reset_model_catalog_result();
+        self.restore_cached_catalog();
         self.server_name.clear();
         self.server_version.clear();
         let empty = serde_json::Map::from_iter([("agents".to_owned(), Value::Array(Vec::new()))]);

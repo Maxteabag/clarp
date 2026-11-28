@@ -90,13 +90,36 @@ function toolRow(item, { explanations, hostNow, tr, duration }) {
   };
 }
 
+/** How long a settled thought took, or null when one of its ends is unknown. */
+function thoughtMs(item) {
+  if (!item.started_at_ms || !item.ended_at_ms) return null;
+  return Math.max(0, item.ended_at_ms - item.started_at_ms);
+}
+
+/**
+ * A finished thought with nothing to show (no words, no headline, not even a
+ * second long) gets no row: never a bare "Thought for 0s" (CL-071).
+ */
+function emptyThought(item) {
+  const ms = thoughtMs(item);
+  return !isRunning(item) && !String(item.title || '').trim() && !String(item.text || '').trim()
+    && (ms === null || ms < 1000);
+}
+
 function reasoningRow(item, hostNow, tr, duration) {
   const running = isRunning(item);
   const title = item.title ? String(item.title) : '';
-  const time = duration(elapsedMs(item, hostNow));
-  const label = running
-    ? (title ? tr('live.thinking_titled', { title }) : tr('live.status.thinking'))
-    : (title ? tr('live.thought_for_titled', { time, title }) : tr('live.thought_for', { time }));
+  const ms = thoughtMs(item);
+  let label;
+  if (running) {
+    label = title ? tr('live.thinking_titled', { title }) : tr('live.status.thinking');
+  } else if (ms !== null && ms >= 1000) {
+    const time = duration(ms);
+    label = title ? tr('live.thought_for_titled', { time, title }) : tr('live.thought_for', { time });
+  } else {
+    // Under a second, or no length known: "Thought", no made-up duration.
+    label = title ? tr('live.thought_titled', { title }) : tr('live.thought');
+  }
   return { type: 'reasoning', id: item.id, status: item.status, running, label,
     text: String(item.text || ''), item };
 }
@@ -140,7 +163,7 @@ export function liveRows(items, { explanations = true, now = Date.now(), skewMs 
         rows.push(row);
       }
     } else if (item.kind === 'reasoning') {
-      rows.push(reasoningRow(item, hostNow, tr, duration));
+      if (!emptyThought(item)) rows.push(reasoningRow(item, hostNow, tr, duration));
     } else if (item.kind === 'message') {
       rows.push({ type: 'message', id: item.id, status: item.status, phase: item.phase || '',
         streaming: isRunning(item), text: String(item.text || ''), rowId: item.row_id || '', item });

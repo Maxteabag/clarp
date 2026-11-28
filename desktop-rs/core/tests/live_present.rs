@@ -933,3 +933,30 @@ fn a_message_that_waits_for_the_next_turn_stays_below_the_working_line() {
     let read = present(&steered_turn(Some(json!(["u-steer"]))), &rows, &grouped);
     assert_eq!(shown_order(&read, &rows), ["u-go", "live:fold:tr-s@u-steer", "u-steer", "live:fold:tr-s", "u-waits"]);
 }
+
+/// CL-071: a thought never reads "Thought for 0s". Under a second, or with
+/// no length known, it is "Thought" (with its headline); with nothing to show
+/// at all it gets no row.
+#[test]
+fn a_thought_under_a_second_reads_thought_and_an_empty_one_is_not_shown() {
+    let item = |id: &str, ordinal: i64, title: &str, text: &str, started: Value, ended: Value| {
+        json!({"id": id, "conv": "c1", "turn_id": "t1", "kind": "reasoning", "status": "completed", "ordinal": ordinal,
+            "title": title, "text": text, "started_at_ms": started, "ended_at_ms": ended, "rev": 2})
+    };
+    let snapshot = json!({"conv": "c1", "epoch": "e1", "lseq": 1, "server_now_ms": 50_000,
+        "activity": {"state": "idle"},
+        "turn": {"turn_id": "t1", "status": "completed", "started_at_ms": 1_000, "ended_at_ms": 40_000},
+        "items": [
+            item("a", 1, "Reading the code", "Reading the code", json!(1_000), json!(1_000)),
+            item("b", 2, "", "", json!(2_000), json!(2_400)),
+            item("c", 3, "", "Some words", json!(3_000), json!(3_200)),
+            item("d", 4, "Weighing it", "", json!(null), json!(9_000)),
+            item("e", 5, "Long one", "x", json!(10_000), json!(31_000)),
+            item("f", 6, "", "", json!(32_000), json!(36_000)),
+        ]});
+    let mut view = LiveView::new();
+    view.apply_snapshot(snapshot.as_object().unwrap());
+    let p = present(&view, &[], &options(&[], 50_000));
+    assert_eq!(titles(&p), ["Thought: Reading the code", "Thought", "Thought: Weighing it", "Thought for 21s: Long one", "Thought for 4s"]);
+    assert!(!titles(&p).iter().any(|t| t.contains("0s")));
+}

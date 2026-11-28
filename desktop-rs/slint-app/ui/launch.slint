@@ -408,9 +408,10 @@ export component NewSessionHub inherits Modal {
                     Caption { text: @tr("BACKEND"); }
                     KeyTag { text: "ctrl+← →"; }
                 }
-                HorizontalLayout {
+                // Every harness keeps its whole name: the marks wrap onto
+                // another line in a narrow window, never cut or run off it.
+                FlexboxLayout {
                     spacing: 8px;
-                    alignment: start;
                     for chip[index] in LaunchHub.providers: ProviderMark {
                         chip: chip;
                         selected: index == LaunchHub.provider-index;

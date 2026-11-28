@@ -869,6 +869,7 @@ impl Engine {
             return;
         }
         let Some(cache) = self.transcript_cache.clone() else { return };
+        self.restore_cached_catalog();
         let snapshot = cache.load_roster(&self.cache_key);
         if !snapshot.is_empty() && self.roster.agents().is_empty() {
             self.mutate_roster(|r| r.apply_snapshot(&snapshot));

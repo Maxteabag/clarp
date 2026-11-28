@@ -112,7 +112,8 @@ impl TranscriptCache {
     }
 
     /// Removes everything cached for `base_url`: every chat and its agent
-    /// list. Forgetting a Host's sign-in leaves none of its words on disk.
+    /// list and model catalog. Forgetting a Host's sign-in leaves none of its
+    /// words on disk.
     pub fn forget_host(&self, base_url: &str) {
         let sessions = self.all(base_url).unwrap_or_else(|error| {
             eprintln!("TranscriptCache: could not list {base_url}: {error}");
@@ -121,11 +122,13 @@ impl TranscriptCache {
         for (session, _) in sessions {
             self.remove(base_url, &session);
         }
-        let roster = self.roster_path_for(base_url);
-        if let Err(error) = std::fs::remove_file(&roster)
-            && error.kind() != std::io::ErrorKind::NotFound
-        {
-            eprintln!("TranscriptCache: could not remove {}: {error}", roster.display());
+        for kind in ["roster", "catalog"] {
+            let path = self.host_path_for(base_url, kind);
+            if let Err(error) = std::fs::remove_file(&path)
+                && error.kind() != std::io::ErrorKind::NotFound
+            {
+                eprintln!("TranscriptCache: could not remove {}: {error}", path.display());
+            }
         }
     }
 
@@ -138,18 +141,18 @@ impl TranscriptCache {
         }
     }
 
-    fn roster_path_for(&self, base_url: &str) -> PathBuf {
-        let digest: String = Sha256::digest(format!("{base_url}\0__roster__").as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
-        self.root.join(format!("roster-{digest}.roster"))
+    /// A Host-wide file beside the chats: `roster-<digest>.roster` for the
+    /// agent list, `catalog-<digest>.catalog` for the model catalog.
+    fn host_path_for(&self, base_url: &str, kind: &str) -> PathBuf {
+        let digest: String = Sha256::digest(format!("{base_url}\0__{kind}__").as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+        self.root.join(format!("{kind}-{digest}.{kind}"))
     }
 
-    /// The last `/agents/snapshot` cached for `base_url`, so the agent list
-    /// and open panes appear on Frame 1 before the Host answers.
-    pub fn load_roster(&self, base_url: &str) -> Object {
+    fn load_host(&self, base_url: &str, kind: &str) -> Object {
         if base_url.is_empty() {
             return Object::new();
         }
-        let path = self.roster_path_for(base_url);
+        let path = self.host_path_for(base_url, kind);
         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         if size == 0 || size > MAX_CACHE_BYTES {
             return Object::new();
@@ -165,7 +168,7 @@ impl TranscriptCache {
         envelope.get("snapshot").and_then(Value::as_object).cloned().unwrap_or_default()
     }
 
-    pub fn save_roster(&self, base_url: &str, snapshot: &Object) -> Result<(), String> {
+    fn save_host(&self, base_url: &str, kind: &str, snapshot: &Object) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         if base_url.is_empty() || snapshot.is_empty() {
             return Err("nothing to cache".into());
@@ -174,10 +177,10 @@ impl TranscriptCache {
         let bytes = serde_json::to_vec(&json!({"schema": 1, "base_url": base_url, "snapshot": snapshot}))
             .map_err(|e| e.to_string())?;
         if bytes.len() as u64 > MAX_CACHE_BYTES {
-            return Err("roster snapshot too large to cache".into());
+            return Err(format!("{kind} too large to cache"));
         }
-        let path = self.roster_path_for(base_url);
-        let temporary = path.with_extension(format!("roster.tmp.{}", std::process::id()));
+        let path = self.host_path_for(base_url, kind);
+        let temporary = path.with_extension(format!("{kind}.tmp.{}", std::process::id()));
         let written = std::fs::write(&temporary, &bytes)
             .and_then(|()| std::fs::set_permissions(&temporary, std::fs::Permissions::from_mode(0o600)))
             .and_then(|()| std::fs::rename(&temporary, &path));
@@ -190,6 +193,26 @@ impl TranscriptCache {
             return Err(format!("{}: {error}", path.display()));
         }
         Ok(())
+    }
+
+    /// The last `/agents/snapshot` cached for `base_url`, so the agent list
+    /// and open panes appear on Frame 1 before the Host answers.
+    pub fn load_roster(&self, base_url: &str) -> Object {
+        self.load_host(base_url, "roster")
+    }
+
+    pub fn save_roster(&self, base_url: &str, snapshot: &Object) -> Result<(), String> {
+        self.save_host(base_url, "roster", snapshot)
+    }
+
+    /// The last `/agent-model-options` catalog cached for `base_url`, so New
+    /// Session shows the harnesses and models at once, before the Host answers.
+    pub fn load_catalog(&self, base_url: &str) -> Object {
+        self.load_host(base_url, "catalog")
+    }
+
+    pub fn save_catalog(&self, base_url: &str, catalog: &Object) -> Result<(), String> {
+        self.save_host(base_url, "catalog", catalog)
     }
 }
 

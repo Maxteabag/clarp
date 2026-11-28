@@ -1233,9 +1233,35 @@ impl Hub {
         let Some(item) = self.view.items.get(id) else {
             return out;
         };
-        let op = self.done_op(item, status, now, patch);
+        let mut op = self.done_op(item, status, now, patch);
+        // Thinking a provider tells only once it is over (Codex's `item.completed`) begins
+        // and ends in the same moment here. It began when the turn was last busy with
+        // something else, so it shows how long it took, not "0s".
+        if text_of(&item["kind"]) == "reasoning" && whole_of(&op["started_at_ms"]) == now {
+            op["started_at_ms"] = json!(self.busy_until(id, now));
+        }
         self.emit(vec![op], (true, ""), now, &mut out);
         out
+    }
+
+    /// The last moment before `now` the turn did something other than item `id`: the end of
+    /// the newest item settled before it, or the turn's start.
+    fn busy_until(&self, id: &str, now: i64) -> i64 {
+        let turn_start = self
+            .view
+            .turn
+            .as_ref()
+            .and_then(|turn| turn.get("started_at_ms"))
+            .map_or(0, whole_of);
+        self.view
+            .items
+            .values()
+            .filter(|item| text_of(&item["id"]) != id)
+            .map(|item| whole_of(&item["ended_at_ms"]))
+            .chain([turn_start])
+            .filter(|at| *at > 0 && *at <= now)
+            .max()
+            .unwrap_or(now)
     }
 
     /// Everything that still runs is settled, and the turn goes on: an attempt of the turn
