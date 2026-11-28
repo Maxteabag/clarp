@@ -146,7 +146,9 @@ export function placeholderFor(conv) {
   if (conv.status === 'loading' && !conv.turns.length) return t('chat.loading');
   if (conv.status === 'error') return t('chat.load_error', { error: conv.error || t('chat.load_failed') });
   if (conv.status === 'ready' && !conv.turns.length) {
-    return t(conv.missing ? 'chat.no_conversation_in' : 'chat.no_messages_in', { folder: conv.cwd || '' }).trim();
+    const folder = conv.cwd || '';
+    if (!folder) return t(conv.missing ? 'chat.no_conversation' : 'chat.no_messages');
+    return t(conv.missing ? 'chat.no_conversation_in' : 'chat.no_messages_in', { folder });
   }
   return '';
 }

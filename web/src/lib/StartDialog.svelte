@@ -282,7 +282,7 @@
 {#if open}
   <div class="start-dialog">
     <div class="start-card">
-      <h3 id="startTitle">{replaceSid ? t('start.title_relaunch', { name }) : t('start.title_start', { name })}</h3>
+      <h3 id="startTitle" data-kicker={t('start.kicker')}>{replaceSid ? t('start.title_relaunch', { name }) : t('start.title_start', { name })}</h3>
 
       <label class="start-field">
         <span>{t('start.directory')}</span>

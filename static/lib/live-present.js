@@ -63,6 +63,22 @@ function outputTail(item, ms) {
   return { tail, more: Math.max(0, (Number(out.total_lines) || out.tail.length) - tail.length) };
 }
 
+const LABEL_MARK = '\u0000';
+
+/**
+ * A tool row's head line from its template ("Running {label}", "{label} चला रहा है"): the words
+ * before and after the label, so the label keeps its own style wherever the language puts it. A
+ * template without {label} keeps the label after its words.
+ */
+export function toolHead(tr, key, label) {
+  const whole = String(tr(key, { label: LABEL_MARK }));
+  const at = whole.indexOf(LABEL_MARK);
+  if (at < 0) return { before: `${whole} `, after: '', text: label ? `${whole} ${label}` : whole };
+  const before = whole.slice(0, at);
+  const after = whole.slice(at + LABEL_MARK.length);
+  return { before, after, text: `${before}${label}${after}`.trim() };
+}
+
 function toolRow(item, { explanations, hostNow, tr, duration }) {
   const tool = item.tool || {};
   const running = isRunning(item);
@@ -71,6 +87,8 @@ function toolRow(item, { explanations, hostNow, tr, duration }) {
   const exitCode = tool.output && tool.output.exit_code;
   const diff = tool.diff && (tool.diff.added || tool.diff.removed)
     ? `+${tool.diff.added || 0} −${tool.diff.removed || 0}` : '';
+  const label = tool.label || tool.name || '';
+  const head = toolHead(tr, `live.tool.${category}.${running ? 'running' : 'done'}`, label);
   return {
     type: 'tool',
     id: item.id,
@@ -78,8 +96,10 @@ function toolRow(item, { explanations, hostNow, tr, duration }) {
     running,
     category: tool.category || 'other',
     name: tool.name || '',
-    verb: tr(`live.tool.${category}.${running ? 'running' : 'done'}`),
-    label: tool.label || tool.name || '',
+    before: head.before,
+    after: head.after,
+    text: head.text,
+    label,
     secondary: secondaryLine(tool, explanations),
     elapsed: item.started_at_ms ? duration(ms) : '',
     exit: item.status === 'failed' && exitCode != null && exitCode !== 0 ? tr('live.exit_code', { code: String(exitCode) }) : '',
@@ -234,6 +254,19 @@ const STATUS_TEXT = new Set(['thinking', 'responding', 'tool', 'compacting', 'wa
 const INTERRUPTIBLE = new Set(['thinking', 'responding', 'tool', 'compacting']);
 
 /**
+ * The status line's words. A tool the Host names with its category is worded from the catalog
+ * (live.tool.<category>.running), as its row is; the Host's English headline only stands in when
+ * there is no tool kind to word it from.
+ */
+function lineText(activity, tool, state, tr) {
+  if (tool && tool.category) {
+    const category = VERBS.has(tool.category) ? tool.category : 'other';
+    return toolHead(tr, `live.tool.${category}.running`, tool.label || tool.name || '').text;
+  }
+  return activity.headlineKey ? tr(activity.headlineKey) : activity.headline || tr(`live.status.${state}`);
+}
+
+/**
  * The one status line: what is happening now, a timer from the Host clock
  * and whether it can be interrupted. Null when nothing runs.
  */
@@ -247,7 +280,7 @@ export function statusLine(activity, { now = Date.now(), skewMs = 0, tr = englis
   return {
     state,
     key: `${state}:${(tool && tool.item_id) || ''}`,
-    text: activity.headlineKey ? tr(activity.headlineKey) : activity.headline || tr(`live.status.${state}`),
+    text: lineText(activity, tool, state, tr),
     since,
     time: since ? clock(hostNow - since) : '',
     more: tool && running > 1 ? `+${running - 1}` : '',

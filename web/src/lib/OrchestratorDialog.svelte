@@ -130,63 +130,65 @@
 
 {#if open}
   <div class="start-dialog">
-    <div class="start-card">
+    <div class="start-card orchestrator-card">
       <h3>{t('orchestrator.title')}</h3>
+      <div class="orchestrator-body">
 
-      <label class="start-field inline-toggle">
-        <span>{t('orchestrator.ai_routing')}</span>
-        <input type="checkbox" bind:checked={enabled} />
-      </label>
-      <label class="start-field inline-toggle">
-        <span>{t('orchestrator.fallback_only')}</span>
-        <input type="checkbox" bind:checked={fallbackOnly} />
-      </label>
-      <label class="start-field">
-        <span>{t('orchestrator.confidence')}</span>
-        <input type="number" min="0.50" max="0.99" step="0.05" bind:value={confidence} />
-      </label>
-      <label class="start-field">
-        <span>{t('orchestrator.provider')}</span>
-        <select bind:value={provider} onchange={() => { model = ''; effort = ''; }}>
-          {#each options as o (o.id)}
-            <option value={o.id}>{o.installed === false ? t('orchestrator.not_installed', { name: o.label }) : o.label}</option>
-          {/each}
-        </select>
-      </label>
-      <label class="start-field">
-        <span>{t('orchestrator.model')}</span>
-        <select bind:value={model} onchange={() => effort = ''}>
-          <option value="">{t('orchestrator.default')}</option>
-          {#each models as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
-        </select>
-      </label>
-      <label class="start-field">
-        <span>{t('orchestrator.effort')}</span>
-        <select bind:value={effort}>
-          <option value="">{t('orchestrator.default')}</option>
-          {#each efforts as e (e)}
-            <option value={e}>{effortLabel(e)}</option>
-          {/each}
-        </select>
-      </label>
-      <div class="orchestrator-last">{providerHelp}</div>
-      <label class="start-field">
-        <span>{t('orchestrator.timeout')}</span>
-        <input type="number" min="250" max="60000" step="250" bind:value={timeoutMs} />
-      </label>
-      <div class="orchestrator-last">{t(last.key, last.params)}</div>
-      <div class="orchestrator-ignored">
-        {#if ignored.length}
-          <div class="orchestrator-ignored-title">{t('orchestrator.ignored')}</div>
-          {#each ignored as row, i (i)}
-            <div class="orchestrator-ignored-row">
-              <div class="orchestrator-ignored-text">{row.text}</div>
-              <div class="orchestrator-ignored-meta">{row.reason || t('orchestrator.ignored_reason')} · {formatNumber(row.conf, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            </div>
-          {/each}
-        {:else}
-          <div class="orchestrator-ignored-empty">{t('orchestrator.none')}</div>
-        {/if}
+        <label class="start-field inline-toggle">
+          <span>{t('orchestrator.ai_routing')}</span>
+          <input type="checkbox" bind:checked={enabled} />
+        </label>
+        <label class="start-field inline-toggle">
+          <span>{t('orchestrator.fallback_only')}</span>
+          <input type="checkbox" bind:checked={fallbackOnly} />
+        </label>
+        <label class="start-field">
+          <span>{t('orchestrator.confidence')}</span>
+          <input type="number" min="0.50" max="0.99" step="0.05" bind:value={confidence} />
+        </label>
+        <label class="start-field">
+          <span>{t('orchestrator.provider')}</span>
+          <select bind:value={provider} onchange={() => { model = ''; effort = ''; }}>
+            {#each options as o (o.id)}
+              <option value={o.id}>{o.installed === false ? t('orchestrator.not_installed', { name: o.label }) : o.label}</option>
+            {/each}
+          </select>
+        </label>
+        <label class="start-field">
+          <span>{t('orchestrator.model')}</span>
+          <select bind:value={model} onchange={() => effort = ''}>
+            <option value="">{t('orchestrator.default')}</option>
+            {#each models as m (m.id)}<option value={m.id}>{m.label || m.id}</option>{/each}
+          </select>
+        </label>
+        <label class="start-field">
+          <span>{t('orchestrator.effort')}</span>
+          <select bind:value={effort}>
+            <option value="">{t('orchestrator.default')}</option>
+            {#each efforts as e (e)}
+              <option value={e}>{effortLabel(e)}</option>
+            {/each}
+          </select>
+        </label>
+        <div class="orchestrator-last">{providerHelp}</div>
+        <label class="start-field">
+          <span>{t('orchestrator.timeout')}</span>
+          <input type="number" min="250" max="60000" step="250" bind:value={timeoutMs} />
+        </label>
+        <div class="orchestrator-last">{t(last.key, last.params)}</div>
+        <div class="orchestrator-ignored">
+          {#if ignored.length}
+            <div class="orchestrator-ignored-title">{t('orchestrator.ignored')}</div>
+            {#each ignored as row, i (i)}
+              <div class="orchestrator-ignored-row">
+                <div class="orchestrator-ignored-text">{row.text}</div>
+                <div class="orchestrator-ignored-meta">{row.reason || t('orchestrator.ignored_reason')} · {formatNumber(row.conf, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              </div>
+            {/each}
+          {:else}
+            <div class="orchestrator-ignored-empty">{t('orchestrator.none')}</div>
+          {/if}
+        </div>
       </div>
 
       <div class="start-actions">

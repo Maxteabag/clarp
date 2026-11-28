@@ -1,6 +1,7 @@
 <script>
-  // One tool call, updated in place from start to finish: verb + label +
-  // elapsed on the first line, the explanation (or the raw command) on a
+  // One tool call, updated in place from start to finish: the translated
+  // template with the label drawn in its own style where the language puts
+  // it ("Running npm test", "npm test चला रहा है") + elapsed on the first line, the explanation (or the raw command) on a
   // reserved second line, and a short output tail with a count of the rest.
   import { isOpen, toggle } from './expanded.svelte.js';
   import { t } from '../../stores/i18n.svelte.js';
@@ -24,8 +25,9 @@
   <button class="lv-head" type="button" disabled={!canOpen} aria-expanded={canOpen ? open : undefined}
           onclick={() => toggle(row.id)}>
     <span class="lv-dot" aria-hidden="true"></span>
-    <span class="lv-verb">{row.verb}</span>
+    {#if row.before.trim()}<span class="lv-verb">{row.before.trim()}</span>{/if}
     <span class="lv-label">{row.label}</span>
+    {#if row.after.trim()}<span class="lv-verb">{row.after.trim()}</span>{/if}
     {#if row.diff}<span class="lv-diff">{#each row.diff.split(' ') as part}<span class:add={part.startsWith('+')} class:del={!part.startsWith('+')}>{part}</span>{/each}</span>{/if}
     {#if row.exit}<span class="lv-exit">{row.exit}</span>{/if}
     {#if row.status === 'interrupted'}<span class="lv-exit">{t('live.interrupted')}</span>{/if}

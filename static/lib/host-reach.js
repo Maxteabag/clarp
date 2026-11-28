@@ -32,6 +32,7 @@ export const EN = Object.freeze({
   'host_down.unknown.title': '{host} isn\'t answering',
   'host_down.unknown.body': '{host} isn\'t responding right now.',
   'host_down.last_seen': 'Last answered {when}',
+  'host_down.last_seen_now': 'Answered just now',
   'host_down.status.reconnecting': 'Reconnecting automatically…',
   'host_down.status.retry_in': 'Trying again {in}',
   'host_down.status.back_online': 'Back online',

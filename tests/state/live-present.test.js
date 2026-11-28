@@ -97,7 +97,7 @@ describe('tool rows', () => {
 
   it('name the command and tick while it runs', () => {
     const row = bash(replay('turn-full', 13), { ...on, now: T0 + 7000 });
-    expect(row).toMatchObject({ type: 'tool', verb: 'Running', label: 'npm test',
+    expect(row).toMatchObject({ type: 'tool', before: 'Running ', after: '', text: 'Running npm test', label: 'npm test',
       running: true, elapsed: '2s', status: 'running' });
   });
 
@@ -126,7 +126,7 @@ describe('tool rows', () => {
 
   it('keep a short tail and a count of the rest once a command fails', () => {
     const row = bash(replay('turn-full'), { ...on, now: T0 + 20000 });
-    expect(row).toMatchObject({ verb: 'Ran', status: 'failed', running: false,
+    expect(row).toMatchObject({ text: 'Ran npm test', status: 'failed', running: false,
       elapsed: '3s', exit: 'exit 1' });
     expect(row.tail).toEqual(['line 810', 'line 811', 'line 812']);
     expect(row.more).toBe(809);
@@ -145,7 +145,13 @@ describe('tool rows', () => {
   it('count added and removed lines on an edit', () => {
     const row = liveRows(liveItems(replay('turn-full')), { ...on, now: T0 + 20000 })
       .find(r => r.id === 'cl:toolu_04');
-    expect(row).toMatchObject({ verb: 'Edited', label: 'src/tokenizer.ts', diff: '+3 −1' });
+    expect(row).toMatchObject({ before: 'Edited ', label: 'src/tokenizer.ts', diff: '+3 −1' });
+  });
+
+  it('place the label where a translation puts it', () => {
+    const verbLast = (key, params) => (key.startsWith('live.tool.') ? `${params.label} चला रहा है` : key);
+    const row = bash(replay('turn-full', 13), { ...on, now: T0 + 7000, tr: verbLast });
+    expect(row).toMatchObject({ before: '', after: ' चला रहा है', label: 'npm test', text: 'npm test चला रहा है' });
   });
 
   it('say a stopped command was interrupted', () => {
@@ -244,6 +250,15 @@ describe('status line', () => {
   it('corrects the timer for the Host clock', () => {
     const live = replay('turn-full', 13);
     expect(statusLine(live.activity, { now: T0 + 5000 + 12000 - 3000, skewMs: 3000 }).time).toBe('0:12');
+  });
+
+  it('words a tool from its category in the chosen language, not the Host\'s English headline', () => {
+    const activity = { state: 'tool', headline: 'Running npm run smoke', running_tools: 1,
+      tool: { name: 'Bash', category: 'exec', label: 'npm run smoke', started_at_ms: T0 } };
+    const hi = (key, p) => (key === 'live.tool.exec.running' ? `${p.label} चला रहा है` : key);
+    expect(statusLine(activity, { now: T0 + 9000, tr: hi }).text).toBe('npm run smoke चला रहा है');
+    expect(statusLine({ ...activity, tool: { ...activity.tool, category: '' } }, { now: T0 }).text)
+      .toBe('Running npm run smoke');
   });
 
   it('is gone when nothing runs', () => {
