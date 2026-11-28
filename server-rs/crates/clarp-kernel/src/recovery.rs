@@ -190,6 +190,11 @@ pub enum Next {
     Fail,
 }
 
+/// How many tries a turn whose tool's session is held elsewhere gets in all.
+pub const SESSION_LOCKED_TRIES: u32 = 3;
+/// How long it waits before its second try; the third waits twice that.
+pub const SESSION_LOCKED_BACKOFF_MS: i64 = 5_000;
+
 /// What follows the failure of an attempt of a turn, on a Host that treats accounts this way.
 pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
     // Waits for an account are no tries against a bad line: they do not use those up. Nor
@@ -226,6 +231,16 @@ pub fn after_failed_attempt(failed: Failed<'_>, accounts: Accounts) -> Next {
         {
             Next::Retry {
                 after_ms: PROVIDER_BACKOFF_MS << (tries - 1),
+                resume: !failed.nothing_done,
+            }
+        }
+        // A session another process holds for a moment (a Codex thread with another
+        // writer) is free again shortly: tried twice more, a few seconds apart.
+        failures::SESSION_LOCKED
+            if !failed.in_call && (1..SESSION_LOCKED_TRIES).contains(&tries) =>
+        {
+            Next::Retry {
+                after_ms: SESSION_LOCKED_BACKOFF_MS << (tries - 1),
                 resume: !failed.nothing_done,
             }
         }

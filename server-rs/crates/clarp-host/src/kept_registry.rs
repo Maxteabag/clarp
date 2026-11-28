@@ -34,6 +34,7 @@ pub static REGISTRY: &[&[crate::kept::Kind]] = &[
     crate::router::KEPT,
     crate::router::phrases::KEPT,
     crate::schedules::KEPT,
+    crate::turn_retry::KEPT,
     crate::seats::KINDS,
     crate::heard::inventory::KEPT,
     crate::heard::install::KEPT,

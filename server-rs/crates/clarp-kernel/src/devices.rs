@@ -481,8 +481,10 @@ impl PushBook {
 pub const LIMITED_REFUSAL: &str = "full device access required";
 
 /// What a device with limited access may send (`_LIMITED_DEVICE_POST_EXACT`).
-pub const LIMITED_POSTS: [&str; 11] = [
+pub const LIMITED_POSTS: [&str; 12] = [
     "/send",
+    // The buttons of a failed turn: a try again is a send (`docs/turn-errors.md`).
+    "/turn-retry",
     "/transcribe",
     "/upload",
     "/select",

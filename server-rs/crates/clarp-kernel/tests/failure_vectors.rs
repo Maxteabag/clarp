@@ -25,8 +25,21 @@ fn a_failure_is_read_as_the_python_host_reads_it() {
     let mut wrong = Vec::new();
     for vector in texts {
         let text = vector["text"].as_str().unwrap();
+        // A kind of this Host's own reads what the Python Host reads as something plainer
+        // (`docs/differences.md`): there it is held to its own tests, here to the rest.
+        // Only where the Python Host saw nothing plainer than a bad exit: an own kind that
+        // swallowed a usage limit, a sign-in or a transient failure would be caught here.
+        let kind = classify_error(text);
+        let theirs_kind = vector["kind"].as_str().unwrap();
+        let kind = if failures::OWN_KINDS.contains(&kind)
+            && matches!(theirs_kind, failures::UNKNOWN | failures::RUNNER_EXIT)
+        {
+            theirs_kind
+        } else {
+            kind
+        };
         let ours = (
-            classify_error(text),
+            kind,
             usage_limit_resets(text),
             explain(text),
             provider_message(text),
@@ -162,6 +175,9 @@ fn the_kinds_and_who_is_told_are_the_python_hosts() {
     assert_eq!(
         failures::OWN_KINDS,
         [
+            failures::INVALID_REQUEST,
+            failures::REFUSED,
+            failures::SESSION_LOCKED,
             failures::PROMPT_TOO_LONG,
             failures::PROVIDER_MISMATCH,
             failures::FOLDER_MISSING,
