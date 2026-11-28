@@ -3,7 +3,8 @@
 Stopping the watcher alone left the helper's turn running, and its parent ended the helper's
 Claude Code by its process id instead: the turn failed as "claude exited with code 143", with
 nothing saying who ended it (26 Nov 2026). The watcher goes only once the Host says the Stop
-held the helper's queue. A plain worker is stopped as before, by its unit.
+held the helper's queue. A plain worker is stopped by its unit. A watcher that
+sees its helper was archived ends on its own.
 """
 
 import importlib.util
@@ -155,3 +156,27 @@ def test_a_plain_worker_is_stopped_by_its_unit_alone(tmp_path, monkeypatch):
     # Its unit's own answer is the command's, as before.
     assert sub_agent.main(["stop", "r1"]) == 5
     assert called(calls) == [["systemctl", "--user", "stop", "clarp-sub-agent-r1"]]
+
+
+def test_a_watcher_ends_when_its_unreported_helper_is_archived(tmp_path, monkeypatch):
+    row = {**HELPER, "helper_state": "ended-unreported"}
+    sub_agent, calls = setup(tmp_path, monkeypatch, **{"r1-helper": row})
+    (sub_agent.DIR / "r1.title").write_text("A helper\n")
+    job_calls = tmp_path / "jobs.jsonl"
+    stub(tmp_path / "bin", "clarp-agent-bg", job_calls, {"the-parent": "job-handle"})
+    sleeps = []
+
+    def archive(_seconds):
+        assert not sleeps, "the watcher kept polling an archived helper"
+        sleeps.append(True)
+        stub(tmp_path / "bin", "clarp-admin", calls, {
+            "r1-helper": {**row, "archived_at": 1795700000000},
+        })
+
+    assert sub_agent.watch("r1", "r1-helper", "the-parent", sleep=archive) == 1
+    assert (sub_agent.DIR / "r1.exit").read_text() == "1\n"
+    assert [call[2] for call in called(job_calls)] == [
+        "job-upsert", "job-active", "job-heartbeat", "job-fail",
+    ]
+    assert called(job_calls)[-1][-1] == "helper r1-helper archived"
+    assert stops(calls) == [] and units(calls) == []
