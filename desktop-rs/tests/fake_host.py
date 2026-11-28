@@ -3197,6 +3197,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"ok": True})
         if url.path == "/stop":
             return self.reply(200, stop_response)
+        if url.path == "/turn-retry":
+            # docs/turn-errors.md: the failed turn's message sent again, as
+            # the button asked (at a time, fresh, after compacting).
+            if not body.get("session") or not body.get("message_id"):
+                return self.reply(400, {"error": "session and message_id are required"})
+            # A fresh retry is queued like a retry: its turn opens a fresh session by itself.
+            status = "scheduled" if body.get("at_ms") else "compacting" if body.get("compact") else "queued"
+            return self.reply(200, {"ok": True, "status": status})
         if url.path in ("/select", "/compact", "/agent-schedules/toggle", "/team-nudging") or url.path.startswith("/agent-"):
             return self.reply(200, {"ok": True})
         if url.path == "/agents":
