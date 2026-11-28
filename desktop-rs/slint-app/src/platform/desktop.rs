@@ -420,7 +420,8 @@ pub struct Note {
     pub choices: Vec<(String, String)>,
 }
 
-/// The settings row a popup's Settings opens at: the section's first.
+/// The settings row a popup's Settings opens at: the Host's first switch,
+/// else this computer's.
 const NOTIFICATION_SETTINGS: &[&str] = &["notify-reply", "desktop-notifications"];
 
 /// The action key of an answer button (`choice:<option id>`).
@@ -565,7 +566,7 @@ pub fn act_on(session: &str, message_id: &str, decision_id: &str, response_type:
         "settings" => {
             perform(Action::Show);
             if let Some(window) = crate::window() {
-                crate::settings_view::open_at(&app, &window, NOTIFICATION_SETTINGS);
+                crate::settings_view::open_searched(&app, &window, "notifications", NOTIFICATION_SETTINGS);
             }
             return;
         }

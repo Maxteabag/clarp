@@ -2032,12 +2032,21 @@ fn desktop_check(out: String) {
             }
             true
         })),
-        ("contact", Box::new(move |_, window, elapsed| {
+        ("contact", Box::new(|_, window, elapsed| {
             let bridge = window.global::<crate::ProfileBridge>();
-            let events = bridge.get_notify_events();
-            if events.row_count() == 0 || elapsed < Duration::from_millis(400) {
+            if bridge.get_notify_events().row_count() == 0 || elapsed < Duration::from_millis(400) {
                 return false;
             }
+            // The keyboard on Notifications brings the card into view.
+            bridge.set_cursor("notify-preset".into());
+            true
+        })),
+        ("contact shown", Box::new(move |_, window, elapsed| {
+            if elapsed < Duration::from_millis(500) {
+                return false;
+            }
+            let bridge = window.global::<crate::ProfileBridge>();
+            let events = bridge.get_notify_events();
             let info = bridge.get_info();
             check(info.notify_shown && info.notify_preset == 3, &format!("a contact with its own choices is Custom: {}", info.notify_preset));
             let reply = events.iter().find(|e| e.id == "reply");
@@ -2050,7 +2059,7 @@ fn desktop_check(out: String) {
         ("preset", Box::new(move |app, window, elapsed| {
             let needs_me = app.engine.borrow().notification_settings().is_some_and(|s| s.preset("a1", false) == clarp_core::notify_events::Preset::NeedsMe);
             let info = window.global::<crate::ProfileBridge>().get_info();
-            if !needs_me || info.notify_preset != 1 || elapsed < Duration::from_millis(300) {
+            if !needs_me || info.notify_preset != 1 || elapsed < Duration::from_millis(500) {
                 return false;
             }
             let last = posts("/notification-settings").last().cloned().unwrap_or_default();
@@ -2064,8 +2073,6 @@ fn desktop_check(out: String) {
             let mut pressed = false;
             move |_, window, elapsed| {
                 if window.get_surface() == "settings" {
-                    let current = window.get_setting_rows().row_data(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
-                    check(current == "notify-reply", &format!("a popup's Settings opens the notification settings: {current}"));
                     return true;
                 }
                 // Once, after the profile has closed.
@@ -2076,9 +2083,23 @@ fn desktop_check(out: String) {
                 false
             }
         })),
-        ("section", Box::new(move |_, window, elapsed| {
+        ("searched", Box::new(move |_, window, elapsed| {
             let rows: Vec<crate::SettingRow> = window.get_setting_rows().iter().collect();
-            if elapsed < Duration::from_millis(300) || !rows.iter().any(|r| r.id == "notify-reply") {
+            if elapsed < Duration::from_millis(500) || !rows.iter().any(|r| r.id == "notify-reply") {
+                return false;
+            }
+            let current = rows.get(window.get_setting_current().max(0) as usize).map(|r| r.id.to_string()).unwrap_or_default();
+            check(window.get_settings_query() == "notifications" && current == "notify-reply", &format!("a popup's Settings opens the notification settings: {current}"));
+            let ids = ["notify-reply", "notify-needs-you", "notify-job-done", "desktop-notifications", "notification-sound", "pause-mobile-push"];
+            check(ids.iter().all(|id| rows.iter().any(|r| r.id == *id)), "with every switch of the section");
+            check(rows.iter().find(|r| r.id == "notify-job-done").is_some_and(|r| !r.on), "a background job is off by default");
+            shot(&out4, "desktop-notifications-settings");
+            crate::settings_view::cancel_search(&app_now(), window);
+            true
+        })),
+        ("section", Box::new(|_, window, _| {
+            let rows: Vec<crate::SettingRow> = window.get_setting_rows().iter().collect();
+            if !window.get_settings_query().is_empty() {
                 return false;
             }
             let at = |id: &str| rows.iter().position(|r| r.id == id);
@@ -2087,8 +2108,6 @@ fn desktop_check(out: String) {
             let order: Vec<Option<usize>> = ids.iter().map(|id| at(id)).collect();
             check(section.is_some() && order.iter().all(|i| i.is_some_and(|i| Some(i) > section)) && order.windows(2).all(|w| w[0] < w[1]),
                   &format!("NOTIFICATIONS lists the Host's events, then this computer's switches: {order:?} after {section:?}"));
-            check(rows.iter().find(|r| r.id == "notify-job-done").is_some_and(|r| !r.on), "a background job is off by default");
-            shot(&out4, "desktop-notifications-settings");
             true
         })),
     ];
