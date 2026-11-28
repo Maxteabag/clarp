@@ -83,6 +83,11 @@ enum Response {
     Streaming { id: String, cancelled: bool },
 }
 
+enum AutomaticResponse {
+    Expected,
+    Interrupted,
+}
+
 #[derive(Default)]
 struct Routing {
     id: String,
@@ -99,7 +104,7 @@ pub(super) struct Session {
     response: Response,
     wanted: bool,
     listening: bool,
-    awaiting_auto_response: bool,
+    automatic: Option<AutomaticResponse>,
     transcribed: HashSet<String>,
     tools: HashSet<String>,
     untranscribed_tools: Vec<(String, String)>,
@@ -117,7 +122,7 @@ impl Session {
             response: Response::Idle,
             wanted: false,
             listening: false,
-            awaiting_auto_response: false,
+            automatic: None,
             transcribed: HashSet::new(),
             tools: HashSet::new(),
             untranscribed_tools: Vec::new(),
@@ -157,10 +162,7 @@ impl Session {
                 ))
             }
             "session.close" if self.phase != Phase::Closed => {
-                self.phase = Phase::Closed;
-                effects.push(Effect::Event(
-                    json!({"type": "session.closed", "reason": "client_closed"}),
-                ));
+                self.close("client_closed", &mut effects);
             }
             kind @ ("session.commentary.append"
             | "session.thinking.append"
@@ -223,7 +225,7 @@ impl Session {
     fn reply(&mut self, effects: &mut Vec<Effect>) {
         if self.phase == Phase::Ready
             && !self.listening
-            && !self.awaiting_auto_response
+            && self.automatic.is_none()
             && self.tools.is_empty()
             && self.routing.is_none()
             && matches!(self.response, Response::Idle)
@@ -239,6 +241,9 @@ impl Session {
 
     fn interrupt(&mut self, effects: &mut Vec<Effect>) {
         self.wanted = false;
+        if let Some(automatic) = &mut self.automatic {
+            *automatic = AutomaticResponse::Interrupted;
+        }
         match &mut self.response {
             Response::Requested { cancel } => *cancel = true,
             Response::Streaming { id, cancelled } if !*cancelled => {
@@ -249,6 +254,13 @@ impl Session {
         }
         effects.push(Effect::Event(
             json!({"type": "session.output_audio.interrupted"}),
+        ));
+    }
+
+    fn close(&mut self, reason: &str, effects: &mut Vec<Effect>) {
+        self.phase = Phase::Closed;
+        effects.push(Effect::Event(
+            json!({"type":"session.closed","reason":reason}),
         ));
     }
 
@@ -279,21 +291,20 @@ impl Session {
                 ));
             }
             "session.updated" if self.phase == Phase::Updating => {
-                self.phase = Phase::Closed;
                 effects.push(Effect::Event(json!({"type":"error","error":{
                     "message":"Eleven Realtime did not confirm the selected model",
                 }})));
-                effects.push(Effect::Event(
-                    json!({"type":"session.closed","reason":"model_mismatch"}),
-                ));
+                self.close("model_mismatch", &mut effects);
             }
             "input_audio_buffer.speech_started" => {
                 self.listening = true;
-                if !matches!(self.response, Response::Idle) {
+                if self.automatic.is_some() || !matches!(self.response, Response::Idle) {
                     self.interrupt(&mut effects);
                 }
             }
-            "input_audio_buffer.committed" => self.awaiting_auto_response = true,
+            "input_audio_buffer.committed" => {
+                self.automatic.get_or_insert(AutomaticResponse::Expected);
+            }
             "conversation.item.input_audio_transcription.completed" => {
                 let (id, text) = (event["item_id"].as_str(), event["transcript"].as_str());
                 if let (Some(id), Some(text)) = (id, text)
@@ -314,14 +325,15 @@ impl Session {
             }
             "response.created" => {
                 if let Some(id) = event["response"]["id"].as_str() {
-                    let automatic = std::mem::take(&mut self.awaiting_auto_response);
                     // Eleven Realtime creates a reply at the audio turn boundary. A
                     // second explicit response to that utterance conflicts, even when
                     // create_response=false was echoed. Only Host speech is requested here.
-                    let cancelled = if automatic {
-                        self.direct
-                    } else {
-                        !matches!(self.response, Response::Requested { cancel: false })
+                    let cancelled = match (&self.response, self.automatic.take()) {
+                        (Response::Requested { cancel: true }, _)
+                        | (_, Some(AutomaticResponse::Interrupted)) => true,
+                        (_, Some(AutomaticResponse::Expected)) => self.direct,
+                        (Response::Requested { cancel: false }, None) => false,
+                        _ => true,
                     };
                     self.response = Response::Streaming {
                         id: id.to_owned(),
@@ -345,9 +357,19 @@ impl Session {
                 ));
             }
             "response.done" => self.done(&event["response"], &mut effects),
-            "error" => effects.push(Effect::Event(json!({"type": "error", "error": {
-                "message": "Eleven Realtime refused the voice request",
-            }}))),
+            "error" => {
+                effects.push(Effect::Event(json!({"type": "error", "error": {
+                    "message": "Eleven Realtime refused the voice request",
+                }})));
+                // An error can arrive in place of the acknowledgement or response ID.
+                // Closing tells the phone the call ended and releases its slot.
+                if self.phase == Phase::Updating
+                    || self.automatic.is_some()
+                    || matches!(self.response, Response::Requested { .. })
+                {
+                    self.close("provider_error", &mut effects);
+                }
+            }
             _ => {}
         }
         self.reply(&mut effects);

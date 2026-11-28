@@ -11,7 +11,7 @@ fn elevenlabs_stand_in() -> (String, std::sync::mpsc::Receiver<(Value, End)>) {
     let address = format!("http://{}", listener.local_addr().unwrap());
     let (ready, calls) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        for model in [MINI, MAX] {
+        for model in [MINI, MAX, MAX] {
             let (mut mint, _) = listener.accept().unwrap();
             mint.set_read_timeout(Some(Duration::from_secs(10)))
                 .unwrap();
@@ -60,6 +60,46 @@ fn opted_in(place: &Place) -> PathBuf {
     let path = place.root.join("oracle.toml");
     std::fs::write(&path, "[oracle]\neleven_realtime_enabled = true\n").unwrap();
     path
+}
+
+fn committed(provider: &End, item: &str) {
+    provider.says(&json!({"type":"input_audio_buffer.speech_started"}));
+    provider.says(&json!({"type":"input_audio_buffer.committed","item_id":item}));
+}
+
+fn transcribed(provider: &End, item: &str, transcript: &str) {
+    provider.says(
+        &json!({"type":"conversation.item.input_audio_transcription.completed",
+        "item_id":item,"transcript":transcript}),
+    );
+}
+
+fn says_tool(provider: &End, response: &str, call: &str) {
+    provider.says(&json!({"type":"response.created","response":{"id":response}}));
+    provider.says(&json!({"type":"response.done","response":{
+        "id":response,"status":"completed","output":[{
+            "type":"function_call","name":"delegate_to_agent","call_id":call,
+            "arguments":"{\"request\":\"Finn den fiktive koden\"}",
+        }],
+    }}));
+}
+
+fn refuses_response(provider: &End, device: &End) {
+    provider.says(
+        &json!({"type":"error","error":{"code":"invalid_request_error",
+        "message":"private upstream diagnostics"}}),
+    );
+    assert_eq!(
+        device.told_of("error", 1)[0],
+        json!({"type":"error","error":{
+            "message":"Eleven Realtime refused the voice request",
+        }})
+    );
+    assert_eq!(
+        device.told_of("session.closed", 1)[0]["reason"],
+        "provider_error"
+    );
+    device.ends();
 }
 
 #[test]
@@ -144,21 +184,11 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     router.wants(json!([{"type": "message", "content": [
         {"type": "output_text", "text": "Den fiktive koden er FURU."},
     ]}]));
-    provider.says(&json!({"type": "input_audio_buffer.speech_started"}));
-    provider.says(&json!({"type": "input_audio_buffer.committed", "item_id": "user-audio"}));
-    provider.says(&json!({"type": "response.created", "response": {"id": "automatic"}}));
+    committed(&provider, "user-audio");
     // Finish the provider tool before ASR. The Host must wait for the user's actual
     // words and forward the request only after those words enter the Oracle transcript.
-    provider.says(&json!({"type": "response.done", "response": {
-        "id": "automatic", "status": "completed", "output": [{
-            "type": "function_call", "name": "delegate_to_agent", "call_id": "route-call",
-            "arguments": "{\"request\":\"Finn den fiktive koden\"}",
-        }],
-    }}));
-    provider.says(
-        &json!({"type": "conversation.item.input_audio_transcription.completed",
-        "item_id": "user-audio", "transcript": "Kan du finne den fiktive koden?"}),
-    );
+    says_tool(&provider, "automatic", "route-call");
+    transcribed(&provider, "user-audio", "Kan du finne den fiktive koden?");
     let heard = device.told_of("session.input_transcript.delta", 1);
     assert_eq!(heard[0]["delta"], "Kan du finne den fiktive koden?");
     let (key, question) = router.question(0);
@@ -198,16 +228,55 @@ fn eleven_realtime_preserves_oracle_audio_routing_and_interruptions() {
     provider.says(
         &json!({"type": "response.done", "response": {"id": "read-result", "status": "cancelled"}}),
     );
-    device.says(&json!({"type": "session.close"}));
-    device.told_of("session.closed", 1);
-    device.ends();
+
+    committed(&provider, "pending-audio");
+    transcribed(&provider, "pending-audio", "Stopp svaret før det begynner.");
+    // Hearing the transcript proves that the commit preceded the local interrupt.
+    device.told_of("session.input_transcript.delta", 2);
+    device.says(&json!({"type":"oracle_v2.interrupt"}));
+    device.told_of("oracle_v2.playback_flush", 2);
+    provider.says(&json!({"type":"response.created","response":{"id":"pending-response"}}));
+    assert_eq!(
+        provider.told_of("response.cancel", 2)[1]["response_id"],
+        "pending-response"
+    );
+    provider.says(
+        &json!({"type":"response.output_audio.delta","response_id":"pending-response","delta":pcm}),
+    );
+    provider.says(
+        &json!({"type":"response.done","response":{"id":"pending-response","status":"cancelled"}}),
+    );
+
+    committed(&provider, "auto-refused");
+    transcribed(&provider, "auto-refused", "Neste automatiske svar.");
+    device.told_of("session.input_transcript.delta", 3);
+    refuses_response(&provider, &device);
     assert_eq!(device.of_kind("session.output_audio.delta").len(), 1);
     assert_eq!(provider.of_kind("response.create").len(), 1);
 
-    let (second, _) = call(MAX);
-    second.says(&json!({"type": "session.close"}));
-    second.told_of("session.closed", 1);
-    second.ends();
+    let (second, max_provider) = call(MAX);
+    router.wants(json!([{"type":"message","content":[{"type":"output_text","text":"Den andre fiktive koden er GRAN."}]}]));
+    committed(&max_provider, "max-audio");
+    transcribed(
+        &max_provider,
+        "max-audio",
+        "Hva er den andre fiktive koden?",
+    );
+    says_tool(&max_provider, "max-automatic", "max-route-call");
+    let tool = max_provider.told_of("conversation.item.create", 1);
+    assert_eq!(tool[0]["item"]["call_id"], "max-route-call");
+    assert!(tool[0]["item"]["output"].as_str().unwrap().contains("GRAN"));
+    max_provider.told_of("response.create", 1);
+    refuses_response(&max_provider, &second);
+    assert_eq!(max_provider.of_kind("response.create").len(), 1);
+
+    let (third, _) = call(MAX);
+    third.says(&json!({"type":"session.close"}));
+    assert_eq!(
+        third.told_of("session.closed", 1)[0]["reason"],
+        "client_closed"
+    );
+    third.ends();
 
     let old = host.post(LEGACY_PICKER, json!({"provider":"openai"}));
     assert_eq!(old["provider"], "openai");
