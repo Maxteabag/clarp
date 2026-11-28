@@ -2657,7 +2657,10 @@ pub(crate) async fn make_agent_as(
     );
     if !bound
         && !model.is_empty()
-        && let Some(detail) = app.models.policy_model_error(backend, model)
+        && let Some(detail) = app
+            .models
+            .model_error(backend, model, app.clock.now_ms())
+            .await
     {
         let code = "invalid model for backend";
         let message = detail
