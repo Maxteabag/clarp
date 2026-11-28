@@ -18,7 +18,7 @@
    "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
    "error": {
     "code": "invalid_request",
-    "key": "turn_error.invalid_request",
+    "key": "error.invalid_request",
     "severity": "error",
     "text": {
      "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
@@ -53,7 +53,11 @@
     "message_id": "u1",
     "trace_id": "t1",
     "fingerprint": "invalid_request:codex:3b9d2e10",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t1\nAt: 2026-11-28 14:03 CET\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead."
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t1\nAt: 2026-11-28 14:03 CET\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
    }
   },
   {
@@ -73,7 +77,7 @@
    "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long. Expected a string with maximum length 64, but got a string with length 71 instead.",
    "error": {
     "code": "invalid_request",
-    "key": "turn_error.invalid_request",
+    "key": "error.invalid_request",
     "severity": "error",
     "text": {
      "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
@@ -108,7 +112,11 @@
     "message_id": "u2",
     "trace_id": "t2",
     "fingerprint": "invalid_request:codex:3b9d2e10",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t2\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long."
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t2\n\nProvider said:\nInvalid response.create payload: Invalid 'input[29].call_id': string too long.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
    }
   },
   {
@@ -136,7 +144,7 @@
    "text": "Turn failed.\n\nInvalid response.create payload: Invalid 'input[29].call_id': string too long.",
    "error": {
     "code": "invalid_request",
-    "key": "turn_error.invalid_request",
+    "key": "error.invalid_request",
     "severity": "error",
     "text": {
      "en": "Codex rejected the conversation history. Start a fresh session with the same conversation and try again.",
@@ -171,7 +179,11 @@
     "message_id": "u3",
     "trace_id": "t3",
     "fingerprint": "invalid_request:codex:3b9d2e10",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t3"
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: invalid_request\nBackend: codex\nModel: gpt-6.1\nTrace: t3",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1"
+    }
    }
   },
   {
@@ -191,7 +203,7 @@
    "text": "Usage limit reached · resets 18:27.\n\nYou've hit your usage limit.",
    "error": {
     "code": "usage_limit",
-    "key": "turn_error.usage_limit",
+    "key": "error.usage_limit_until",
     "severity": "warning",
     "text": {
      "en": "Your Codex account is out of usage until 18:27. Try again then, or switch model.",
@@ -228,7 +240,12 @@
     "trace_id": "t4",
     "resets_at_ms": 1795850820000,
     "fingerprint": "usage_limit:codex:0a11f3c4",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: usage_limit\nBackend: codex\nModel: gpt-6.1\nTrace: t4\n\nProvider said:\nYou've hit your usage limit."
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: usage_limit\nBackend: codex\nModel: gpt-6.1\nTrace: t4\n\nProvider said:\nYou've hit your usage limit.",
+    "params": {
+     "backend": "Codex",
+     "model": "gpt-6.1",
+     "time_ms": 1795850820000
+    }
    }
   },
   {
@@ -248,7 +265,7 @@
    "text": "Sign-in expired — could not refresh the account.\n\nOAuth session expired. Please run /login",
    "error": {
     "code": "auth",
-    "key": "turn_error.auth",
+    "key": "error.auth",
     "severity": "error",
     "text": {
      "en": "Your Claude sign-in has expired. Sign in again, then try again.",
@@ -284,7 +301,11 @@
     "message_id": "u5",
     "trace_id": "t5",
     "fingerprint": "auth:claude:77c0be12",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: auth\nBackend: claude\nModel: claude-opus-5-5\nTrace: t5\n\nProvider said:\nOAuth session expired. Please run /login"
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: auth\nBackend: claude\nModel: claude-opus-5-5\nTrace: t5\n\nProvider said:\nOAuth session expired. Please run /login",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
    }
   },
   {
@@ -304,7 +325,7 @@
    "text": "This conversation is too long for the model. Compact it or start a new one.\n\nPrompt is too long · the request is ~1050000 tokens (limit 1000000)",
    "error": {
     "code": "prompt_too_long",
-    "key": "turn_error.prompt_too_long",
+    "key": "error.prompt_too_long",
     "severity": "warning",
     "text": {
      "en": "This conversation has grown too long for the model. Compact it and continue.",
@@ -332,7 +353,11 @@
     "message_id": "u6",
     "trace_id": "t6",
     "fingerprint": "prompt_too_long:claude:1c2d3e4f",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: prompt_too_long\nBackend: claude\nModel: claude-opus-5-5\nTrace: t6"
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: prompt_too_long\nBackend: claude\nModel: claude-opus-5-5\nTrace: t6",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
    }
   }
  ],
@@ -351,7 +376,7 @@
     "message": "API unavailable (overloaded / rate limited)",
     "detail": "529 Overloaded",
     "code": "provider_busy",
-    "key": "turn_error.provider_busy",
+    "key": "error.provider_busy",
     "severity": "warning",
     "text": {
      "en": "Claude is overloaded right now and the Host's retries did not get through. Try again in a minute, or switch model.",
@@ -385,7 +410,11 @@
     "message_id": "u7",
     "trace_id": "t7",
     "fingerprint": "provider_busy:claude:9e8d7c6b",
-    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: provider_busy\nBackend: claude\nModel: claude-opus-5-5\nTrace: t7\n\nProvider said:\n529 Overloaded"
+    "copy_text": "A Clarp agent turn failed. Diagnose it and tell me what to change.\n\nCode: provider_busy\nBackend: claude\nModel: claude-opus-5-5\nTrace: t7\n\nProvider said:\n529 Overloaded",
+    "params": {
+     "backend": "Claude",
+     "model": "claude-opus-5-5"
+    }
    }
   }
  },

@@ -566,9 +566,33 @@ pub fn explained_in(failure: &Failure<'_>, zone: &jiff::tz::TimeZone) -> Value {
         _ => {}
     }
 
+    // The key of the sentence in an app's own catalog, and what fills it: an app says it in
+    // the user's language from these, and falls back to `text` for a key it does not know.
+    // A time is sent as epoch milliseconds, for the app to say in its locale.
+    let folder = FOLDER_SAID_RE
+        .captures(said)
+        .and_then(|found| found.get(1))
+        .map(|dir| dir.as_str().to_string())
+        .or_else(|| failures::missing_folder(said).map(|dir| {
+            dir.strip_prefix(clarp_spool::NOT_A_FOLDER).unwrap_or(dir).trim().to_string()
+        }))
+        .unwrap_or_default();
+    let key = match code {
+        "usage_limit" if reset.is_some() => "error.usage_limit_until".to_string(),
+        "folder_missing" if folder.is_empty() => "error.folder_missing_no_path".to_string(),
+        _ => format!("error.{code}"),
+    };
+    let mut params = json!({"backend": named, "model": model});
+    if code == "folder_missing" && !folder.is_empty() {
+        params["folder"] = json!(folder);
+    }
+    if let (Some(at), "usage_limit") = (resets_at_ms, code) {
+        params["time_ms"] = json!(at);
+    }
     let mut error = json!({
         "code": code,
-        "key": format!("turn_error.{code}"),
+        "key": key,
+        "params": params,
         "text": text.json(),
         "severity": severity,
         "actions": actions,

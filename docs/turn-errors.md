@@ -29,7 +29,8 @@ An app that does not know the feature keeps showing `text` as today.
 ```json
 {
   "code": "usage_limit",
-  "key": "turn_error.usage_limit",
+  "key": "error.usage_limit_until",
+  "params": {"backend": "Codex", "model": "gpt-6.1", "time_ms": 1795850820000},
   "text": {
     "en": "Your Codex account is out of usage until 18:27.",
     "nb": "Codex-kontoen din er tom for kvote til kl. 18:27."
@@ -53,19 +54,72 @@ An app that does not know the feature keeps showing `text` as today.
 ```
 
 - `code`: stable, from the list below. Apps may pick an icon by it; never parse `text`.
-- `key`: `turn_error.<code>`, for an app that wants its own strings. The Host's `text` is the
-  default and is always present.
-- `text`: one sentence per language. Show `nb` when the device's preferred language is Norwegian
-  (`nb`, `nn`, `no`), `en` otherwise.
+- `key` and `params`: the sentence's key in the app's own catalog and what fills it (see Catalog
+  keys below). **An app says the sentence from its catalog, in the user's chosen language**, and
+  formats `time_ms` with the platform's formatter in that locale. It falls back to `text` only
+  for a key it does not have, or when a placeholder its string uses is empty in `params`.
+- `text`: the Host's own sentence in English and Norwegian, the fallback above (`nb` for a
+  Norwegian app language, `en` otherwise).
 - `severity`: `error` (red), `warning` (amber: a limit or wait, nothing broken), `info` (grey).
-- `actions`: in order of importance; draw the first as the primary button. Each has its own
-  `label` in both languages. Unknown `id`s are skipped.
+- `actions`: in order of importance; draw the first as the primary button. The button's words
+  come from the catalog (`error.action.<id>`); its `label` (en/nb) is the fallback. Unknown `id`s
+  are skipped.
 - `detail`: the provider's raw words (up to 1000 characters), for the disclosure. May be empty.
 - `message_id`: the user message the turn was for; what `retry` sends again. May be empty (a
   heartbeat, a goal wake): then the retry actions are left out.
 - `fingerprint`: equal for the same failure. Used to collapse repeats (below).
 - `copy_text`: what `copy_details` puts on the clipboard: a short prompt for an agent with the
   code, backend, model, trace, time and raw words.
+
+## Catalog keys
+
+Shared with every client's catalog (Android writes `_` for `.`: `error_usage_limit`,
+`error_action_retry`). English is the source; clarp-i18n translates. Placeholders are named
+here; each platform uses its positional form. `{time}` is `time_ms` (or an action's `at_ms`)
+formatted by the platform in the app's locale: the time alone when it is today, else with the
+weekday within a week, else with the date. Backend and model names are never translated.
+
+| key | English | params |
+|---|---|---|
+| `error.usage_limit` | Your {backend} account is out of usage. Try again later, or switch model. | backend |
+| `error.usage_limit_until` | Your {backend} account is out of usage until {time}. Try again then, or switch model. | backend, time |
+| `error.billing` | Your {backend} account is out of credits. Top it up, or switch model. | backend |
+| `error.auth` | Your {backend} sign-in has expired. Sign in again, then try again. | backend |
+| `error.account_plan` | Your {backend} plan does not include {model}. Switch model or account. | backend, model |
+| `error.free_model_restricted` | This free OpenCode model only runs in OpenCode's own apps. Choose another model. | |
+| `error.connection` | Lost the connection to {backend}, and the Host's retries did not get through. Try again. | backend |
+| `error.network_gone` | This computer had no network for 15 minutes, so the turn stopped. Try again once it is online. | |
+| `error.provider_busy` | {backend} is overloaded right now, and the Host's retries did not get through. Try again in a minute, or switch model. | backend |
+| `error.provider_down` | The provider of {model} is unavailable right now. Try again later, or switch model. | model |
+| `error.invalid_request` | {backend} rejected the conversation history. Start a fresh session with the same conversation and try again. | backend |
+| `error.refused` | The model refused to answer (a safety filter blocked it). Rephrase, or switch model. | |
+| `error.prompt_too_long` | This conversation has grown too long for the model. Compact it and continue. | |
+| `error.timeout` | {backend} stopped responding. Try again. | backend |
+| `error.runner_exit` | {backend} stopped unexpectedly. Try again. | backend |
+| `error.ended_from_outside` | Something outside Clarp ended the turn. Send the message again. | |
+| `error.interrupted` | The turn was cut off before it finished. Send the message again. | |
+| `error.not_started` | The Host could not start the turn. Try again. | |
+| `error.folder_missing` | This agent's folder {folder} no longer exists. Recreate it, or make a new agent in another folder. | folder |
+| `error.folder_missing_no_path` | This agent's folder no longer exists. Recreate it, or make a new agent in another folder. | |
+| `error.provider_mismatch` | This agent ran on another model provider than the one it is bound to. Check its Codex home and provider. | |
+| `error.session_locked` | The {backend} session is busy in another process. Try again in a moment. | backend |
+| `error.moved` | This agent moved to another Host. Continue the conversation there. | |
+| `error.unknown` | The turn failed at {backend}. Try again, or switch model if it happens again. | backend |
+| `error.action.retry` | Try again | |
+| `error.action.retry_at` | Try again at {time} | time (the action's `at_ms`) |
+| `error.action.fresh_retry` | New session, try again | |
+| `error.action.compact_retry` | Compact and continue | |
+| `error.action.switch_model` | Switch backend or model | |
+| `error.action.sign_in` | Sign in again | |
+| `error.action.copy_details` | Copy for AI | |
+| `error.details` | Details | |
+| `error.repeat_count` | {count}× (plural) | count |
+| `error.copied` | Copied | |
+| `error.retry_scheduled` | Will try again at {time} | time |
+| `error.retry_sent` | Sent again | |
+| `error.action_failed` | That didn't work. Try again. | |
+
+`copy_text` is English on purpose (it is for an agent) and stays out of the catalogs.
 
 ## Codes
 
