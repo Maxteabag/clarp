@@ -403,10 +403,37 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         &claude,
         &format!("#!/bin/sh\nread message\n{STAND_IN_ANSWERS}"),
     );
+    let codex = place.root.join("codex");
+    let runner = std::env::var("CLARP_TEST_HELPER_CODEX").unwrap_or_default();
+    if !runner.is_empty() {
+        assert!(PathBuf::from(&runner).is_file());
+        std::os::unix::fs::symlink(&runner, codex.with_extension("real")).unwrap();
+    }
+    // A real Codex executable can be supplied for the isolated VM proof. Only the
+    // reviewer runs it; the other fixture turns need no provider.
+    program(
+        &codex,
+        r#"#!/bin/sh
+[ "$1" = exec ] || exit 0
+if [ "$CLAUDE_PWA_SESSION" = new-reviewer ]; then
+  printf '%s\n' "$@" > reviewer-argv
+  if [ -x "$0.real" ]; then exec "$0.real" "$@"; fi
+fi
+cat >/dev/null
+echo '{"type":"thread.started","thread_id":"00000000-0000-7000-8000-000000000001"}'
+echo '{"type":"turn.started"}'
+echo '{"type":"item.completed","item":{"id":"a","type":"agent_message","text":"fixture"}}'
+echo '{"type":"turn.completed","usage":{}}'
+"#,
+    );
+    git_in(&product, &["init", "-q"]);
     let host = place.start_in(
         "helper-test",
         &["--config", place.root.to_str().unwrap()],
-        &[("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap())],
+        &[
+            ("CLARP_CLAUDE_PROGRAM", claude.to_str().unwrap()),
+            ("CLARP_CODEX_PROGRAM", codex.to_str().unwrap()),
+        ],
     );
     assert_eq!(host.get("/peers"), json!([]));
     eprintln!(
@@ -422,7 +449,7 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     ] {
         let row = host.post(
             "/agents",
-            json!({"name":name,"session":name,"role":"helper","parent":parent,"cwd":cwd}),
+            json!({"name":name,"session":name,"role":"helper","parent":parent,"cwd":cwd,"backend":"claude","model":"claude-opus-5-5","effort":"high"}),
         );
         assert_eq!(row["agent"]["backend"], expected, "{row}");
         assert_eq!(
@@ -442,14 +469,20 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     );
     let prompt = place.root.join("brief");
     std::fs::write(&prompt, "fixture").unwrap();
-    for (name, options, model, backend) in [
+    for (name, options) in [
         (
-            "model-only",
-            vec!["--model", "claude-opus-5-5"],
-            "claude-opus-5-5",
-            "claude",
+            "new-reviewer",
+            vec![
+                "--backend",
+                "claude",
+                "--model",
+                "claude-opus-5-5",
+                "--effort",
+                "high",
+            ],
         ),
-        ("omitted", vec![], "gpt-6.2-astra", "codex"),
+        ("model-only", vec!["--model", "claude-opus-5-5"]),
+        ("omitted", vec![]),
     ] {
         let output = place
             .command(on_path("python3").unwrap())
@@ -462,7 +495,7 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             .arg(&prompt)
             .arg("--clarp-agent")
             .args(options)
-            .env("CLARP_SESSION", "mixed")
+            .env("CLARP_SESSION", "product-child")
             .env("CLARP_HOST_ADDR", &host.address)
             .env("CLARP_HOST_TOKEN", &host.token)
             .env("PATH", &tools)
@@ -481,10 +514,30 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
             .iter()
             .find(|row| row["session"] == name)
             .unwrap();
-        assert_eq!(agent["backend"], backend);
-        assert_eq!(agent["model"], model);
-        if backend == "codex" {
-            assert_eq!(agent["effort"], "medium");
+        for key in ["backend", "model", "effort"] {
+            assert_eq!(agent[key], selection[key], "{agent}");
+        }
+        if name == "new-reviewer" {
+            wait_for("fresh reviewer to run", || host.state(name) == "done");
+            let args = std::fs::read_to_string(product.join("reviewer-argv")).unwrap();
+            let args: Vec<_> = args.lines().collect();
+            assert!(args.windows(2).any(|p| p == ["--model", "gpt-6.2-astra"]));
+            assert!(
+                args.windows(2)
+                    .any(|p| p == ["-c", r#"model_reasoning_effort="medium""#])
+            );
+            eprintln!(
+                "new-reviewer Host readback backend={} model={} effort={} state={}; Codex exec argv --model gpt-6.2-astra -c model_reasoning_effort=medium; runner={}",
+                agent["backend"],
+                agent["model"],
+                agent["effort"],
+                host.state(name),
+                if runner.is_empty() {
+                    "stand-in"
+                } else {
+                    runner.as_str()
+                }
+            );
         }
     }
     host.send("mixed", "ready", "ready");
@@ -494,14 +547,14 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
     let forked = host.post(
         "/agents/mixed/fork",
         json!({"children":[
-            {"name":"explicit-fork","task":"fixture","cwd":product,"model":"claude-opus-5-5"},
+            {"name":"explicit-fork","task":"fixture","cwd":product,"backend":"claude","model":"claude-opus-5-5","effort":"high"},
             {"name":"default-fork","task":"fixture","cwd":product},
             {"name":"film-fork","task":"fixture","cwd":unrelated}
         ]}),
     );
     let roster = host.get("/agents/snapshot");
     for (index, (backend, model)) in [
-        ("claude", Some("claude-opus-5-5")),
+        ("codex", Some("gpt-6.2-astra")),
         ("codex", Some("gpt-6.2-astra")),
         ("claude", None),
     ]
@@ -520,10 +573,16 @@ fn scoped_helper_defaults_follow_the_parent_even_when_children_work_elsewhere() 
         if let Some(model) = model {
             assert_eq!(row["model"], model);
         }
-        if index == 1 {
+        if index < 2 {
             assert_eq!(row["effort"], "medium");
         }
     }
+    let bound_home = bound_privacy::own_home(&place, "private-provider");
+    let bound = host.post("/agents",json!({"name":"bound-helper","role":"helper","parent":"lead","backend":"codex","codex_home":bound_home,"codex_provider":"stand-in","model":"private-deployment","effort":"high"}));
+    assert_eq!(bound["agent"]["model"], "private-deployment");
+    let inherited = host.post("/agents",json!({"name":"bound-child","role":"helper","parent":"bound-helper","backend":"codex","model":"private-deployment","effort":"low"}));
+    assert_eq!(inherited["agent"]["model"], "private-deployment");
+    assert_eq!(inherited["agent"]["effort"], "low");
     // The restart rig creates a top-level agent for the backend under test.
     // The soak later starts that same agent again in place using its backend.
     for (session, backend, model) in [

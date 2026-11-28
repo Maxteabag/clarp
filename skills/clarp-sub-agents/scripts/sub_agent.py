@@ -224,7 +224,8 @@ def _live_helper(name: str) -> tuple[str, str] | None:
     return session, str(row.get("backend") or "")
 
 
-def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: pathlib.Path) -> int:
+def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: pathlib.Path,
+                      model: str) -> int:
     """Create (or reuse) a Clarp helper agent, prompt it, and watch it."""
     parent = _parent()
     if not parent:
@@ -243,8 +244,6 @@ def start_clarp_agent(a: argparse.Namespace, workdir: pathlib.Path, prompt: path
                 _admin("model", "--effort", a.effort, "--session", helper)
             _admin("agent", "helper-state", helper, "running", "--from", parent)
         else:
-            apply_start_defaults(a, parent, workdir)
-            model = a.model if a.model is not None else (DEFAULT_MODEL if a.backend == "claude" else "")
             create = ["agent", "create", a.name, "--parent", parent, "--role", "helper",
                       "--cwd", str(workdir), "--backend", a.backend]
             if model:
@@ -295,8 +294,7 @@ def fork(a: argparse.Namespace) -> int:
         args += ["--task", a.task]
     else:
         sys.exit("fork needs --task or --task-file")
-    # When omitted, the Host resolves the backend for each child.
-    _check_effort(a.backend, a.effort)
+    # The Host validates effort against the backend selected for each child.
     for flag, value in (("--count", a.count), ("--worktree", a.worktree), ("--cwd", a.cwd),
                         ("--backend", a.backend), ("--model", a.model), ("--effort", a.effort)):
         if value:
@@ -422,26 +420,6 @@ def _check_effort(backend: str, effort) -> None:
         sys.exit("--effort is part of the model id on agy: pass e.g. --model claude-opus-5-5-high")
 
 
-def apply_start_defaults(a: argparse.Namespace, parent: str, workdir: pathlib.Path) -> None:
-    if a.model and not a.backend:
-        a.backend = "claude"
-        return
-    try:
-        row = _admin("agent", "helper-state", parent, "--child-cwd", str(workdir))
-    except AdminError:
-        # Older Hosts know helper-state but do not accept a child workdir.
-        row = _admin("agent", "helper-state", parent)
-        if "helper_defaults" in row:
-            raise
-    defaults = row.get("helper_defaults") or {}
-    a.backend = a.backend or defaults.get("backend") or "claude"
-    if a.backend == defaults.get("backend"):
-        if a.model is None:
-            a.model = defaults["model"]
-        if a.effort is None:
-            a.effort = defaults["effort"]
-
-
 def start(a: argparse.Namespace) -> int:
     if not re.fullmatch(r"[A-Za-z0-9._-]+", a.name):
         sys.exit("name must be [A-Za-z0-9._-]")
@@ -454,8 +432,8 @@ def start(a: argparse.Namespace) -> int:
     if a.effort and not a.clarp_agent:
         sys.exit("--effort needs --clarp-agent (it is set on the helper agent)")
     if a.clarp_agent:
-        return start_clarp_agent(a, workdir.resolve(), prompt)
-    a.backend = a.backend or "claude"
+        model = a.model if a.model is not None else ("" if a.backend != "claude" else DEFAULT_MODEL)
+        return start_clarp_agent(a, workdir.resolve(), prompt, model)
     if a.backend not in ("claude", "codex"):
         sys.exit("without --clarp-agent, --backend must be claude or codex")
     if not shutil.which("systemd-run"):
@@ -511,7 +489,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("start")
     s.add_argument("name"); s.add_argument("workdir"); s.add_argument("prompt_file")
     s.add_argument("--model")
-    s.add_argument("--backend", type=_backend_alias, choices=CLARP_BACKENDS)
+    s.add_argument("--backend", type=_backend_alias, choices=CLARP_BACKENDS, default="claude")
     s.add_argument("--effort", help="reasoning effort where supported by the helper's backend")
     s.add_argument("--title")
     s.add_argument("--clarp-agent", action="store_true",

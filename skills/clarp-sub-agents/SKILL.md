@@ -189,10 +189,10 @@ start, and the command exits 1.
    to the product directories their immediate child must work in. Descendants
    qualify through that child. The `selection`
    holds `backend`, `model` and `effort`. A helper also qualifies through its
-   helper ancestry. Fresh Clarp helper starts and forks use that selection
-   when flags are omitted. A model supplied without a backend keeps the
-   traditional backend for that invocation (Claude for start, the parent’s
-   backend for fork). Plain systemd
+   helper ancestry. The Host enforces the selection when creating a qualified
+   Clarp helper, including forks and reviewer starts with explicit backend,
+   model or effort flags. Outside the scope, explicit flags and ordinary
+   launcher defaults apply. Test fixtures, bound providers and plain systemd
    workers keep their own defaults.
 
    Without a scoped selection or `--model`, a helper gets the Host's default model for its tool, the

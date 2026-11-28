@@ -2657,17 +2657,10 @@ pub(crate) async fn make_agent_as(
         && let Some(parent) = &request.parent
         && let Some(selection) =
             scope.for_parent(&app.fleet.directory(), parent, request.cwd.as_deref())
-        && (request.backend.is_some() || request.model.as_deref().is_none_or(str::is_empty))
-        && request
-            .backend
-            .as_ref()
-            .is_none_or(|b| b.is_empty() || b == &selection.backend)
     {
         request.backend = Some(selection.backend.clone());
-        request.model.get_or_insert_with(|| selection.model.clone());
-        request
-            .effort
-            .get_or_insert_with(|| selection.effort.clone());
+        request.model = Some(selection.model.clone());
+        request.effort = Some(selection.effort.clone());
     }
     let backend = request
         .backend
