@@ -109,8 +109,8 @@ component ArtifactCard inherits Rectangle {
             if root.artifact.readable: Button {
                 // i18n: Updates page, artifact card, button (verb, imperative): open the artifact to read it
                 text: @tr("Read");
-                // i18n: Updates page, artifact card, accessibility label of the Read button (verb); {} is the artifact's title
-                accessible-label: @tr("Read {}", root.artifact.title);
+                // i18n: Updates page, artifact card, accessibility label of the Read button (verb, imperative: open it to read it, not the past tense); {} is the artifact's title
+                accessible-label: @tr("verb" => "Read {}", root.artifact.title);
                 clicked => { root.open(root.artifact.id); }
             }
             // i18n: Updates page, artifact card, button (verb phrase): open the chat the artifact came from

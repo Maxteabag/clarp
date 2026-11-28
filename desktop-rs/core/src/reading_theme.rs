@@ -194,11 +194,16 @@ pub fn lightness(color: &str) -> f64 {
     (r.max(g).max(b) + r.min(g).min(b)) / 2.0
 }
 
+/// Theme names that are product names: shown as they are in every language,
+/// and kept off the catalog, where the same English means something else
+/// ("Teams" is also Clarp's teams page).
+const PRODUCT_NAMES: &[&str] = &["Teams"];
+
 /// A theme's name or description (`reading_themes.json`) in the app's
 /// language; the file's English is the key.
 pub fn local(english: &str) -> String {
-    if english.is_empty() {
-        return String::new();
+    if english.is_empty() || PRODUCT_NAMES.contains(&english) {
+        return english.to_owned();
     }
     crate::i18n::translate("", english, "", None, &[])
 }
@@ -255,8 +260,7 @@ fn catalog_strings() -> Vec<String> {
         tr!("Word"),
         // i18n: Settings > Appearance, description of the "Word" reading theme (font and product names stay as they are)
         tr!("Like Microsoft Word: black text on a white page over Word's grey canvas, Word blue for the accent and hyperlinks, Calibri (or Carlito, its metric twin) when installed."),
-        // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
-        tr!("Teams"),
+        // The "Teams" theme's name is a product name, kept as it is (PRODUCT_NAMES).
         // i18n: Settings > Appearance, description of the "Teams" reading theme (font and product names stay as they are)
         tr!("Microsoft Teams light: Segoe UI in near-black on white, the Teams purple accent and the lavender own-message bubble, as in the Teams desktop app."),
         // i18n: Settings > Appearance, reading theme name (a proper name for a colour and font style; translate only where it is an ordinary word)
