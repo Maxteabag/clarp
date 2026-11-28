@@ -209,6 +209,35 @@ pub fn relative(tag: &str, seconds: i64) -> String {
     translate_in(tag, "", one, other, Some(n), &[])
 }
 
+/// A unit pattern for a short duration; each language abbreviates its own units.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Span {
+    /// "12s"
+    Seconds,
+    /// "4m"
+    Minutes,
+    /// "6m 39s"
+    MinutesSeconds,
+    /// "1h 05m"
+    HoursMinutes,
+    /// "3d"
+    Days,
+}
+
+/// A short duration from already-formatted parts (`b` only for the two-part
+/// spans): "12s", "6m 39s", "1h 05m", "3d". The caller picks the unit and any
+/// zero padding; the language writes the unit letters and their order.
+pub fn span(tag: &str, span: Span, a: &str, b: &str) -> String {
+    let template = match span {
+        Span::Seconds => "{0}s",
+        Span::Minutes => "{0}m",
+        Span::MinutesSeconds => "{0}m {1}s",
+        Span::HoursMinutes => "{0}h {1}m",
+        Span::Days => "{0}d",
+    };
+    translate_in(tag, "duration", template, "", None, &[&a as &dyn std::fmt::Display, &b])
+}
+
 /// The catalog strings this module uses: `relative` picks them at run time,
 /// so tools/i18n-export finds them here.
 #[allow(dead_code)]
@@ -248,5 +277,15 @@ fn catalog_strings() -> Vec<String> {
         tr!("in {n} month" | "in {n} months" % 1),
         // i18n: relative timestamp for something due in the future; {n} is the number
         tr!("in {n} year" | "in {n} years" % 1),
+        // i18n: short duration in seconds, e.g. "12s" (how long a turn or a tool has run, chat list and transcript); {0} is the number; use the language's usual one-letter or short unit
+        tr!("duration" => "{0}s", 1),
+        // i18n: short duration in minutes, e.g. "4m" (how long something has run); {0} is the number; use the language's usual short unit
+        tr!("duration" => "{0}m", 1),
+        // i18n: short duration in minutes and seconds, e.g. "6m 39s" (how long a turn has run); {0} minutes, {1} seconds
+        tr!("duration" => "{0}m {1}s", 1, 2),
+        // i18n: short duration in hours and minutes, e.g. "1h 05m" (how long a turn has run); {0} hours, {1} minutes
+        tr!("duration" => "{0}h {1}m", 1, 2),
+        // i18n: short duration in days, e.g. "3d" (how long a process has run); {0} is the number; use the language's usual short unit
+        tr!("duration" => "{0}d", 1),
     ]
 }

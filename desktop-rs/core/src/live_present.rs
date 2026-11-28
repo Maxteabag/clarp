@@ -7,9 +7,13 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 
+use crate::i18n::{self, format};
 use crate::json::Object;
 use crate::live::{LiveView, is_terminal};
 use crate::protocol::Message;
+use crate::tr;
+
+// i18n-screen: chat transcript (live work)
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Kind {
@@ -259,23 +263,30 @@ pub fn clock(ms: i64) -> String {
     }
 }
 
-/// "12s", "1m 12s", "2h 3m".
+/// "12s", "1m 12s", "2h 3m", in the app's language.
 pub fn worked(ms: i64) -> String {
+    let tag = i18n::current();
+    let n = |v: i64| format::number(tag, v);
     let seconds = (ms.max(0) + 500) / 1000;
     match seconds {
-        s if s < 60 => format!("{}s", s.max(1)),
-        s if s < 3600 => if s % 60 == 0 { format!("{}m", s / 60) } else { format!("{}m {}s", s / 60, s % 60) },
-        s => format!("{}h {}m", s / 3600, s / 60 % 60),
+        s if s < 60 => format::span(tag, format::Span::Seconds, &n(s.max(1)), ""),
+        s if s < 3600 => if s % 60 == 0 {
+            format::span(tag, format::Span::Minutes, &n(s / 60), "")
+        } else {
+            format::span(tag, format::Span::MinutesSeconds, &n(s / 60), &n(s % 60))
+        },
+        s => format::span(tag, format::Span::HoursMinutes, &n(s / 3600), &n(s / 60 % 60)),
     }
 }
 
 /// A settled item's duration: "3.2s" under a minute, else "1m 12s".
 fn duration(ms: i64) -> String {
-    if ms < 60_000 { format!("{:.1}s", ms.max(0) as f64 / 1000.0) } else { worked(ms) }
-}
-
-fn plural(count: usize, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
+    if ms < 60_000 {
+        let tag = i18n::current();
+        format::span(tag, format::Span::Seconds, &format::decimal(tag, ms.max(0) as f64 / 1000.0, 1), "")
+    } else {
+        worked(ms)
+    }
 }
 
 /// The one status line (§7.4), or none when idle.
@@ -295,15 +306,22 @@ pub fn status_line(view: &LiveView, host_now_ms: i64) -> Option<StatusLine> {
             let extra = if more > 0 { format!(" +{more}") } else { String::new() };
             (format!("● {label}{}{extra}", since(started)), true)
         }
-        "thinking" => (format!("◌ {}{}", if headline.is_empty() { "Thinking" } else { headline }, since(turn_started)), true),
-        "responding" => (format!("◌ Responding{}", since(turn_started)), true),
-        "compacting" => (format!("◌ Compacting{}", since(turn_started)), true),
+        // i18n: chat, status line under a running turn: the agent is thinking (verb, ongoing); a timer may follow
+        "thinking" => (format!("◌ {}{}", if headline.is_empty() { tr!("Thinking") } else { headline.to_owned() }, since(turn_started)), true),
+        // i18n: chat, status line under a running turn: the agent is writing its reply (verb, ongoing); a timer may follow
+        "responding" => (format!("◌ {}{}", tr!("Responding"), since(turn_started)), true),
+        // i18n: chat, status line under a running turn: the agent is shortening its context (verb, ongoing); a timer may follow
+        "compacting" => (format!("◌ {}{}", tr!("Compacting"), since(turn_started)), true),
         // Held for the machine: an ordinary working turn (no words of its own).
-        "limited" if crate::chat_view::held_for_the_machine(activity) => (format!("◌ Working{}", since(turn_started)), true),
-        "limited" => (format!("◌ {}", if headline.is_empty() { crate::chat_view::limited_words(activity) } else { headline }), true),
-        "waiting" => (format!("◆ {}", if headline.is_empty() { "Waiting for you" } else { headline }), false),
-        "interrupted" => ("■ Interrupted".to_owned(), false),
-        "background" => (format!("◇ {}", if headline.is_empty() { "Working in the background" } else { headline }), false),
+        // i18n: chat, status line under a running turn: the agent is working (verb, ongoing); a timer may follow
+        "limited" if crate::chat_view::held_for_the_machine(activity) => (format!("◌ {}{}", tr!("Working"), since(turn_started)), true),
+        "limited" => (format!("◌ {}", if headline.is_empty() { crate::chat_view::limited_words(activity) } else { headline.to_owned() }), true),
+        // i18n: chat, status line: the agent is waiting for the user's answer
+        "waiting" => (format!("◆ {}", if headline.is_empty() { tr!("Waiting for you") } else { headline.to_owned() }), false),
+        // i18n: chat, status line: the turn was stopped before it finished (past participle)
+        "interrupted" => (format!("■ {}", tr!("Interrupted")), false),
+        // i18n: chat, status line: the agent keeps working on something in the background after its turn
+        "background" => (format!("◇ {}", if headline.is_empty() { tr!("Working in the background") } else { headline.to_owned() }), false),
         // An unknown state is ignored.
         _ => return None,
     };
@@ -511,12 +529,17 @@ pub(crate) fn logged_summary<'a>(rows: &'a [Message], turn_id: &str) -> Option<&
 /// "3 tools" without a worked time, "Working · 2 tools" while it runs.
 /// None: neither a worked time nor a folded call, so no work row.
 pub fn work_title(running: bool, worked_ms: Option<i64>, calls: usize) -> Option<String> {
-    let count = (calls > 0).then(|| plural(calls, "tool", "tools"));
+    // i18n: chat, work row of a turn: how many tool calls it folds; {n} is the count
+    let count = (calls > 0).then(|| tr!("{n} tool" | "{n} tools" % calls));
     Some(match (running, worked_ms, count) {
-        (true, _, Some(count)) => format!("Working · {count}"),
-        (true, _, None) => "Working".to_owned(),
-        (false, Some(ms), Some(count)) => format!("Worked for {} · {count}", worked(ms)),
-        (false, Some(ms), None) => format!("Worked for {}", worked(ms)),
+        // i18n: chat, work row title while the turn runs; {} is the tool count ("3 tools")
+        (true, _, Some(count)) => tr!("Working · {}", count),
+        // i18n: chat, work row title while the turn runs (verb, ongoing)
+        (true, _, None) => tr!("Working"),
+        // i18n: chat, work row title of a finished turn; {0} is how long it worked ("11s"), {1} the tool count ("3 tools")
+        (false, Some(ms), Some(count)) => tr!("Worked for {0} · {1}", worked(ms), count),
+        // i18n: chat, work row title of a finished turn; {} is how long it worked ("11s")
+        (false, Some(ms), None) => tr!("Worked for {}", worked(ms)),
         (false, None, Some(count)) => count,
         (false, None, None) => return None,
     })
@@ -696,22 +719,56 @@ fn arrange_part(key: &str, turn: &Object, settled: bool, last: bool, timed: bool
     entries
 }
 
-fn verb(category: &str, status: &str) -> &'static str {
+/// A tool row's title: what the tool did (or is doing) and its label
+/// ("Ran cargo test", "Reading src/main.rs"); None for a category with no
+/// words of its own.
+fn verb(category: &str, status: &str, label: &str) -> Option<String> {
     let done = is_terminal(status);
     let stopped = status == "interrupted";
-    match category {
-        "exec" if stopped => "Stopped",
-        "exec" => if done { "Ran" } else { "Running" },
-        "read" => if done { "Read" } else { "Reading" },
-        "list" => if done { "Listed" } else { "Listing" },
-        "search" => if done { "Searched" } else { "Searching" },
-        "edit" => if done { "Edited" } else { "Editing" },
-        "write" => if done { "Wrote" } else { "Writing" },
-        "fetch" => if done { "Fetched" } else { "Fetching" },
-        "todo" => if done { "Updated the plan" } else { "Updating the plan" },
-        "agent" => if done { "Delegated" } else { "Delegating" },
-        _ => "",
-    }
+    // In every line below, {} is what the tool worked on (a command, a file path,
+    // a search pattern, a URL or an agent's task), possibly empty.
+    let text = match category {
+        // i18n: chat, tool row title: a shell command that was stopped (past tense)
+        "exec" if stopped => tr!("Stopped {}", label),
+        // i18n: chat, tool row title: a shell command that ran (past tense)
+        "exec" if done => tr!("Ran {}", label),
+        // i18n: chat, tool row title: a shell command that is running now
+        "exec" => tr!("Running {}", label),
+        // i18n: chat, tool row title: a file the agent read (past tense)
+        "read" if done => tr!("Read {}", label),
+        // i18n: chat, tool row title: a file the agent is reading now
+        "read" => tr!("Reading {}", label),
+        // i18n: chat, tool row title: a folder the agent listed (past tense)
+        "list" if done => tr!("Listed {}", label),
+        // i18n: chat, tool row title: a folder the agent is listing now
+        "list" => tr!("Listing {}", label),
+        // i18n: chat, tool row title: what the agent searched for (past tense)
+        "search" if done => tr!("Searched {}", label),
+        // i18n: chat, tool row title: what the agent is searching for now
+        "search" => tr!("Searching {}", label),
+        // i18n: chat, tool row title: a file the agent edited (past tense)
+        "edit" if done => tr!("Edited {}", label),
+        // i18n: chat, tool row title: a file the agent is editing now
+        "edit" => tr!("Editing {}", label),
+        // i18n: chat, tool row title: a file the agent wrote (past tense)
+        "write" if done => tr!("Wrote {}", label),
+        // i18n: chat, tool row title: a file the agent is writing now
+        "write" => tr!("Writing {}", label),
+        // i18n: chat, tool row title: a web page the agent fetched (past tense)
+        "fetch" if done => tr!("Fetched {}", label),
+        // i18n: chat, tool row title: a web page the agent is fetching now
+        "fetch" => tr!("Fetching {}", label),
+        // i18n: chat, tool row title: the agent updated its to-do plan (past tense)
+        "todo" if done => tr!("Updated the plan {}", label),
+        // i18n: chat, tool row title: the agent is updating its to-do plan now
+        "todo" => tr!("Updating the plan {}", label),
+        // i18n: chat, tool row title: the agent handed a task to a helper agent (past tense)
+        "agent" if done => tr!("Delegated {}", label),
+        // i18n: chat, tool row title: the agent is handing a task to a helper agent now
+        "agent" => tr!("Delegating {}", label),
+        _ => return None,
+    };
+    Some(text.trim().to_owned())
 }
 
 fn elapsed_or_duration(item: &Object, options: &Options) -> String {
@@ -753,19 +810,29 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             entry.spoken = item.get("spoken").and_then(Value::as_bool).unwrap_or(false)
                 || crate::text::has_speech(text(item, "text"));
             if status == "interrupted" {
-                entry.meta = "interrupted".into();
+                // i18n: chat, small note beside a reply that was cut off when the turn was stopped (past participle)
+                entry.meta = tr!("meta" => "interrupted");
             }
         }
         "reasoning" => {
             entry.kind = Kind::Reasoning;
             let title = text(item, "title");
-            let head = if is_terminal(&status) {
-                let ms = int(item, "ended_at_ms").unwrap_or(0) - int(item, "started_at_ms").unwrap_or(0);
-                format!("Thought for {}", worked(ms))
-            } else {
-                "Thinking".to_owned()
+            entry.title = match (is_terminal(&status), title.is_empty()) {
+                (true, empty) => {
+                    let took = worked(int(item, "ended_at_ms").unwrap_or(0) - int(item, "started_at_ms").unwrap_or(0));
+                    if empty {
+                        // i18n: chat, reasoning row title of a finished thought; {} is how long the agent thought ("12s")
+                        tr!("Thought for {}", took)
+                    } else {
+                        // i18n: chat, reasoning row title of a finished thought; {0} is how long ("12s"), {1} the thought's own short title
+                        tr!("Thought for {0}: {1}", took, title)
+                    }
+                }
+                // i18n: chat, reasoning row title while the agent thinks (verb, ongoing)
+                (false, true) => tr!("Thinking"),
+                // i18n: chat, reasoning row title while the agent thinks; {} is the thought's own short title
+                (false, false) => tr!("Thinking: {}", title),
             };
-            entry.title = if title.is_empty() { head } else { format!("{head}: {title}") };
             let body: Vec<String> = text(item, "text").lines().map(str::to_owned).collect();
             entry.expandable = !body.iter().all(|l| l.trim().is_empty());
             if expanded {
@@ -777,7 +844,8 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             entry.kind = Kind::Plan;
             let steps: Vec<&Object> = object(item, "plan").and_then(|p| p.get("steps")).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object).collect();
             let done = steps.iter().filter(|s| text(s, "status") == "completed").count();
-            entry.title = format!("Plan · {done} of {} done", steps.len());
+            // i18n: chat, plan row title: progress of the agent's to-do plan; {0} steps finished, {1} steps in all
+            entry.title = tr!("Plan · {0} of {1} done", done, steps.len());
             entry.lines = steps
                 .iter()
                 .map(|s| {
@@ -794,7 +862,8 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
             entry.kind = Kind::Diff;
             let diff = object(item, "diff");
             let files: Vec<&Object> = diff.and_then(|d| d.get("files")).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_object).collect();
-            entry.title = format!("Changed {}", plural(files.len(), "file", "files"));
+            // i18n: chat, diff row title: how many files the turn changed; {n} is the count
+            entry.title = tr!("Changed {n} file" | "Changed {n} files" % files.len());
             entry.meta = diff.map(diff_stats).unwrap_or_default();
             entry.expandable = true;
             if expanded {
@@ -804,7 +873,13 @@ pub(crate) fn item_entry(item: &Object, options: &Options) -> Entry {
         }
         _ => {
             entry.kind = Kind::Compaction;
-            entry.title = if is_terminal(&status) { "Compacted the context".into() } else { "Compacting the context".into() };
+            entry.title = if is_terminal(&status) {
+                // i18n: chat, row title: the agent shortened its context (past tense)
+                tr!("Compacted the context")
+            } else {
+                // i18n: chat, row title: the agent is shortening its context now
+                tr!("Compacting the context")
+            };
             entry.meta = elapsed_or_duration(item, options);
         }
     }
@@ -821,13 +896,14 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
     let tool = object(item, "tool").unwrap_or(&empty);
     let status = entry.status.clone();
     let label = text(tool, "label");
-    let verb = verb(text(tool, "category"), &status);
-    let verb = if verb.is_empty() { text(tool, "name") } else { verb };
-    entry.title = [verb, label].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" ");
+    entry.title = verb(text(tool, "category"), &status, label)
+        .unwrap_or_else(|| [text(tool, "name"), label].iter().filter(|s| !s.is_empty()).copied().collect::<Vec<_>>().join(" "));
     let output = object(tool, "output");
-    let exit = output.and_then(|o| int(o, "exit_code")).filter(|c| *c != 0).map(|c| format!("exit {c}")).unwrap_or_default();
+    // i18n: chat, small note on a tool row: the command's non-zero exit status; {} is the number
+    let exit = output.and_then(|o| int(o, "exit_code")).filter(|c| *c != 0).map(|c| tr!("exit {}", c)).unwrap_or_default();
     let diff = object(tool, "diff").filter(|d| d.contains_key("added") || d.contains_key("removed"));
-    let stopped = if status == "interrupted" { "interrupted".to_owned() } else { String::new() };
+    // i18n: chat, small note on a tool row stopped with its turn (past participle)
+    let stopped = if status == "interrupted" { tr!("meta" => "interrupted") } else { String::new() };
     entry.meta = match diff {
         Some(diff) => join_meta(&[diff_stats(diff), exit.clone(), stopped]),
         None if status == "interrupted" => stopped,
@@ -870,7 +946,8 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
         } else {
             entry.lines = tail.clone();
             if total > tail.len() {
-                entry.more = format!("+{} earlier lines", total - tail.len());
+                // i18n: chat, opened tool output: how many earlier lines are not shown; {n} is the count
+                entry.more = tr!("+{n} earlier line" | "+{n} earlier lines" % (total - tail.len()));
             }
         }
         if multiline_command {
@@ -884,7 +961,8 @@ fn tool_entry(item: &Object, options: &Options, entry: &mut Entry) {
         let start = tail.len().saturating_sub(TAIL_COLLAPSED);
         entry.lines = tail[start..].to_vec();
         if total > entry.lines.len() {
-            entry.more = format!("+{} lines", total - entry.lines.len());
+            // i18n: chat, folded tool output: how many more lines there are; {n} is the count
+            entry.more = tr!("+{n} line" | "+{n} lines" % (total - entry.lines.len()));
         }
     }
 }
@@ -920,12 +998,29 @@ fn explore_entry(group: &str, members: &[&Object], options: &Options) -> Entry {
             .collect::<HashSet<_>>()
             .len()
     };
-    let parts: Vec<String> = [(count("read"), "file", "files"), (count("search"), "search", "searches"), (count("list"), "listing", "listings")]
-        .into_iter()
-        .filter(|(n, _, _)| *n > 0)
-        .map(|(n, one, many)| plural(n, one, many))
-        .collect();
-    let title = if running { "Exploring".to_owned() } else { format!("Explored {}", parts.join(", ")) };
+    let (files, searches, listings) = (count("read"), count("search"), count("list"));
+    let mut parts: Vec<String> = Vec::new();
+    if files > 0 {
+        // i18n: chat, explore row title part: how many files the agent read; {n} is the count
+        parts.push(tr!("{n} file" | "{n} files" % files));
+    }
+    if searches > 0 {
+        // i18n: chat, explore row title part: how many searches the agent ran (noun); {n} is the count
+        parts.push(tr!("{n} search" | "{n} searches" % searches));
+    }
+    if listings > 0 {
+        // i18n: chat, explore row title part: how many folder listings the agent made (noun); {n} is the count
+        parts.push(tr!("{n} listing" | "{n} listings" % listings));
+    }
+    let title = if running {
+        // i18n: chat, explore row title while the agent reads and searches files (verb, ongoing)
+        tr!("Exploring")
+    } else {
+        // i18n: separator between items of a short inline list ("2 files, 1 search"); keep the trailing space where the language uses one
+        let separator = tr!("list separator" => ", ");
+        // i18n: chat, explore row title of finished exploring; {} is a list such as "2 files, 1 search"
+        tr!("Explored {}", parts.join(&separator))
+    };
     Entry {
         key,
         kind: Kind::Explore,
@@ -938,7 +1033,8 @@ fn explore_entry(group: &str, members: &[&Object], options: &Options) -> Entry {
                 .map(|m| {
                     let tool = object(m, "tool");
                     let category = tool.map(|t| text(t, "category")).unwrap_or_default();
-                    format!("{} {}", verb(category, text(m, "status")), tool.map(|t| text(t, "label")).unwrap_or_default())
+                    let label = tool.map(|t| text(t, "label")).unwrap_or_default();
+                    verb(category, text(m, "status"), label).unwrap_or_else(|| label.to_owned())
                 })
                 .collect()
         } else {

@@ -1,10 +1,10 @@
-//! Chat-list stamps, transcript day headings and running durations. Port of
-//! the C++ client's `TimeFormat`. `now` is injected so tests are deterministic;
-//! instants are shown in `now`'s time zone. Text follows the en_US QLocale
-//! formats the C++ client produced on this machine (short time "6:10 PM",
-//! short date "6/12/26").
+//! Chat-list stamps, transcript day headings and running durations, in the
+//! app's language (`i18n::format`). `now` is injected so tests are
+//! deterministic; instants are shown in `now`'s time zone.
 
 use chrono::{DateTime, Datelike, Days, FixedOffset, NaiveDate, NaiveDateTime, TimeZone};
+
+use crate::i18n::{self, format};
 
 static CLOCK_24H: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
@@ -17,12 +17,12 @@ fn short_time<Tz: TimeZone>(moment: &DateTime<Tz>) -> String
 where
     Tz::Offset: std::fmt::Display,
 {
-    let format = if CLOCK_24H.load(std::sync::atomic::Ordering::Relaxed) { "%H:%M" } else { "%-I:%M %p" };
-    moment.format(format).to_string()
+    let clock = if CLOCK_24H.load(std::sync::atomic::Ordering::Relaxed) { format::Clock::H24 } else { format::Clock::H12 };
+    format::time(i18n::current(), moment.time(), clock)
 }
 
 fn short_date(day: NaiveDate) -> String {
-    day.format("%-m/%-d/%y").to_string()
+    format::date_short(i18n::current(), day)
 }
 
 /// ISO-8601 with or without milliseconds; an instant without an offset is
@@ -51,19 +51,17 @@ fn previous_day(day: NaiveDate) -> NaiveDate {
 }
 
 fn day_heading(day: NaiveDate, today: NaiveDate) -> String {
-    if day == today {
-        "Today".into()
-    } else if day == previous_day(today) {
-        "Yesterday".into()
+    if day == today || day == previous_day(today) {
+        format::relative_day(i18n::current(), day, today).unwrap_or_default()
     } else if day.year() == today.year() {
-        day.format("%-d %B").to_string()
+        format::day_month_long(i18n::current(), day)
     } else {
         short_date(day)
     }
 }
 
 /// Chat-list stamp for an epoch-milliseconds instant: today → short time,
-/// yesterday → "Yesterday", within a week → weekday, this year → "12 Jun",
+/// yesterday → "Yesterday", within a week → weekday, this year → "Jun 12",
 /// older → short date. Empty for a missing or zero instant.
 pub fn chat_stamp<Tz: TimeZone>(epoch_millis: i64, now: &DateTime<Tz>) -> String
 where
@@ -79,11 +77,11 @@ where
     if day == today {
         short_time(&moment)
     } else if day == previous_day(today) {
-        "Yesterday".into()
+        format::relative_day(i18n::current(), day, today).unwrap_or_default()
     } else if day < today && (today - day).num_days() < 7 {
-        day.format("%A").to_string()
+        format::weekday(i18n::current(), day)
     } else if day.year() == today.year() {
-        day.format("%-d %b").to_string()
+        format::day_month(i18n::current(), day)
     } else {
         short_date(day)
     }
@@ -110,32 +108,38 @@ pub fn day_separator<Tz: TimeZone>(timestamp: &str, previous: &str, now: &DateTi
     day_heading(moment.date_naive(), now.date_naive())
 }
 
+fn number(n: i64) -> String {
+    format::number(i18n::current(), n)
+}
+
 /// Compact running time: "12s", "4m", "1h 05m", "3d". Negative reads "0s".
 pub fn compact_duration(milliseconds: i64) -> String {
+    let tag = i18n::current();
     let seconds = (milliseconds / 1000).max(0);
     if seconds < 60 {
-        return format!("{seconds}s");
+        return format::span(tag, format::Span::Seconds, &number(seconds), "");
     }
     let minutes = seconds / 60;
     if minutes < 60 {
-        return format!("{minutes}m");
+        return format::span(tag, format::Span::Minutes, &number(minutes), "");
     }
     let hours = minutes / 60;
     if hours < 24 {
-        return format!("{hours}h {:02}m", minutes % 60);
+        return format::span(tag, format::Span::HoursMinutes, &number(hours), &format!("{:02}", minutes % 60));
     }
-    format!("{}d", hours / 24)
+    format::span(tag, format::Span::Days, &number(hours / 24), "")
 }
 
 /// A running turn's time for the chat list, ticking each second: "12s",
 /// "6m 39s", "1h 05m". A start ahead of the local clock reads "0s".
 pub fn turn_elapsed(milliseconds: i64) -> String {
+    let tag = i18n::current();
     let seconds = (milliseconds / 1000).max(0);
     if seconds < 60 {
-        return format!("{seconds}s");
+        return format::span(tag, format::Span::Seconds, &number(seconds), "");
     }
     if seconds < 3600 {
-        return format!("{}m {:02}s", seconds / 60, seconds % 60);
+        return format::span(tag, format::Span::MinutesSeconds, &number(seconds / 60), &format!("{:02}", seconds % 60));
     }
-    format!("{}h {:02}m", seconds / 3600, seconds / 60 % 60)
+    format::span(tag, format::Span::HoursMinutes, &number(seconds / 3600), &format!("{:02}", seconds / 60 % 60))
 }
