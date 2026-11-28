@@ -40,7 +40,7 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
 
     let (id, artifact_id) = ask(json!({}));
     // Approval rows offer the user's own words on a Host with the feature.
-    let shown = host.get(&format!("/artifacts/{artifact_id}"));
+    let shown = &host.get(&format!("/artifacts/{artifact_id}"))["artifact"];
     assert_eq!(shown["decision"]["allow_custom_text"], true, "{shown}");
     let refused = resolve(
         &id,
@@ -62,7 +62,7 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
         "{until}"
     );
     let revision = decision["revision"].as_i64().unwrap();
-    let shown = host.get(&format!("/artifacts/{artifact_id}"));
+    let shown = &host.get(&format!("/artifacts/{artifact_id}"))["artifact"];
     assert_eq!(shown["decision"]["undoable"], true, "{shown}");
 
     // The tools' token never takes the user's answer back.
@@ -107,7 +107,7 @@ fn a_held_answer_is_taken_back_until_the_agent_has_it() {
     assert_eq!(said["artifact"]["decision"]["status"], "answered");
     let after = said["artifact"]["decision"]["revision"].as_i64().unwrap();
     wait_for("the held answer to go", || {
-        let shown = host.get(&format!("/artifacts/{artifact_id}"));
+        let shown = &host.get(&format!("/artifacts/{artifact_id}"))["artifact"];
         shown["decision"]["delivery_pending"] == false
             && shown["decision"].get("undoable").is_none()
     });
@@ -251,7 +251,7 @@ fn a_spoken_answer_is_matched_against_the_request() {
         )
     );
     assert_eq!(matched(json!({ "words": "B" })).0, 400);
-    let shown = host.get(&format!("/artifacts/{artifact_id}"));
+    let shown = &host.get(&format!("/artifacts/{artifact_id}"))["artifact"];
     assert_eq!(shown["decision"]["status"], "pending");
     assert_eq!(shown["decision"]["revision"], 1);
 }
@@ -310,6 +310,7 @@ fn a_held_form_answer_is_taken_back_and_the_form_opens_again() {
     assert!(receipt["undo_until"].is_i64(), "{receipt}");
     let (status, row) = send("GET", "/artifacts/spec-undo", &Value::Null);
     assert_eq!(status, 200, "{row}");
+    let row = &row["artifact"];
     assert_eq!(row["status"], "completed");
     assert_eq!(row["undoable"], true, "{row}");
 
