@@ -18,15 +18,16 @@ import { t } from '../stores/i18n.svelte.js';
 // User-visible and accessibility strings of this feature, read from the
 // language catalog (lib/i18n/en.json) each time they are shown.
 const KEYS = {
-  copyCode: 'chat.code.copy',
-  copyTable: 'chat.table.copy',
-  copied: 'chat.copied',
-  expand: 'chat.expand',
-  untitledCode: 'viewer.code',
-  close: 'viewer.close',
-  wrap: 'viewer.wrap',
-  codeViewer: 'viewer.code',
-  tableViewer: 'viewer.table',
+  copyCode: 'codeblock.copy',
+  copied: 'codeblock.copied',
+  expand: 'codeblock.expand',
+  wrap: 'codeblock.wrap',
+  untitledCode: 'codeblock.untitled',
+  codeViewer: 'codeblock.untitled',
+  copyTable: 'table.copy',
+  expandTable: 'table.expand',
+  tableViewer: 'table.fullscreen_title',
+  close: 'fullscreen.close',
 };
 export const STRINGS = Object.defineProperties({}, Object.fromEntries(
   Object.entries(KEYS).map(([name, key]) => [name, { get: () => t(key), enumerable: true }])));
@@ -101,7 +102,7 @@ export function codeBlockHtml(code, info) {
 export function tableBlockHtml(tableHtml, md) {
   return `<div class="table-block" data-md="${escapeAttr(String(md || '').trim())}">` +
     `<div class="blk-head"><span></span>` +
-    iconButton('blk-expand', STRINGS.expand, ICONS.expand) +
+    iconButton('blk-expand', STRINGS.expandTable, ICONS.expand) +
     `</div>` +
     `<div class="table-wrap">${tableHtml}</div>` +
     `</div>`;
