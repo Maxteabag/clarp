@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "GET /send-admission",
+  "type": "object",
+  "required": ["session", "client_msg_id", "admission_route"],
+  "properties": {
+    "session": {"type": "string"},
+    "client_msg_id": {"type": "string", "minLength": 1},
+    "admission_route": {"enum": ["conversation_fork", "waiting", "started", "unresolved"]},
+    "admission_revision": {"type": "integer", "minimum": 1}
+  },
+  "if": {"properties": {"admission_route": {"const": "unresolved"}}},
+  "then": {"not": {"required": ["admission_revision"]}},
+  "else": {"required": ["admission_revision"]}
+}

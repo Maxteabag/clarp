@@ -493,6 +493,10 @@ enum Ask {
         answer: Answer<Vec<JobRecord>>,
     },
     /// One thing of the conversation, by its id, as it is now.
+    SendAdmission {
+        id: String,
+        answer: Answer<Option<(&'static str, u64)>>,
+    },
     Row {
         id: String,
         answer: Answer<Option<Versioned>>,
@@ -681,6 +685,7 @@ impl Ask {
             Self::Publish { .. } => "Publish",
             Self::JobRecord { .. } => "JobRecord",
             Self::JobTimeline { .. } => "JobTimeline",
+            Self::SendAdmission { .. } => "SendAdmission",
             Self::Row { .. } => "Row",
             Self::Delivery { .. } => "Delivery",
             Self::RevisionAt { .. } => "RevisionAt",
@@ -1680,6 +1685,20 @@ impl AgentHandle {
             answer,
         })
         .await
+    }
+
+    pub async fn send_admission(
+        &self,
+        id: String,
+    ) -> Result<Option<(&'static str, u64)>, Unavailable> {
+        let asked = id.clone();
+        if let Some(read) = self
+            .read_glance(move |actor, _| actor.send_admission(&asked))
+            .await
+        {
+            return read;
+        }
+        self.ask(|answer| Ask::SendAdmission { id, answer }).await
     }
 
     pub async fn row(&self, id: String) -> Result<Option<Versioned>, Unavailable> {
@@ -3781,12 +3800,7 @@ impl Worker {
         // conversation fork. A busy-send preference must not steer or cut the work.
         let conversation = matches!(
             &ask,
-            Ask::Send { message, admission: Admission::Queue, reservation: None, marks, .. }
-                if message.origin.is_user_send()
-                    && marks.coordination.is_none()
-                    && Actor::fork_answers(message)
-                    && !message.text.trim_start().starts_with('/')
-                    && clarp_backend::agy_acp::attached(&message.text).is_empty()
+            Ask::Send { admission: Admission::Queue, reservation: None, marks, .. } if marks.owner_admission
         ) && crate::conversation_forks::may_fork(
             &self.setup.record.backend,
             chat_view(&self.setup),
@@ -4249,6 +4263,7 @@ impl Worker {
                     return Ok(());
                 }
                 let waits = matches!(while_busy, Busy::Planned(Plan::Wait(_)));
+                marks.owner_admission &= conversation;
                 marks.wait_for_turn = waits;
                 let live = actor.live_turn();
                 let held = crate::held::Held::new(&thread, "a send's commit");
@@ -4274,9 +4289,7 @@ impl Worker {
                     let forked = if conversation && sent.queued && !transit_holds_queue {
                         let (taken, fork) = actor.fork_take(turn, now)?;
                         if taken {
-                            out.actions.extend(fork.actions);
-                            out.changed.status |= fork.changed.status;
-                            out.changed.queue |= fork.changed.queue;
+                            out.absorb(fork);
                         }
                         taken
                     } else {
@@ -4344,6 +4357,14 @@ impl Worker {
                                 let _ = tx.send(Ask::TakeoverHeld { offer, held });
                             }
                         });
+                    }
+                }
+                if marks.owner_admission
+                    && let Ok((Ok(receipt), out)) = &mut sent
+                {
+                    receipt.owner_admission = actor.send_admission(message.told_id())?;
+                    if !receipt.duplicate {
+                        out.admission_changes.push(message.told_id().to_owned());
                     }
                 }
                 answered(sent, answer)?
@@ -4879,6 +4900,7 @@ impl Worker {
                 limit,
                 answer,
             } => return read(actor.goal_events(&plan, after, limit), answer),
+            Ask::SendAdmission { id, answer } => return read(actor.send_admission(&id), answer),
             Ask::Row { id, answer } => return read(actor.row(&id), answer),
             Ask::Delivery {
                 mut turns,
@@ -5183,6 +5205,22 @@ impl Worker {
 
     /// Does what the actor decided, and tells the clients what changed.
     fn after(&mut self, mut out: Outputs) {
+        out.admission_changes.sort();
+        out.admission_changes.dedup();
+        if let Some(actor) = &self.actor {
+            for id in &out.admission_changes {
+                if let Ok(Some((route, revision))) = actor.send_admission(id) {
+                    self.setup.hub.publish(
+                        serde_json::json!({
+                            "type": "send-admission", "session": self.setup.record.session,
+                            "agent_id": self.setup.record.agent_id, "client_msg_id": id,
+                            "admission_route": route, "admission_revision": revision,
+                        }),
+                        self.now_ms(),
+                    );
+                }
+            }
+        }
         // What the agent passed through while its tool's output was read is told before the
         // state at the end.
         self.passed = std::mem::take(&mut out.passed);
@@ -5799,7 +5837,14 @@ impl Worker {
                 self.write_followup(socket, input);
                 return;
             }
-            Action::Fork(order) => self.launch_fork(*order, tx),
+            Action::Fork(order) => {
+                let (turn, attempt) = (order.turn, order.attempt);
+                let launched = self.launch_fork(*order, tx);
+                if let Err(error) = &launched {
+                    tell(&self.tx, turn, attempt, Told::Failed(error.to_string()));
+                }
+                launched
+            }
             // The check can take seconds: it runs on a thread of its own, and its answer
             // comes back as any other. One runs at a time: a check asked for meanwhile is
             // made when it is over, the newest of them only.
@@ -6293,6 +6338,7 @@ impl Worker {
                 message: accepted.message,
                 admission: accepted.admission,
                 marks: clarp_actor::Marks {
+                    owner_admission: accepted.owner_admission,
                     trace_named: accepted.trace_named,
                     ..clarp_actor::Marks::default()
                 },
@@ -7297,6 +7343,7 @@ fn refuse_for(
             Ok(Ask::Delegation { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::KeeperEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::GoalEvents { answer, .. }) => drop(answer.send(Err(refusal()))),
+            Ok(Ask::SendAdmission { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Row { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::Delivery { answer, .. }) => drop(answer.send(Err(refusal()))),
             Ok(Ask::RevisionAt { answer, .. }) => drop(answer.send(Err(refusal()))),

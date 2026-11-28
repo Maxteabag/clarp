@@ -369,6 +369,7 @@ fn event_item(event: &AgentEvent, ts_ms: i64) -> Result<NewItem, JournalError> {
     }
     item.turn = match event {
         AgentEvent::Turn { turn, .. }
+        | AgentEvent::UnreadReleased { turn }
         | AgentEvent::Joined { turn, .. }
         | AgentEvent::JoinRead { turn, .. }
         | AgentEvent::JoinSettled { turn, .. }

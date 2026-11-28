@@ -72,7 +72,7 @@ pub(crate) const KEPT: &[crate::kept::Kind] = &[crate::kept::Kind::book(
 
 /// The contract this Host speaks: the Python Host's number on the day this was written. What
 /// this Host does not have yet is absent from `FEATURES`, which is how an app learns it.
-pub const HOST_CONTRACT: u64 = 217;
+pub const HOST_CONTRACT: u64 = 218;
 pub const MIN_IOS_CONTRACT: u64 = 1;
 
 /// The features of the contract this Host has, each with the contract number that
@@ -567,6 +567,7 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("events_chat_previews", 212),
     // The owner's optional visible first acknowledgment for a newly started text turn.
     ("text_turn_ack", 214),
+    ("owner_conversation_fork", 218),
     // Provider-attributed OpenCode turn accounting and OpenRouter's own key usage.
     ("opencode_provider_usage", 215),
     // The local tools token reaches HTTP routes with the agent's own identity and privacy.
@@ -948,6 +949,7 @@ pub fn router(app: App) -> Router {
         .route("/events", get(events))
         .route("/events/{stream_id}/live", post(change_live))
         .route("/send", post(send))
+        .route("/send-admission", get(send_admission))
         .route("/agent-moved", post(crate::agent_moved::set))
         .route("/agent-chat-view", post(crate::chat_view::set))
         .route(
@@ -3536,6 +3538,32 @@ pub(crate) fn sender(app: &App, named: Option<&Value>) -> Option<Sender> {
     })
 }
 
+#[derive(Deserialize)]
+struct SendAdmissionQuery {
+    session: String,
+    client_msg_id: String,
+}
+
+async fn send_admission(
+    State(app): State<App>,
+    Query(query): Query<SendAdmissionQuery>,
+) -> Result<Json<Value>, ApiError> {
+    let member = app
+        .member(&query.session)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "unknown agent"))?;
+    let id = python::strip(&query.client_msg_id);
+    if id.is_empty() {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "empty client_msg_id",
+        ));
+    }
+    let route = member.agent.send_admission(id.to_owned()).await?;
+    let mut value = json!(clarp_protocol::responses::SendAdmission::new(id, route));
+    value["session"] = json!(member.record.session);
+    Ok(Json(value))
+}
+
 async fn send(
     State(app): State<App>,
     Extension(principal): Extension<Principal>,
@@ -3554,9 +3582,8 @@ async fn send(
             &coordination::Principal::default(),
             false,
         ) == "user";
-    made.text_chat = user_send
-        && !principal.is_agent_request(&headers)
-        && crate::text_turn_ack::is_text(&request);
+    made.owner_chat = user_send && !principal.is_agent_request(&headers);
+    made.text_chat = made.owner_chat && crate::text_turn_ack::is_text(&request);
     let mut agent_id = String::new();
     if user_send {
         let asked = python::strip(&request.session);
@@ -4212,10 +4239,29 @@ async fn send_as(
         && !made.peer
         && !made.housekeeping
         && !user_word;
+    let owner_admission = plain
+        && made.owner_chat
+        && member.record.session == "hazel-74f6"
+        && admission == Admission::Queue
+        && request.while_busy.as_deref().map(python::strip) != Some("after_turn")
+        && clarp_actor::Actor::fork_answers(&message)
+        && !message.text.trim_start().starts_with('/')
+        // An upload can be an ordinary document of any type.
+        && !message.text.split_whitespace().any(|word| word.contains("/uploads/"))
+        && crate::conversation_forks::may_fork(
+            &member.record.backend,
+            crate::chat_view::preference(&app.fleet.directory(), &member.record.agent_id),
+            &member.record.agent_id,
+            &member.record.session,
+        );
+    let receipt_id = minted.filter(|_| owner_admission);
+    let unresolved =
+        || receipt_id.map(|id| clarp_protocol::responses::SendAdmission::new(id, None));
     if plain && guard.is_none() {
         let accepted = crate::accepted::Accepted {
             agent_id: member.record.agent_id.clone(),
             message: message.clone(),
+            owner_admission,
             admission,
             while_busy: request
                 .while_busy
@@ -4275,6 +4321,13 @@ async fn send_as(
             // One the log had already stands where it stands: nothing is told of it.
             let Some(early) = kept else {
                 return Ok(SendResponse {
+                    admission: match receipt_id {
+                        Some(id) => Some(clarp_protocol::responses::SendAdmission::new(
+                            id,
+                            member.agent.send_admission(id.to_owned()).await?,
+                        )),
+                        None => None,
+                    },
                     ok: true,
                     session: member.record.session.clone(),
                     dispatch: member.record.backend.clone(),
@@ -4322,6 +4375,7 @@ async fn send_as(
             }
             drop(route);
             return Ok(SendResponse {
+                admission: unresolved(),
                 ok: true,
                 session: member.record.session.clone(),
                 dispatch: member.record.backend.clone(),
@@ -4337,6 +4391,7 @@ async fn send_as(
         coordination,
         trace_named: made.trace_named,
         user_word,
+        owner_admission,
         wait_for_turn: false,
     };
     let sent = member
@@ -4404,6 +4459,13 @@ async fn send_as(
         session: member.record.session.clone(),
         dispatch: member.record.backend.clone(),
         trace_id,
+        admission: match receipt_id {
+            Some(id) => Some(clarp_protocol::responses::SendAdmission::new(
+                id,
+                sent.owner_admission,
+            )),
+            None => None,
+        },
         queued: Some(sent.queued),
         // Where the queue stands with this message in it. A message that did not have to
         // wait says nothing about the queue: the Python Host answers zeros, and so does this.

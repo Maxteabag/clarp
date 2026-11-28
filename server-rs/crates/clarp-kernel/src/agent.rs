@@ -109,6 +109,10 @@ pub enum Command {
         turn: TurnId,
         join: Join,
     },
+    /// Release an unread fork reservation back to its place in the mailbox.
+    ReleaseUnread {
+        turn: TurnId,
+    },
     /// The live process echoed this follow-up.
     JoinRead {
         turn: TurnId,
@@ -335,6 +339,9 @@ pub enum AgentEvent {
     },
     TakeoverCleared {
         from: TurnId,
+    },
+    UnreadReleased {
+        turn: TurnId,
     },
     Joined {
         turn: TurnId,
@@ -1413,6 +1420,17 @@ impl Agent {
                 }
                 work.record(AgentEvent::Joined { turn, join });
             }
+            Command::ReleaseUnread { turn } => {
+                if !work
+                    .agent
+                    .joins
+                    .get(&turn)
+                    .is_some_and(|join| join.stage == Stage::Pending)
+                {
+                    return Err(Refusal::NotWaiting(turn));
+                }
+                work.record(AgentEvent::UnreadReleased { turn });
+            }
             Command::JoinRead { turn } => {
                 if !work
                     .agent
@@ -1951,6 +1969,21 @@ impl Agent {
                 self.joins.clear();
                 self.mailbox.push_front(held);
                 self.waited.insert(*turn);
+                self.queue_revision += 1;
+            }
+            AgentEvent::UnreadReleased { turn } => {
+                if !self
+                    .joins
+                    .get(turn)
+                    .is_some_and(|join| join.stage == Stage::Pending)
+                {
+                    return Err(IllegalTransition {
+                        turn: *turn,
+                        state: "unreserved",
+                        event: "unread-released",
+                    });
+                }
+                self.joins.remove(turn);
                 self.queue_revision += 1;
             }
             AgentEvent::Joined { turn, join } => {

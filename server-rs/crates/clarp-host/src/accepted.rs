@@ -46,6 +46,8 @@ pub struct Accepted {
     /// Its caller named its trace: a trace another message of the agent has is refused.
     #[serde(default)]
     pub trace_named: bool,
+    #[serde(default)]
+    pub owner_admission: bool,
     /// When it was kept, on the Host's clock.
     pub at_ms: i64,
 }
@@ -435,6 +437,7 @@ mod tests {
             },
             admission: Admission::Queue,
             while_busy: None,
+            owner_admission: false,
             trace_named: true,
             at_ms: 1,
         }
