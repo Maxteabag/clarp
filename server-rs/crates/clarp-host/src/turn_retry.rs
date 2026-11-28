@@ -154,14 +154,17 @@ async fn retry(
         return Json(json!({"ok": true, "status": "scheduled", "at_ms": at_ms})).into_response();
     }
     // Sent now: a try planned for later is no longer wanted.
-    let _ = app
+    if let Err(why) = app
         .fleet
         .keep(
             KIND,
             planned_key(&member.record.agent_id, &message.id),
             None,
         )
-        .await;
+        .await
+    {
+        app.fleet.unkept(KIND, &why.0);
+    }
     if compact {
         // The conversation is made shorter first; the message waits behind it.
         let asked = json!({"session": member.record.session}).to_string();
@@ -229,7 +232,10 @@ pub async fn run_due(app: &App) {
     let now = app.clock.now_ms();
     for (key, stored) in kept {
         let Ok(planned) = serde_json::from_slice::<Planned>(&stored) else {
-            let _ = app.fleet.keep(KIND, key, None).await;
+            // What cannot be read is no try: it is let go, and a failure to is said.
+            if let Err(why) = app.fleet.keep(KIND, key, None).await {
+                app.fleet.unkept(KIND, &why.0);
+            }
             continue;
         };
         if planned.at_ms > now {
