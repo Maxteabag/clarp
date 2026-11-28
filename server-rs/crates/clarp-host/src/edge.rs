@@ -579,6 +579,10 @@ pub const FEATURES: &[(&str, u64)] = &[
     ("opencode_provider_usage", 215),
     // The local tools token reaches HTTP routes with the agent's own identity and privacy.
     ("agent_token_api", 216),
+    // The chat list's line of a message is what it holds, never its Markdown: an agent row's
+    // `last_message_preview`, a notification's `preview_parts`, a kind and its values each app
+    // words in the user's language, and `GET /log` carries the chat's line too.
+    ("chat_preview_parts", 219),
     // A helper's chat holds the turns other agents give it as its conversation: in its `/log`
     // a turn another agent started has its prompt and its answers in `view=conversation`,
     // anchored as a user's turn's are, its audience still the agents'
@@ -1948,11 +1952,12 @@ fn own_line(directory: &Directory, member: &Member, view: &crate::agent::View) -
 
 /// The fields of an agent's snapshot row a chat's preview carries (feature
 /// `events_chat_previews`, issues 905 and 913).
-pub(crate) const PREVIEW_FIELDS: [&str; 9] = [
+pub(crate) const PREVIEW_FIELDS: [&str; 10] = [
     "conversation_id",
     "head_revision",
     "last_message_id",
     "last_message",
+    "last_message_preview",
     "busy",
     "latest_state",
     "latest_state_ts",
@@ -3400,6 +3405,12 @@ async fn log_answer(app: &App, query: LogQuery) -> Result<Value, ApiError> {
     {
         answer["view"] = json!(view);
     }
+    // The chat list's line of this chat as the Host has it now, made as the snapshot's row
+    // makes it (feature `chat_preview_parts`): an app that read the chat shows it on the chat's
+    // row and makes no line of its own.
+    let mut line = preview_fields(&directory, &member);
+    answer["last_message"] = line["last_message"].take();
+    answer["last_message_preview"] = line["last_message_preview"].take();
     Ok(answer)
 }
 
